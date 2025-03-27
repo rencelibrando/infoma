@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "862099405823",
+    "project_id": "bike-rental-bc5bd",
+    "storage_bucket": "bike-rental-bc5bd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:862099405823:android:4c6ad9bdb7c6515e2545ca",
+        "android_client_info": {
+          "package_name": "com.example.bikerental"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "862099405823-78mnq414n8tagg8sdke4lcvadcknhdeo.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.bikerental",
+            "certificate_hash": "b8b4f98960c82f653865c3ef1afa277f49b5873e"
+          }
+        },
+        {
+          "client_id": "862099405823-r4enfg894e2stk11iq2bc2otoar0oeh6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "862099405823-r4enfg894e2stk11iq2bc2otoar0oeh6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
