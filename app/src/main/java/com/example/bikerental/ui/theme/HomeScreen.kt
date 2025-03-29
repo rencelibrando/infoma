@@ -2,17 +2,25 @@ package com.example.bikerental.ui.theme
 import BottomNavigationBar
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -21,7 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -29,9 +39,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
+import coil.compose.rememberAsyncImagePainter
 import com.example.bikerental.R
 import com.example.bikerental.ui.theme.map.BikeMapMarker
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 
 data class Bike(
     val id: String,
@@ -51,6 +67,15 @@ fun HomeScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQuery by remember { mutableStateOf("") }
+
+    // Check if user is logged in
+    LaunchedEffect(Unit) {
+        if (FirebaseAuth.getInstance().currentUser == null) {
+            navController.navigate("signIn") {
+                popUpTo("home") { inclusive = true }
+            }
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -76,7 +101,7 @@ fun HomeScreen(
                 0 -> LocationTabContent(fusedLocationProviderClient)
                 1 -> BikeListingsTabContent()
                 2 -> BookingsTabContent()
-                3 -> ProfileTabContent()
+                3 -> ProfileTabContent(navController)
             }
         }
     }
@@ -238,25 +263,306 @@ fun BookingsTabContent() {
 }
 
 @Composable
-fun ProfileTabContent() {
+fun ProfileTabContent(navController: NavController) {
+    var user by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser) }
+    var profileData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    val colorScheme = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val scrollState = rememberScrollState()
+
+    // Refresh user data when the screen is displayed
+    LaunchedEffect(Unit) {
+        // Reload Firebase Auth user
+        FirebaseAuth.getInstance().currentUser?.reload()?.addOnSuccessListener {
+            user = FirebaseAuth.getInstance().currentUser
+        }
+
+        // Fetch Firestore data
+        user?.let { currentUser ->
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    if (document != null && document.exists()) {
+                        profileData = document.data
+                    }
+                }
+        }
+    }
+
+    // Handle logout function
+    fun handleLogout() {
+        FirebaseAuth.getInstance().signOut()
+        navController.navigate("signIn") {
+            popUpTo("home") { inclusive = true }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .verticalScroll(scrollState)
+            .padding(16.dp)
     ) {
+        // Profile Header with Logout Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Profile",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = colorScheme.onBackground
+            )
+            
+            Button(
+                onClick = { handleLogout() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colorScheme.errorContainer
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                    contentDescription = "Logout",
+                    tint = colorScheme.onErrorContainer
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Logout",
+                    color = colorScheme.onErrorContainer
+                )
+            }
+        }
+
+        // Profile Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 18.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Profile Image
+                Surface(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .padding(bottom = 8.dp),
+                    shape = CircleShape,
+                    color = colorScheme.primaryContainer
+                ) {
+                    if (profileData?.get("profilePictureUrl") != null) {
+                        Image(
+                            painter = rememberAsyncImagePainter(profileData?.get("profilePictureUrl") as String),
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Profile",
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .size(48.dp),
+                            tint = colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+
+                // User Name
+                Text(
+                    text = profileData?.get("fullName") as? String ?: user?.displayName ?: "User",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = colorScheme.onSurface
+                )
+
+                // User Email
+                Text(
+                    text = user?.email ?: "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+
+                if (profileData?.get("phoneNumber") != null) {
+                    Text(
+                        text = profileData?.get("phoneNumber") as String,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Ride History Section
         Text(
-            text = "Your Profile",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground
+            text = "Ride History",
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold
+            ),
+            modifier = Modifier.padding(vertical = 8.dp),
+            color = colorScheme.onBackground
         )
-        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                RideHistoryItem(
+                    date = "Today",
+                    bikeName = "Mountain Explorer",
+                    duration = "45 mins",
+                    cost = "₱45.00"
+                )
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                RideHistoryItem(
+                    date = "Yesterday",
+                    bikeName = "City Cruiser",
+                    duration = "30 mins",
+                    cost = "₱30.00"
+                )
+            }
+        }
+
+        // Account Settings Section
         Text(
-            text = "Profile settings and information will be displayed here.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = "Account Settings",
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold
+            ),
+            modifier = Modifier.padding(vertical = 8.dp),
+            color = colorScheme.onBackground
         )
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(8.dp)
+            ) {
+                SettingsItem(
+                    icon = Icons.Default.Person,
+                    title = "Edit Profile",
+                    onClick = { navController.navigate("editProfile") }
+                )
+                SettingsItem(
+                    icon = Icons.Default.Lock,
+                    title = "Privacy & Security",
+                    onClick = { /* Handle privacy settings */ }
+                )
+                SettingsItem(
+                    icon = Icons.Default.Help,
+                    title = "Help & Support",
+                    onClick = { /* Handle help & support */ }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RideHistoryItem(
+    date: String,
+    bikeName: String,
+    duration: String,
+    cost: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = bikeName,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Medium
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = date,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.End
+        ) {
+            Text(
+                text = cost,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = duration,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsItem(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(vertical = 12.dp, horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(24.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
     }
 }
 
