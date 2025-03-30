@@ -128,6 +128,9 @@ fun HomeScreen(
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground,
         bottomBar = {
             BottomNavigationBar(
                 selectedItem = selectedTab,
@@ -139,6 +142,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             // Top App Bar with Search and Notifications
             TopAppBar(
@@ -1208,70 +1212,74 @@ fun SettingsItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TopAppBar(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.background
     ) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = onSearchQueryChange,
-            placeholder = { Text("Search...", fontSize = 12.sp) },
+        Row(
             modifier = Modifier
-                .weight(1.5f)
-                .height(45.dp),
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.primary
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                placeholder = { Text("Search...", fontSize = 12.sp) },
+                modifier = Modifier
+                    .weight(1.5f)
+                    .height(45.dp),
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
                 )
-            },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface
             )
-        )
 
-        IconButton(
-            onClick = { /* Handle Settings Click */ },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        IconButton(
-            onClick = { /* Handle Notification Click */ },
-            modifier = Modifier.size(40.dp)
-        ) {
-            BadgedBox(
-                badge = {
-                    Badge {
-                        Text("2")
-                    }
-                }
+            IconButton(
+                onClick = { /* Handle Settings Click */ },
+                modifier = Modifier.size(40.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = "Notifications",
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
                     tint = MaterialTheme.colorScheme.primary
                 )
+            }
+
+            IconButton(
+                onClick = { /* Handle Notification Click */ },
+                modifier = Modifier.size(40.dp)
+            ) {
+                BadgedBox(
+                    badge = {
+                        Badge {
+                            Text("2")
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Notifications",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }

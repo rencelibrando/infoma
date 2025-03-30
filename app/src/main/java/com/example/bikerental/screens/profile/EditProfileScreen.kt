@@ -24,8 +24,6 @@ import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.google.firebase.auth.ktx.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -35,8 +33,12 @@ import com.google.firebase.firestore.SetOptions
 import android.Manifest
 import android.content.pm.PackageManager
 import android.app.Activity
+import android.content.Context
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import kotlin.math.roundToInt
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,7 +53,8 @@ fun EditProfileScreen(navController: NavController) {
     var profilePictureUrl by remember { mutableStateOf<String?>(null) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
-    var showPermissionDialog by remember { mutableStateOf(false) }
+    var showRationaleDialog by remember { mutableStateOf(false) }
+    var uploadProgress by remember { mutableStateOf<Float?>(null) }
     
     val context = LocalContext.current
     val user = FirebaseAuth.getInstance().currentUser
@@ -65,63 +68,80 @@ fun EditProfileScreen(navController: NavController) {
         uri?.let { selectedImageUri = it }
     }
 
-    // Permission launcher
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            // Permission granted, launch image picker
-            imagePickerLauncher.launch("image/*")
-        } else {
-            showError = true
-            errorMessage = "Permission required to select image"
+    // Multiple permissions launcher
+    val multiplePermissionsLauncher = rememberLauncherForActivityResult(
+        RequestMultiplePermissions()
+    ) { permissions ->
+        when {
+            permissions.entries.all { it.value } -> {
+                // All permissions granted, launch image picker
+                imagePickerLauncher.launch("image/*")
+            }
+            else -> {
+                showError = true
+                errorMessage = "Permissions required to select profile picture"
+            }
         }
     }
 
-    // Permission Dialog
-    if (showPermissionDialog) {
+    // Function to check and request permissions
+    fun checkAndRequestPermissions() {
+        when {
+            // Check if we have all required permissions
+            hasRequiredPermissions(context) -> {
+                // All permissions granted, launch picker
+                imagePickerLauncher.launch("image/*")
+            }
+            // Should show rationale for any permission
+            shouldShowPermissionRationale(context as Activity) -> {
+                showRationaleDialog = true
+            }
+            else -> {
+                // Request permissions
+                val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+                } else {
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
+                multiplePermissionsLauncher.launch(permissions)
+            }
+        }
+    }
+
+    // Permission Rationale Dialog
+    if (showRationaleDialog) {
         AlertDialog(
-            onDismissRequest = { showPermissionDialog = false },
+            onDismissRequest = { showRationaleDialog = false },
             title = { Text("Permission Required") },
-            text = { Text("Storage permission is required to select a profile picture. Would you like to grant permission?") },
+            text = { 
+                Text(
+                    "To set a profile picture, the app needs permission to access your photos. " +
+                    "Without this permission, you won't be able to select a profile picture."
+                )
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    showPermissionDialog = false
-                    permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                }) {
+                TextButton(
+                    onClick = {
+                        showRationaleDialog = false
+                        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+                        } else {
+                            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                        }
+                        multiplePermissionsLauncher.launch(permissions)
+                    }
+                ) {
                     Text("Grant Permission")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showPermissionDialog = false }) {
-                    Text("Cancel")
+                TextButton(
+                    onClick = { showRationaleDialog = false }
+                ) {
+                    Text("Not Now")
                 }
             }
         )
-    }
-
-    // Function to handle image selection
-    fun handleImageSelection() {
-        when {
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED -> {
-                // Permission already granted, launch picker
-                imagePickerLauncher.launch("image/*")
-            }
-            ActivityCompat.shouldShowRequestPermissionRationale(
-                context as Activity,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) -> {
-                // Show permission dialog
-                showPermissionDialog = true
-            }
-            else -> {
-                // Request permission directly
-                permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
-        }
     }
 
     // Fetch existing user data
@@ -151,7 +171,6 @@ fun EditProfileScreen(navController: NavController) {
     fun uploadImage(imageUri: Uri, userId: String, onSuccess: (String) -> Unit, onError: (String) -> Unit) {
         try {
             val storageRef = storage.reference
-            // Use a simpler path structure
             val imageRef = storageRef.child("profile_pictures/$userId")
 
             // Create file metadata
@@ -160,31 +179,33 @@ fun EditProfileScreen(navController: NavController) {
                 .setCustomMetadata("userId", userId)
                 .build()
 
-            // Start upload with metadata
+            // Start upload with metadata and track progress
             val uploadTask = imageRef.putFile(imageUri, metadata)
-
+            
             uploadTask
                 .addOnProgressListener { taskSnapshot ->
                     val progress = (100.0 * taskSnapshot.bytesTransferred / taskSnapshot.totalByteCount)
-                    println("Upload is $progress% done")
+                    uploadProgress = progress.toFloat() / 100f
                 }
-                .continueWithTask { task ->
-                    if (!task.isSuccessful) {
-                        task.exception?.let { throw it }
-                    }
+                .addOnSuccessListener {
+                    // Reset progress after successful upload
+                    uploadProgress = null
+                    // Get the download URL
                     imageRef.downloadUrl
+                        .addOnSuccessListener { downloadUrl ->
+                            onSuccess(downloadUrl.toString())
+                        }
+                        .addOnFailureListener { e ->
+                            onError("Failed to get download URL: ${e.message}")
+                        }
                 }
-                .addOnSuccessListener { downloadUri ->
-                    println("Upload successful. Download URL: $downloadUri")
-                    onSuccess(downloadUri.toString())
-                }
-                .addOnFailureListener { exception ->
-                    println("Upload failed: ${exception.message}")
-                    onError("Failed to upload image: ${exception.message}")
+                .addOnFailureListener { e ->
+                    uploadProgress = null
+                    onError("Failed to upload image: ${e.message}")
                 }
         } catch (e: Exception) {
-            println("Exception during upload: ${e.message}")
-            onError("Error preparing upload: ${e.message}")
+            uploadProgress = null
+            onError("Error during upload: ${e.message}")
         }
     }
 
@@ -213,27 +234,59 @@ fun EditProfileScreen(navController: NavController) {
                 modifier = Modifier
                     .size(120.dp)
                     .clip(CircleShape)
-                    .clickable { handleImageSelection() },
+                    .clickable { checkAndRequestPermissions() },
                 contentAlignment = Alignment.Center
             ) {
-                if (selectedImageUri != null) {
-                    Image(
-                        painter = rememberAsyncImagePainter(selectedImageUri),
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else if (profilePictureUrl != null) {
-                    Image(
-                        painter = rememberAsyncImagePainter(profilePictureUrl),
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                // Show existing or selected profile picture
+                if (selectedImageUri != null || profilePictureUrl != null) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Image(
+                            painter = rememberAsyncImagePainter(selectedImageUri ?: profilePictureUrl),
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        
+                        // Show upload progress if active
+                        uploadProgress?.let { progress ->
+                            CircularProgressIndicator(
+                                progress = progress,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .align(Alignment.Center),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                            )
+                        }
+
+                        // Show camera icon when not uploading
+                        if (uploadProgress == null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable { checkAndRequestPermissions() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Surface(
+                                    modifier = Modifier.size(40.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                                    shape = CircleShape
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "Change Photo",
+                                        modifier = Modifier.padding(8.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
                 } else {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = CircleShape
+                        shape = CircleShape,
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         Icon(
                             imageVector = Icons.Default.CameraAlt,
@@ -246,6 +299,17 @@ fun EditProfileScreen(navController: NavController) {
                     }
                 }
             }
+
+            // Helper text - show different message when uploading
+            Text(
+                text = if (uploadProgress != null) 
+                    "Uploading... ${(uploadProgress!! * 100).roundToInt()}%" 
+                else 
+                    "Tap to change profile picture",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -338,10 +402,10 @@ fun EditProfileScreen(navController: NavController) {
                     showError = false
                     
                     user?.let { currentUser ->
-                        if (selectedImageUri != null) {
+                        selectedImageUri?.let { uri ->
                             // Upload image with new function
                             uploadImage(
-                                selectedImageUri!!,
+                                uri,
                                 currentUser.uid,
                                 onSuccess = { downloadUrl ->
                                     // Now update Firestore with all info including the new image URL
@@ -372,7 +436,7 @@ fun EditProfileScreen(navController: NavController) {
                                     errorMessage = error
                                 }
                             )
-                        } else {
+                        } ?: run {
                             // Update without changing the image
                             updateUserProfile(
                                 currentUser.uid,
@@ -483,5 +547,34 @@ private fun updateUserProfile(
         println("Exception during profile update: ${e.message}")
         onError("Error updating profile: ${e.message}")
         onComplete()
+    }
+}
+
+// Helper functions outside the composable
+private fun hasRequiredPermissions(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_MEDIA_IMAGES
+        ) == PackageManager.PERMISSION_GRANTED
+    } else {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+}
+
+private fun shouldShowPermissionRationale(activity: Activity): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        ActivityCompat.shouldShowRequestPermissionRationale(
+            activity,
+            Manifest.permission.READ_MEDIA_IMAGES
+        )
+    } else {
+        ActivityCompat.shouldShowRequestPermissionRationale(
+            activity,
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        )
     }
 } 
