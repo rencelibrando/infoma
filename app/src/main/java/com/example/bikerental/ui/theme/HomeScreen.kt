@@ -48,6 +48,39 @@ import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.*
+import kotlinx.coroutines.launch
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.location.LocationServices
+import android.annotation.SuppressLint
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.Polyline
+import com.google.android.gms.maps.model.PolylineOptions
+import android.location.Location
+import com.google.android.gms.maps.model.Dot
+import com.google.android.gms.maps.model.PatternItem
+import com.google.android.gms.maps.model.Gap as MapGap
+import kotlin.math.roundToInt
+import com.google.maps.DirectionsApi
+import com.google.maps.GeoApiContext
+import com.google.maps.model.TravelMode
+import com.google.maps.android.PolyUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.*
+import kotlinx.coroutines.*
+import org.json.JSONObject
+import java.io.IOException
 
 data class Bike(
     val id: String,
@@ -57,6 +90,23 @@ data class Bike(
     val rating: Float,
     val distance: String,
     val imageRes: Int
+)
+
+data class BikeLocation(
+    val id: String,
+    val name: String,
+    val type: String,
+    val price: String,
+    val location: LatLng,
+    val isAvailable: Boolean = true
+)
+
+data class RouteInfo(
+    val distance: String,
+    val duration: String,
+    val polylinePoints: List<LatLng>,
+    val steps: List<String>,
+    val isAlternative: Boolean = false
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,7 +149,7 @@ fun HomeScreen(
             // Display content based on selected tab
             when (selectedTab) {
                 0 -> LocationTabContent(fusedLocationProviderClient)
-                1 -> BikeListingsTabContent()
+                1 -> BikeListingsTabContent(fusedLocationProviderClient)
                 2 -> BookingsTabContent()
                 3 -> ProfileTabContent(navController)
             }
@@ -109,9 +159,248 @@ fun HomeScreen(
 
 @Composable
 fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    
+    // State for location permission
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    
+    // States for location and route
+    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    var selectedBike by remember { mutableStateOf<BikeLocation?>(null) }
+    var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+    var distanceToSelectedBike by remember { mutableStateOf<Double?>(null) }
+    
+    var selectedRoute by remember { mutableStateOf<RouteInfo?>(null) }
+    var availableRoutes by remember { mutableStateOf<List<RouteInfo>>(emptyList()) }
+    var showRouteSheet by remember { mutableStateOf(false) }
+    
+    // Default location (Intramuros)
+    val defaultLocation = LatLng(14.5890, 120.9760)
+    
+    // Camera position state
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(defaultLocation, 16f)
+    }
+
+    // Initialize GeoApiContext
+    val geoApiContext = remember {
+        GeoApiContext.Builder()
+            .apiKey("YOUR_GOOGLE_MAPS_API_KEY") // Replace with your API key
+            .build()
+    }
+
+    // Permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasLocationPermission = isGranted
+        if (isGranted) {
+            getCurrentLocation(fusedLocationProviderClient) { location ->
+                currentLocation = location
+                scope.launch {
+                    cameraPositionState.animate(
+                        update = CameraUpdateFactory.newLatLngZoom(location, 16f),
+                        durationMs = 1000
+                    )
+                }
+            }
+        }
+    }
+
+    // Request location when component is first loaded
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            getCurrentLocation(fusedLocationProviderClient) { location ->
+                currentLocation = location
+                scope.launch {
+                    cameraPositionState.animate(
+                        update = CameraUpdateFactory.newLatLngZoom(location, 16f),
+                        durationMs = 1000
+                    )
+                }
+            }
+        }
+    }
+
+    val client = remember { OkHttpClient() }
+
+    // Function to decode polyline points
+    fun decodePoly(encoded: String): List<LatLng> {
+        val poly = ArrayList<LatLng>()
+        var index = 0
+        val len = encoded.length
+        var lat = 0
+        var lng = 0
+
+        while (index < len) {
+            var b: Int
+            var shift = 0
+            var result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or (b and 0x1f shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+            lat += dlat
+
+            shift = 0
+            result = 0
+            do {
+                b = encoded[index++].code - 63
+                result = result or (b and 0x1f shl shift)
+                shift += 5
+            } while (b >= 0x20)
+            val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+            lng += dlng
+
+            val p = LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5)
+            poly.add(p)
+        }
+        return poly
+    }
+
+    // Function to fetch directions from Google Maps API
+    suspend fun fetchDirections(origin: LatLng, destination: LatLng): List<RouteInfo> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val apiKey = "YOUR_GOOGLE_MAPS_API_KEY" // Replace with your API key
+                val url = "https://maps.googleapis.com/maps/api/directions/json?" +
+                        "origin=${origin.latitude},${origin.longitude}" +
+                        "&destination=${destination.latitude},${destination.longitude}" +
+                        "&mode=bicycling" +
+                        "&alternatives=true" +
+                        "&key=$apiKey"
+
+                val request = Request.Builder()
+                    .url(url)
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val jsonData = JSONObject(response.body?.string() ?: "")
+                val routes = mutableListOf<RouteInfo>()
+
+                if (jsonData.getString("status") == "OK") {
+                    val routesArray = jsonData.getJSONArray("routes")
+                    for (i in 0 until routesArray.length()) {
+                        val route = routesArray.getJSONObject(i)
+                        val leg = route.getJSONArray("legs").getJSONObject(0)
+                        val steps = mutableListOf<String>()
+                        
+                        // Extract steps instructions
+                        val stepsArray = leg.getJSONArray("steps")
+                        for (j in 0 until stepsArray.length()) {
+                            val step = stepsArray.getJSONObject(j)
+                            steps.add(step.getString("html_instructions"))
+                        }
+
+                        routes.add(
+                            RouteInfo(
+                                distance = leg.getJSONObject("distance").getString("text"),
+                                duration = leg.getJSONObject("duration").getString("text"),
+                                polylinePoints = decodePoly(route.getJSONObject("overview_polyline").getString("points")),
+                                steps = steps,
+                                isAlternative = i > 0
+                            )
+                        )
+                    }
+                }
+                routes
+            } catch (e: Exception) {
+                e.printStackTrace()
+                emptyList()
+            }
+        }
+    }
+
+    // Function to calculate estimated cycling time
+    fun calculateCyclingTime(distanceInMeters: Double): String {
+        val speedKmH = 13.0 // Average cycling speed
+        val timeHours = distanceInMeters / 1000.0 / speedKmH
+        val timeMinutes = (timeHours * 60).toInt()
+        return when {
+            timeMinutes < 1 -> "Less than 1 min"
+            timeMinutes < 60 -> "$timeMinutes mins"
+            else -> "${timeMinutes / 60}h ${timeMinutes % 60}m"
+        }
+    }
+
+    // Function to generate route suggestions
+    fun generateRoutes(start: LatLng, end: LatLng) {
+        val routes = mutableListOf<RouteInfo>()
+        
+        // Calculate straight-line distance
+        val startLocation = Location("").apply {
+            latitude = start.latitude
+            longitude = start.longitude
+        }
+        
+        val endLocation = Location("").apply {
+            latitude = end.latitude
+            longitude = end.longitude
+        }
+        
+        val distanceInMeters = startLocation.distanceTo(endLocation)
+        
+        // Main route (direct path)
+        val mainRoute = RouteInfo(
+            distance = if (distanceInMeters < 1000) 
+                "${distanceInMeters.toInt()} m" 
+            else 
+                "${"%.1f".format(distanceInMeters / 1000)} km",
+            duration = calculateCyclingTime(distanceInMeters.toDouble()),
+            polylinePoints = listOf(start, end),
+            steps = emptyList(),
+            isAlternative = false
+        )
+        routes.add(mainRoute)
+        
+        // Alternative route (slightly longer path through a midpoint)
+        val midPoint = LatLng(
+            (start.latitude + end.latitude) / 2 + 0.0005,
+            (start.longitude + end.longitude) / 2 + 0.0005
+        )
+        
+        val altDistance = startLocation.distanceTo(Location("").apply {
+            latitude = midPoint.latitude
+            longitude = midPoint.longitude
+        }) + Location("").apply {
+            latitude = midPoint.latitude
+            longitude = midPoint.longitude
+        }.distanceTo(endLocation)
+        
+        val alternativeRoute = RouteInfo(
+            distance = if (altDistance < 1000) 
+                "${altDistance.toInt()} m" 
+            else 
+                "${"%.1f".format(altDistance / 1000)} km",
+            duration = calculateCyclingTime(altDistance.toDouble()),
+            polylinePoints = listOf(start, midPoint, end),
+            steps = emptyList(),
+            isAlternative = true
+        )
+        routes.add(alternativeRoute)
+        
+        availableRoutes = routes
+        selectedRoute = mainRoute
+        showRouteSheet = true
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(scrollState)
             .padding(horizontal = 6.dp)
     ) {
         // Map Title and Controls
@@ -122,42 +411,226 @@ fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = "Find Bikes in Intramuros",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Column {
+                Text(
+                    text = "Find Bikes in Intramuros",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                selectedBike?.let { bike ->
+                    distanceToSelectedBike?.let { distance ->
+                        Text(
+                            text = if (distance < 1000) {
+                                "Distance to ${bike.name}: ${distance.toInt()} m"
+                            } else {
+                                "Distance to ${bike.name}: ${"%.1f".format(distance / 1000)} km"
+                            },
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
 
             Button(
-                onClick = { /* Handle location request */ },
+                onClick = {
+                    if (!hasLocationPermission) {
+                        locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    } else {
+                        getCurrentLocation(fusedLocationProviderClient) { location ->
+                            currentLocation = location
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    update = CameraUpdateFactory.newLatLngZoom(location, 16f),
+                                    durationMs = 1000
+                                )
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .height(36.dp)
+                    .width(110.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                )
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                shape = MaterialTheme.shapes.small
             ) {
                 Icon(
                     imageVector = Icons.Default.MyLocation,
                     contentDescription = "My Location",
-                    tint = MaterialTheme.colorScheme.onPrimary
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Locate Me")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    "Locate Me",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
 
-        // Placeholder for map area
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(450.dp)
-                .clip(MaterialTheme.shapes.medium)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center
         ) {
-            Text("Map View Placeholder", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(
+                    isMyLocationEnabled = hasLocationPermission,
+                    mapStyleOptions = MapStyleOptions.loadRawResourceStyle(
+                        context,
+                        R.raw.map_style
+                    ),
+                    mapType = MapType.NORMAL
+                ),
+                uiSettings = MapUiSettings(
+                    zoomControlsEnabled = false,
+                    myLocationButtonEnabled = false,
+                    mapToolbarEnabled = false,
+                    compassEnabled = true,
+                    zoomGesturesEnabled = true,
+                    rotationGesturesEnabled = true,
+                    tiltGesturesEnabled = true,
+                    scrollGesturesEnabled = true
+                )
+            ) {
+                // Show current location marker
+                currentLocation?.let { location ->
+                    Marker(
+                        state = MarkerState(position = location),
+                        title = "My Location",
+                        snippet = "You are here"
+                    )
+                }
+                
+                // Show bike markers
+                intramurosLocations.forEach { bikeLocation ->
+                    Marker(
+                        state = MarkerState(position = bikeLocation.location),
+                        title = "${bikeLocation.name} (${bikeLocation.type})",
+                        snippet = "${bikeLocation.price} - Click to select",
+                        icon = BitmapDescriptorFactory.defaultMarker(
+                            if (bikeLocation == selectedBike) 
+                                BitmapDescriptorFactory.HUE_GREEN
+                            else 
+                                BitmapDescriptorFactory.HUE_RED
+                        ),
+                        onClick = { marker ->
+                            selectedBike = bikeLocation
+                            currentLocation?.let { userLocation ->
+                                scope.launch {
+                                    val routes = fetchDirections(userLocation, bikeLocation.location)
+                                    if (routes.isNotEmpty()) {
+                                        availableRoutes = routes
+                                        selectedRoute = routes.first()
+                                        showRouteSheet = true
+                                    }
+                                }
+                            }
+                            true
+                        }
+                    )
+                }
+
+                // Draw route if available
+                if (routePoints.isNotEmpty()) {
+                    Polyline(
+                        points = routePoints,
+                        color = MaterialTheme.colorScheme.primary,
+                        width = 5f
+                    )
+                }
+
+                // Draw selected route if available
+                selectedRoute?.let { route ->
+                    Polyline(
+                        points = route.polylinePoints,
+                        color = if (route.isAlternative) 
+                            MaterialTheme.colorScheme.secondary 
+                        else 
+                            MaterialTheme.colorScheme.primary,
+                        width = 5f,
+                        pattern = if (route.isAlternative) 
+                            listOf(Dot(), MapGap(20f))
+                        else 
+                            null
+                    )
+                }
+            }
+
+            // Custom zoom controls overlay
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 16.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surface,
+                        MaterialTheme.shapes.small
+                    )
+            ) {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            cameraPositionState.animate(
+                                update = CameraUpdateFactory.zoomIn(),
+                                durationMs = 300
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.shapes.small
+                        )
+                ) {
+                    Text(
+                        "+",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Divider(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(1.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+                
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            cameraPositionState.animate(
+                                update = CameraUpdateFactory.zoomOut(),
+                                durationMs = 300
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surface,
+                            MaterialTheme.shapes.small
+                        )
+                ) {
+                    Text(
+                        "−",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
 
-        // Legend or Map Options
+        // Legend
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -172,14 +645,110 @@ fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    MapLegendItem(color = Color(0xFF4CAF50), label = "Available Bikes")
-                    MapLegendItem(color = Color(0xFFFF9800), label = "Pickup Stations")
-                    MapLegendItem(color = MaterialTheme.colorScheme.tertiary, label = "Your Location")
+                    MapLegendItem(color = Color(0xFF4CAF50), label = "Selected Bike")
+                    MapLegendItem(color = Color(0xFFFF0000), label = "Available Bikes")
+                    MapLegendItem(color = MaterialTheme.colorScheme.primary, label = "Route")
+                }
+            }
+        }
+
+        // Route information sheet
+        if (showRouteSheet && selectedBike != null && selectedRoute != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Route to ${selectedBike?.name}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    availableRoutes.forEach { route ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedRoute = route }
+                                .padding(vertical = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = if (route.isAlternative) "Alternative Route" else "Recommended Route",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (selectedRoute == route)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "${route.distance} • ${route.duration}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                
+                                RadioButton(
+                                    selected = selectedRoute == route,
+                                    onClick = { selectedRoute = route },
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+                            }
+
+                            // Show turn-by-turn directions
+                            if (selectedRoute == route) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Directions",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                route.steps.forEach { step ->
+                                    Text(
+                                        text = "• $step",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    Button(
+                        onClick = { /* Handle booking */ },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("Book This Bike")
+                    }
                 }
             }
         }
@@ -206,7 +775,80 @@ fun MapLegendItem(color: Color, label: String) {
 }
 
 @Composable
-fun BikeListingsTabContent() {
+fun BikeListingsTabContent(fusedLocationProviderClient: FusedLocationProviderClient? = null) {
+    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    val context = LocalContext.current
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    // Permission launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasLocationPermission = isGranted
+        if (isGranted) {
+            getCurrentLocation(fusedLocationProviderClient) { location ->
+                currentLocation = location
+            }
+        }
+    }
+
+    // Request location when component is first loaded
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+        } else {
+            getCurrentLocation(fusedLocationProviderClient) { location ->
+                currentLocation = location
+            }
+        }
+    }
+
+    // Function to calculate distance between two points
+    fun calculateDistance(bikeLocation: LatLng): String {
+        return if (currentLocation != null) {
+            val startLocation = Location("").apply {
+                latitude = currentLocation!!.latitude
+                longitude = currentLocation!!.longitude
+            }
+            
+            val endLocation = Location("").apply {
+                latitude = bikeLocation.latitude
+                longitude = bikeLocation.longitude
+            }
+            
+            val distanceInMeters = startLocation.distanceTo(endLocation)
+            if (distanceInMeters < 1000) {
+                "${distanceInMeters.toInt()} m"
+            } else {
+                "${"%.1f".format(distanceInMeters / 1000)} km"
+            }
+        } else {
+            "-- km"
+        }
+    }
+
+    // Convert intramurosLocations to Bike objects with real distances
+    val availableBikesWithDistance = remember(currentLocation) {
+        intramurosLocations.map { bikeLocation ->
+            Bike(
+                id = bikeLocation.id,
+                name = bikeLocation.name,
+                type = bikeLocation.type,
+                price = bikeLocation.price,
+                rating = 4.5f, // Default rating
+                distance = calculateDistance(bikeLocation.location),
+                imageRes = R.drawable.bambike
+            )
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -221,21 +863,21 @@ fun BikeListingsTabContent() {
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        // Featured Bikes Section
+        // Featured Bikes Section with real distances
         SectionHeader(
             title = "Featured Bikes",
             onSeeAllClick = { /* Navigate to featured bikes page */ }
         )
-        FeaturedBikesRow(bikes = featuredBikes)
+        FeaturedBikesRow(bikes = availableBikesWithDistance.take(3))
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Available Bikes Near You Section
+        // Available Bikes Near You Section with real distances
         SectionHeader(
             title = "Available Bikes Near You",
             onSeeAllClick = { /* Navigate to nearby bikes page */ }
         )
-        AvailableBikesGrid(bikes = availableBikes)
+        AvailableBikesGrid(bikes = availableBikesWithDistance)
     }
 }
 
@@ -318,7 +960,7 @@ fun ProfileTabContent(navController: NavController) {
                 style = MaterialTheme.typography.headlineMedium.copy(
                     fontWeight = FontWeight.Bold
                 ),
-                color = colorScheme.onBackground
+                color = colorScheme.primary
             )
             
             Button(
@@ -348,7 +990,7 @@ fun ProfileTabContent(navController: NavController) {
             colors = CardDefaults.cardColors(
                 containerColor = colorScheme.surface
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 18.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 15.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -391,7 +1033,7 @@ fun ProfileTabContent(navController: NavController) {
                     style = MaterialTheme.typography.titleLarge.copy(
                         fontWeight = FontWeight.Bold
                     ),
-                    color = colorScheme.onSurface
+                    color = colorScheme.primary
                 )
 
                 // User Email
@@ -418,7 +1060,7 @@ fun ProfileTabContent(navController: NavController) {
                 fontWeight = FontWeight.Bold
             ),
             modifier = Modifier.padding(vertical = 8.dp),
-            color = colorScheme.onBackground
+            color = colorScheme.primary
         )
 
         Card(
@@ -455,7 +1097,7 @@ fun ProfileTabContent(navController: NavController) {
                 fontWeight = FontWeight.Bold
             ),
             modifier = Modifier.padding(vertical = 8.dp),
-            color = colorScheme.onBackground
+            color = colorScheme.primary
         )
 
         Card(
@@ -507,7 +1149,7 @@ fun RideHistoryItem(
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontWeight = FontWeight.Medium
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.primary
             )
             Text(
                 text = date,
@@ -554,13 +1196,13 @@ fun SettingsItem(
             Icon(
                 imageVector = icon,
                 contentDescription = title,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = MaterialTheme.colorScheme.primary
             )
             Spacer(modifier = Modifier.width(24.dp))
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.primary
             )
         }
     }
@@ -760,7 +1402,7 @@ fun FeaturedBikeCard(bike: Bike) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "• ${bike.distance} away",
+                        text = "• ${bike.distance}",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -917,6 +1559,57 @@ val availableBikes = listOf(
         imageRes = R.drawable.bambike // Replace with actual images
     )
 )
+
+// Add Intramuros bike locations
+val intramurosLocations = listOf(
+    BikeLocation(
+        id = "bike1",
+        name = "Mountain Bike 1",
+        type = "Mountain Bike",
+        price = "₱12/hr",
+        location = LatLng(14.5891, 120.9767) // Near Manila Cathedral
+    ),
+    BikeLocation(
+        id = "bike2",
+        name = "City Bike 1",
+        type = "City Bike",
+        price = "₱10/hr",
+        location = LatLng(14.5895, 120.9757) // Near Fort Santiago
+    ),
+    BikeLocation(
+        id = "bike3",
+        name = "Road Bike 1",
+        type = "Road Bike",
+        price = "₱8/hr",
+        location = LatLng(14.5879, 120.9749) // Near Baluarte de San Diego
+    ),
+    BikeLocation(
+        id = "bike4",
+        name = "Mountain Bike 2",
+        type = "Mountain Bike",
+        price = "₱12/hr",
+        location = LatLng(14.5883, 120.9775) // Near San Agustin Church
+    ),
+    BikeLocation(
+        id = "bike5",
+        name = "City Bike 2",
+        type = "City Bike",
+        price = "₱10/hr",
+        location = LatLng(14.5902, 120.9763) // Near Plaza Roma
+    )
+)
+
+@SuppressLint("MissingPermission")
+private fun getCurrentLocation(
+    fusedLocationProviderClient: FusedLocationProviderClient?,
+    onLocationReceived: (LatLng) -> Unit
+) {
+    fusedLocationProviderClient?.lastLocation?.addOnSuccessListener { location ->
+        location?.let {
+            onLocationReceived(LatLng(it.latitude, it.longitude))
+        }
+    }
+}
 
 @Preview(showBackground = true)
 @Composable

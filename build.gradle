@@ -1,0 +1,13 @@
+buildscript {
+    repositories {
+        google()          // Google's Maven repo
+        mavenCentral()    // Maven Central
+        gradlePluginPortal() // Gradle Plugin Portal (for plugins like Secrets)
+    }
+    dependencies {
+        classpath libs.gradle
+        classpath libs.kotlin.gradle.plugin
+        classpath libs.google.services
+    }
+}
+

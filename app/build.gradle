@@ -1,0 +1,96 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.android.libraries.mapsplatform.secrets-gradle-plugin' version '2.0.1'
+    id 'com.google.gms.google-services'
+}
+
+android {
+    namespace 'com.example.bikerental'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.example.bikerental"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion '1.5.8'
+    }
+    packaging {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+        }
+    }
+}
+
+dependencies {
+    implementation platform(libs.androidx.compose.bom.v20231001)
+    implementation libs.androidx.core.ktx.v1120
+    implementation libs.androidx.lifecycle.runtime.ktx.v270
+    implementation libs.androidx.activity.compose.v182
+    implementation libs.ui
+    implementation libs.ui.graphics
+    implementation libs.ui.tooling.preview
+    implementation libs.material3
+    implementation libs.androidx.navigation.compose.v276
+    implementation libs.androidx.material.icons.extended
+    
+    // Google Maps
+    implementation libs.play.services.maps.v1910
+    implementation libs.places
+    implementation libs.maps.ktx
+    implementation libs.maps.compose
+    implementation libs.play.services.location
+    implementation 'com.google.maps:google-maps-services:2.2.0'
+    implementation 'com.google.maps.android:android-maps-utils:3.4.0'
+    implementation 'org.slf4j:slf4j-simple:1.7.32'
+    
+    // Google Sign-In
+    implementation libs.gms.play.services.auth
+    
+    // HTTP Client
+    implementation libs.okhttp
+    
+    // Firebase
+    implementation platform(libs.firebase.bom)
+    implementation libs.firebase.analytics
+    implementation libs.google.firebase.auth
+    implementation libs.google.firebase.firestore
+    implementation libs.google.firebase.storage
+    
+    // Image Loading
+    implementation libs.coil.compose.v250
+    
+    testImplementation libs.junit
+    androidTestImplementation libs.androidx.junit
+    androidTestImplementation libs.androidx.espresso.core.v351
+    androidTestImplementation platform(libs.androidx.compose.bom.v20231001)
+    androidTestImplementation libs.ui.test.junit4
+    debugImplementation libs.ui.tooling
+    debugImplementation libs.ui.test.manifest
+} 

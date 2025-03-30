@@ -24,10 +24,11 @@ import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import android.util.Patterns
 import androidx.compose.ui.text.font.FontWeight
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException

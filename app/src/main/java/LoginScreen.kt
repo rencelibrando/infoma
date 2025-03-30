@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.example.bikerental.R
+import androidx.compose.foundation.BorderStroke
 
 @Composable
 fun GearTickLoginScreen(navController: NavHostController) {
@@ -87,7 +88,7 @@ fun GearTickLoginScreen(navController: NavHostController) {
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = Color.White
                 ),
-                border = ButtonDefaults.outlinedButtonBorder(enabled = true)
+                border = BorderStroke(1.dp, Color.White)
             ) {
                 Text(
                     text = "Sign Up",

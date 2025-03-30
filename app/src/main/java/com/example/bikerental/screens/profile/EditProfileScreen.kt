@@ -24,6 +24,8 @@ import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import com.google.firebase.auth.ktx.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
@@ -56,7 +58,7 @@ fun EditProfileScreen(navController: NavController) {
     val db = FirebaseFirestore.getInstance()
     val storage = FirebaseStorage.getInstance()
 
-    // Image picker launcher - Moved before its usage
+    // Image picker launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -149,9 +151,8 @@ fun EditProfileScreen(navController: NavController) {
     fun uploadImage(imageUri: Uri, userId: String, onSuccess: (String) -> Unit, onError: (String) -> Unit) {
         try {
             val storageRef = storage.reference
-            // Create a unique filename using timestamp
-            val timestamp = System.currentTimeMillis()
-            val imageRef = storageRef.child("profile_pictures/$userId/profile_$timestamp.jpg")
+            // Use a simpler path structure
+            val imageRef = storageRef.child("profile_pictures/$userId")
 
             // Create file metadata
             val metadata = StorageMetadata.Builder()
@@ -443,9 +444,9 @@ private fun updateUserProfile(
             userUpdates["profilePictureUrl"] = it
         }
 
-        // Update Firestore using update() to preserve existing fields
+        // Use set() with merge option instead of update() to create the document if it doesn't exist
         db.collection("users").document(userId)
-            .update(userUpdates as Map<String, Any>)
+            .set(userUpdates, SetOptions.merge())
             .addOnSuccessListener {
                 println("Firestore update successful with new address fields")
                 // Update Auth Profile
