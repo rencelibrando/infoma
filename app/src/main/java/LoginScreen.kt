@@ -51,7 +51,7 @@ fun GearTickLoginScreen(navController: NavHostController) {
             // App Subtitle
             Text(
                 text = "Discover convenient bike rental services at your fingertips.",
-                fontSize = 16.sp,
+                fontSize = 14.sp,
                 color = Color.White,
                 modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp)
             )

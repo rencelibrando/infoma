@@ -27,7 +27,6 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.ktx.userProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
-import androidx.core.net.toUri
 import com.google.firebase.storage.StorageMetadata
 import com.google.firebase.firestore.SetOptions
 import android.Manifest

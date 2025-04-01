@@ -2,8 +2,10 @@
 accompanistInsets = "0.23.1"
 activityComposeVersion = "1.8.2"
 agp = "8.2.2"
+androidMapsUtils = "3.4.0"
 coilCompose = "2.4.0"
 coilComposeVersion = "2.5.0"
+coilSvg = "2.5.0"
 composeBomVersion = "2024.02.00"
 coreKtxVersion = "1.12.0"
 espressoCoreVersion = "3.5.1"
@@ -11,6 +13,7 @@ firebaseAuthKtx = "22.3.1"
 firebaseBom = "32.7.2"
 firebaseFirestore = "24.10.2"
 firebaseStorage = "20.3.0"
+googleMapsServices = "2.2.0"
 googleServices = "4.4.1"
 gradle = "8.9.1"
 kotlin = "1.9.22"
@@ -19,10 +22,14 @@ junit = "4.13.2"
 junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 kotlinGradlePlugin = "1.9.22"
+kotlinxCoroutinesAndroid = "1.7.3"
+kotlinxCoroutinesPlayServices = "1.7.3"
+lifecycleRuntimeCompose = "2.7.0"
 lifecycleRuntimeKtx = "2.7.0"
 activityCompose = "1.8.2"
 composeBom = "2024.02.00"
 lifecycleRuntimeKtxVersion = "2.7.0"
+lifecycleViewmodelCompose = "2.7.0"
 mapsCompose = "2.11.4"
 mapsKtx = "5.0.0"
 material = "1.11.0"
@@ -36,17 +43,21 @@ playServicesLocation = "21.0.1"
 playServicesMaps = "18.2.0"
 playServicesMapsVersion = "18.2.0"
 secretsGradlePlugin = "2.0.1"
+slf4jSimple = "1.7.32"
 uiTextGoogleFonts = "1.7.8"
 firebaseDatabase = "20.3.0"
 
 [libraries]
 accompanist-insets = { module = "com.google.accompanist:accompanist-insets", version.ref = "accompanistInsets" }
+android-maps-utils = { module = "com.google.maps.android:android-maps-utils", version.ref = "androidMapsUtils" }
 androidx-activity-compose-v182 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
 androidx-compose-bom-v20231001 = { module = "androidx.compose:compose-bom", version.ref = "composeBomVersion" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-core-ktx-v1120 = { module = "androidx.core:core-ktx", version.ref = "coreKtxVersion" }
 androidx-espresso-core-v351 = { module = "androidx.test.espresso:espresso-core", version.ref = "espressoCoreVersion" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeCompose" }
 androidx-lifecycle-runtime-ktx-v270 = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtxVersion" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodelCompose" }
 androidx-material = { module = "androidx.compose.material:material", version.ref = "material" }
 androidx-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
@@ -55,16 +66,19 @@ androidx-ui-text-google-fonts = { module = "androidx.compose.ui:ui-text-google-f
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
 coil-compose-v250 = { module = "io.coil-kt:coil-compose", version.ref = "coilComposeVersion" }
 coil-gif = { module = "io.coil-kt:coil-gif", version.ref = "coilCompose" }
+coil-svg = { module = "io.coil-kt:coil-svg", version.ref = "coilSvg" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-auth = { module = "com.google.firebase:firebase-auth" }
 firebase-auth-ktx = { module = "com.google.firebase:firebase-auth-ktx", version.ref = "firebaseAuthKtx" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-firestore = { module = "com.google.firebase:firebase-firestore", version.ref = "firebaseFirestore" }
+firebase-firestore-ktx = { module = "com.google.firebase:firebase-firestore-ktx" }
 firebase-storage = { module = "com.google.firebase:firebase-storage", version.ref = "firebaseStorage" }
 gms-play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuthVersion" }
 google-firebase-auth = { module = "com.google.firebase:firebase-auth" }
 google-firebase-firestore = { module = "com.google.firebase:firebase-firestore" }
 google-firebase-storage = { module = "com.google.firebase:firebase-storage" }
+google-maps-services = { module = "com.google.maps:google-maps-services", version.ref = "googleMapsServices" }
 google-services = { module = "com.google.gms:google-services", version.ref = "googleServices" }
 gradle = { module = "com.android.tools.build:gradle", version.ref = "gradle" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -82,6 +96,8 @@ androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 firebase-database = { group = "com.google.firebase", name = "firebase-database", version.ref = "firebaseDatabase" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlinGradlePlugin" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutinesAndroid" }
+kotlinx-coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
 maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
 maps-ktx = { module = "com.google.maps.android:maps-ktx", version.ref = "mapsKtx" }
 material3 = { module = "androidx.compose.material3:material3" }
@@ -92,6 +108,7 @@ play-services-location = { module = "com.google.android.gms:play-services-locati
 play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
 play-services-maps-v1910 = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMapsVersion" }
 secrets-gradle-plugin = { module = "com.google.android.libraries.mapsplatform.secrets-gradle-plugin:secrets-gradle-plugin", version.ref = "secretsGradlePlugin" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4jSimple" }
 ui = { module = "androidx.compose.ui:ui" }
 ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }

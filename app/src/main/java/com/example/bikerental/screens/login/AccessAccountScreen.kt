@@ -1,8 +1,7 @@
 package com.example.bikerental.screens.login
+
 import android.app.Activity
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,108 +12,109 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import androidx.navigation.compose.rememberNavController
-import com.example.bikerental.R
+import com.example.bikerental.components.GoogleSignInButton
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
+import com.example.bikerental.models.AuthState
+import com.example.bikerental.viewmodels.AuthViewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.common.api.ApiException
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.GoogleAuthProvider
+import android.util.Log
 import android.util.Patterns
-import androidx.compose.ui.text.font.FontWeight
-import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
-import com.google.firebase.auth.FirebaseAuthInvalidUserException
-import com.example.bikerental.components.GoogleSignInButton
+import android.widget.Toast
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 
 @Composable
-fun AccessAccountScreen(navController: NavController) {
+fun AccessAccountScreen(
+    navController: NavController,
+    viewModel: AuthViewModel = viewModel()
+) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isErrorVisible by remember { mutableStateOf(false) }
-    var isSuccess by remember { mutableStateOf(false) }
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    val firebaseAuth = FirebaseAuth.getInstance()
     val colorScheme = MaterialTheme.colorScheme
 
-    // Effect to handle navigation after successful login
-    LaunchedEffect(isSuccess) {
-        if (isSuccess) {
-            navController.navigate("home") {
-                popUpTo("signIn") { inclusive = true }
+    // Collect auth state
+    val authState by viewModel.authState.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+
+    // Initialize Google Sign-In when the screen is first displayed
+    LaunchedEffect(Unit) {
+        viewModel.initializeGoogleSignIn(context)
+    }
+
+    // Google Sign-In Launcher
+    val googleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            try {
+                val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                val account = task.getResult(ApiException::class.java)
+                account?.idToken?.let { token ->
+                    viewModel.handleGoogleSignInResult(
+                        idToken = token,
+                        displayName = account.displayName,
+                        email = account.email,
+                        context = context
+                    )
+                } ?: run {
+                    Toast.makeText(context, "Failed to get ID token", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: ApiException) {
+                val errorMessage = when (e.statusCode) {
+                    GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Google Sign-In was cancelled"
+                    GoogleSignInStatusCodes.NETWORK_ERROR -> "Network error occurred"
+                    else -> "Google Sign-In failed: ${e.message}"
+                }
+                Log.e("AccessAccountScreen", "Google sign in failed", e)
+                Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    // Handle auth state changes
+    LaunchedEffect(authState) {
+        when (authState) {
+            is AuthState.Authenticated -> {
+                navController.navigate("home") {
+                    popUpTo("signIn") { inclusive = true }
+                }
+            }
+            is AuthState.Error -> {
+                Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
+            }
+            is AuthState.NeedsAdditionalInfo -> {
+                navController.navigate("signUp")
+            }
+            is AuthState.PasswordResetSent -> {
+                Toast.makeText(context, "Password reset email sent", Toast.LENGTH_LONG).show()
+                showForgotPasswordDialog = false
+            }
+            else -> {}
         }
     }
 
     fun validateInputs(): Boolean {
-        if (email.isBlank()) {
-            errorMessage = "Please enter your email"
-            isErrorVisible = true
-            return false
-        }
-        if (!Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
-            errorMessage = "Please enter a valid email address"
-            isErrorVisible = true
-            return false
-        }
-        if (password.isBlank()) {
-            errorMessage = "Please enter your password"
-            isErrorVisible = true
-            return false
-        }
-        return true
-    }
-
-    // Google Sign-In Client
-    val googleSignInClient: GoogleSignInClient = remember {
-        GoogleSignIn.getClient(
-            context,
-            GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(context.getString(R.string.default_web_client_id))
-                .requestEmail()
-                .build()
-        )
-    }
-
-    val googleLauncher: ActivityResultLauncher<Intent> = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            isLoading = true
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                val credential = GoogleAuthProvider.getCredential(account.idToken, null)
-                firebaseAuth.signInWithCredential(credential)
-                    .addOnCompleteListener { task ->
-                        if (task.isSuccessful) {
-                            isSuccess = true
-                        } else {
-                            errorMessage = when (task.exception) {
-                                is FirebaseAuthInvalidCredentialsException -> "Invalid credentials"
-                                else -> "Google sign in failed: ${task.exception?.message}"
-                            }
-                            isErrorVisible = true
-                            isLoading = false
-                        }
-                    }
-            } catch (e: ApiException) {
-                errorMessage = "Google sign in failed: ${e.message}"
-                isErrorVisible = true
-                isLoading = false
+        return when {
+            email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
+                false
             }
+            password.isBlank() -> {
+                Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
+                false
+            }
+            else -> true
         }
     }
 
@@ -125,24 +125,22 @@ fun AccessAccountScreen(navController: NavController) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(48.dp))
-        
+
         // Title Section
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = "Access Account",
+                text = "Welcome Back",
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Bold
                 ),
                 color = colorScheme.primary
             )
             Text(
-                text = "Welcome back! Please log in to continue.",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Normal
-                ),
+                text = "Sign in to continue",
+                style = MaterialTheme.typography.titleMedium,
                 color = colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
             )
@@ -157,93 +155,58 @@ fun AccessAccountScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // Error Message
-        if (isErrorVisible && errorMessage != null) {
-            Text(
-                text = errorMessage!!,
-                color = colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-
-        // Email Field
+        // Form Fields
         ResponsiveTextField(
             value = email,
-            onValueChange = { 
-                email = it.trim()
-                isErrorVisible = false
-            },
-            label = "Your email address",
-            leadingIcon = { Icon(Icons.Default.Email, contentDescription = "Email") },
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Email,
-            isError = isErrorVisible && errorMessage?.contains("email") == true
+            onValueChange = { email = it.trim() },
+            label = "Email",
+            leadingIcon = { Icon(Icons.Default.Email, "Email") }
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Password Field
         ResponsiveTextField(
             value = password,
-            onValueChange = { 
-                password = it
-                isErrorVisible = false
-            },
-            label = "Your password",
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password") },
+            onValueChange = { password = it },
+            label = "Password",
+            leadingIcon = { Icon(Icons.Default.Lock, "Password") },
             trailingIcon = {
                 IconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
-                        imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        contentDescription = "Toggle Password"
+                        if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        "Toggle password visibility"
                     )
                 }
             },
-            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
-            isError = isErrorVisible && errorMessage?.contains("password") == true
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation()
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         // Forgot Password Link
         Text(
-            text = "Forgot your password?",
+            text = "Forgot Password?",
             style = MaterialTheme.typography.bodyMedium,
             color = colorScheme.primary,
             modifier = Modifier
                 .align(Alignment.End)
-                .padding(top = 8.dp)
-                .clickable { /* TODO: Implement forgot password */ }
+                .clickable { showForgotPasswordDialog = true }
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
-        // Login Button
+        // Sign In Button
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                    isLoading = true
-                    isErrorVisible = false
-                    firebaseAuth.signInWithEmailAndPassword(email, password)
-                        .addOnCompleteListener { task ->
-                            if (task.isSuccessful) {
-                                isSuccess = true
-                            } else {
-                                errorMessage = when (task.exception) {
-                                    is FirebaseAuthInvalidUserException -> "No account found with this email"
-                                    is FirebaseAuthInvalidCredentialsException -> "Invalid password"
-                                    else -> "Login failed: ${task.exception?.message}"
-                                }
-                                isErrorVisible = true
-                                isLoading = false
-                            }
-                        }
+                    viewModel.signInWithEmailPassword(email, password)
                 }
             },
             text = "Sign In",
-            isLoading = isLoading
+            isLoading = authState is AuthState.Loading
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
         // OR Separator
         Row(
@@ -257,51 +220,91 @@ fun AccessAccountScreen(navController: NavController) {
             )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Google Sign-In Button
+        // Google Sign In Button
         GoogleSignInButton(
             onClick = {
-                val signInIntent = googleSignInClient.signInIntent
-                googleLauncher.launch(signInIntent)
+                try {
+                    val googleSignInClient = viewModel.getGoogleSignInClient(context)
+                    googleLauncher.launch(googleSignInClient.signInIntent)
+                } catch (e: Exception) {
+                    Log.e("AccessAccountScreen", "Failed to start Google Sign-In", e)
+                    Toast.makeText(
+                        context,
+                        "Failed to start Google Sign-In. Please try again.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             },
-            isLoading = isLoading
+            isLoading = authState is AuthState.Loading
         )
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Bottom Sign Up Link
+        // Sign Up Link
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 280.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Don't have an account?",
+                text = "Don't have an account? ",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = "Sign Up",
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    fontWeight = FontWeight.Bold
                 ),
                 color = colorScheme.primary,
-                modifier = Modifier
-                    .clickable { navController.navigate("signUp") }
-                    .padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+                modifier = Modifier.clickable {
+                    navController.navigate("signUp") {
+                        popUpTo("signIn") { inclusive = true }
+                    }
+                }
             )
         }
-    }
-}
 
-@Preview(showBackground = true)
-@Composable
-fun AccessAccountScreenPreview() {
-    AccessAccountScreen(rememberNavController())
+        Spacer(modifier = Modifier.height(32.dp))
+    }
+
+    // Forgot Password Dialog
+    if (showForgotPasswordDialog) {
+        var resetEmail by remember { mutableStateOf(email) }
+
+        AlertDialog(
+            onDismissRequest = { showForgotPasswordDialog = false },
+            title = { Text("Reset Password") },
+            text = {
+                ResponsiveTextField(
+                    value = resetEmail,
+                    onValueChange = { resetEmail = it.trim() },
+                    label = "Email",
+                    leadingIcon = { Icon(Icons.Default.Email, "Email") }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (resetEmail.isNotBlank() && Patterns.EMAIL_ADDRESS.matcher(resetEmail).matches()) {
+                            viewModel.resetPassword(resetEmail)
+                        } else {
+                            Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Send Reset Link")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgotPasswordDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 

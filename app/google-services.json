@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "862099405823",
+    "firebase_url": "https://bike-rental-bc5bd-default-rtdb.asia-southeast1.firebasedatabase.app",
     "project_id": "bike-rental-bc5bd",
     "storage_bucket": "bike-rental-bc5bd.firebasestorage.app"
   },

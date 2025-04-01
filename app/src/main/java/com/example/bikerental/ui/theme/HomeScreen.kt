@@ -1,30 +1,69 @@
 package com.example.bikerental.ui.theme
 import BottomNavigationBar
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.location.Location
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.automirrored.filled.Help
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Help
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,50 +76,47 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
-import coil.compose.rememberAsyncImagePainter
 import com.example.bikerental.R
-import com.example.bikerental.ui.theme.map.BikeMapMarker
 import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.*
-import kotlinx.coroutines.launch
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import com.google.android.gms.location.LocationServices
-import android.annotation.SuppressLint
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.Polyline
-import com.google.android.gms.maps.model.PolylineOptions
-import android.location.Location
+import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.Dot
-import com.google.android.gms.maps.model.PatternItem
-import com.google.android.gms.maps.model.Gap as MapGap
-import kotlin.math.roundToInt
-import com.google.maps.DirectionsApi
-import com.google.maps.GeoApiContext
-import com.google.maps.model.TravelMode
-import com.google.maps.android.PolyUtil
+import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.*
-import kotlinx.coroutines.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONObject
-import java.io.IOException
+import com.google.android.gms.maps.model.Gap as MapGap
+import com.example.bikerental.components.RequirementsWrapper
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import coil.compose.AsyncImage
+import com.example.bikerental.viewmodels.AuthViewModel
+import androidx.compose.material3.AlertDialog
 
 data class Bike(
     val id: String,
@@ -117,45 +153,50 @@ fun HomeScreen(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var searchQuery by remember { mutableStateOf("") }
-
+    val viewModel = remember { AuthViewModel() }
+    
     // Check if user is logged in
     LaunchedEffect(Unit) {
         if (FirebaseAuth.getInstance().currentUser == null) {
-            navController.navigate("signIn") {
+            navController.navigate("signin") {
                 popUpTo("home") { inclusive = true }
             }
         }
     }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground,
-        bottomBar = {
-            BottomNavigationBar(
-                selectedItem = selectedTab,
-                onItemSelected = { newTab -> selectedTab = newTab }
-            )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
-        ) {
-            // Top App Bar with Search and Notifications
-            TopAppBar(
-                searchQuery = searchQuery,
-                onSearchQueryChange = { newQuery -> searchQuery = newQuery }
-            )
+    RequirementsWrapper {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
+            contentColor = MaterialTheme.colorScheme.onBackground,
+            bottomBar = {
+                BottomNavigationBar(
+                    selectedItem = selectedTab,
+                    onItemSelected = { newTab -> selectedTab = newTab }
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .background(MaterialTheme.colorScheme.background)
+            ) {
+                // Top App Bar with Search and Notifications
+                if (selectedTab != 3) { // Don't show TopAppBar in Profile tab
+                    TopAppBar(
+                        searchQuery = searchQuery,
+                        onSearchQueryChange = { newQuery -> searchQuery = newQuery }
+                    )
+                }
 
-            // Display content based on selected tab
-            when (selectedTab) {
-                0 -> LocationTabContent(fusedLocationProviderClient)
-                1 -> BikeListingsTabContent(fusedLocationProviderClient)
-                2 -> BookingsTabContent()
-                3 -> ProfileTabContent(navController)
+                // Display content based on selected tab
+                when (selectedTab) {
+                    0 -> LocationTabContent(fusedLocationProviderClient)
+                    1 -> BikeListingsTabContent(fusedLocationProviderClient)
+                    2 -> BookingsTabContent()
+                    3 -> ProfileScreen(navController, viewModel)
+                }
             }
         }
     }
@@ -195,12 +236,6 @@ fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?
         position = CameraPosition.fromLatLngZoom(defaultLocation, 16f)
     }
 
-    // Initialize GeoApiContext
-    val geoApiContext = remember {
-        GeoApiContext.Builder()
-            .apiKey("YOUR_GOOGLE_MAPS_API_KEY") // Replace with your API key
-            .build()
-    }
 
     // Permission launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -341,65 +376,7 @@ fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?
     }
 
     // Function to generate route suggestions
-    fun generateRoutes(start: LatLng, end: LatLng) {
-        val routes = mutableListOf<RouteInfo>()
-        
-        // Calculate straight-line distance
-        val startLocation = Location("").apply {
-            latitude = start.latitude
-            longitude = start.longitude
-        }
-        
-        val endLocation = Location("").apply {
-            latitude = end.latitude
-            longitude = end.longitude
-        }
-        
-        val distanceInMeters = startLocation.distanceTo(endLocation)
-        
-        // Main route (direct path)
-        val mainRoute = RouteInfo(
-            distance = if (distanceInMeters < 1000) 
-                "${distanceInMeters.toInt()} m" 
-            else 
-                "${"%.1f".format(distanceInMeters / 1000)} km",
-            duration = calculateCyclingTime(distanceInMeters.toDouble()),
-            polylinePoints = listOf(start, end),
-            steps = emptyList(),
-            isAlternative = false
-        )
-        routes.add(mainRoute)
-        
-        // Alternative route (slightly longer path through a midpoint)
-        val midPoint = LatLng(
-            (start.latitude + end.latitude) / 2 + 0.0005,
-            (start.longitude + end.longitude) / 2 + 0.0005
-        )
-        
-        val altDistance = startLocation.distanceTo(Location("").apply {
-            latitude = midPoint.latitude
-            longitude = midPoint.longitude
-        }) + Location("").apply {
-            latitude = midPoint.latitude
-            longitude = midPoint.longitude
-        }.distanceTo(endLocation)
-        
-        val alternativeRoute = RouteInfo(
-            distance = if (altDistance < 1000) 
-                "${altDistance.toInt()} m" 
-            else 
-                "${"%.1f".format(altDistance / 1000)} km",
-            duration = calculateCyclingTime(altDistance.toDouble()),
-            polylinePoints = listOf(start, midPoint, end),
-            steps = emptyList(),
-            isAlternative = true
-        )
-        routes.add(alternativeRoute)
-        
-        availableRoutes = routes
-        selectedRoute = mainRoute
-        showRouteSheet = true
-    }
+
 
     Column(
         modifier = Modifier
@@ -481,89 +458,89 @@ fun LocationTabContent(fusedLocationProviderClient: FusedLocationProviderClient?
                 .fillMaxWidth()
                 .height(450.dp)
         ) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                properties = MapProperties(
-                    isMyLocationEnabled = hasLocationPermission,
-                    mapStyleOptions = MapStyleOptions.loadRawResourceStyle(
-                        context,
-                        R.raw.map_style
+            // Wrap GoogleMap in a Box to ensure proper composition
+            Box(modifier = Modifier.fillMaxSize()) {
+                GoogleMap(
+                    modifier = Modifier.fillMaxSize(),
+                    cameraPositionState = cameraPositionState,
+                    properties = MapProperties(
+                        isMyLocationEnabled = hasLocationPermission,
+                        mapType = MapType.NORMAL
                     ),
-                    mapType = MapType.NORMAL
-                ),
-                uiSettings = MapUiSettings(
-                    zoomControlsEnabled = false,
-                    myLocationButtonEnabled = false,
-                    mapToolbarEnabled = false,
-                    compassEnabled = true,
-                    zoomGesturesEnabled = true,
-                    rotationGesturesEnabled = true,
-                    tiltGesturesEnabled = true,
-                    scrollGesturesEnabled = true
-                )
-            ) {
-                // Show current location marker
-                currentLocation?.let { location ->
-                    Marker(
-                        state = MarkerState(position = location),
-                        title = "My Location",
-                        snippet = "You are here"
+                    uiSettings = MapUiSettings(
+                        zoomControlsEnabled = false,
+                        myLocationButtonEnabled = false,
+                        mapToolbarEnabled = false,
+                        compassEnabled = true,
+                        zoomGesturesEnabled = true,
+                        rotationGesturesEnabled = true,
+                        tiltGesturesEnabled = true,
+                        scrollGesturesEnabled = true
                     )
-                }
-                
-                // Show bike markers
-                intramurosLocations.forEach { bikeLocation ->
-                    Marker(
-                        state = MarkerState(position = bikeLocation.location),
-                        title = "${bikeLocation.name} (${bikeLocation.type})",
-                        snippet = "${bikeLocation.price} - Click to select",
-                        icon = BitmapDescriptorFactory.defaultMarker(
-                            if (bikeLocation == selectedBike) 
-                                BitmapDescriptorFactory.HUE_GREEN
-                            else 
-                                BitmapDescriptorFactory.HUE_RED
-                        ),
-                        onClick = { marker ->
-                            selectedBike = bikeLocation
-                            currentLocation?.let { userLocation ->
-                                scope.launch {
-                                    val routes = fetchDirections(userLocation, bikeLocation.location)
-                                    if (routes.isNotEmpty()) {
-                                        availableRoutes = routes
-                                        selectedRoute = routes.first()
-                                        showRouteSheet = true
+                ) {
+                    // Move map content inside the content lambda
+                    // Show current location marker
+                    currentLocation?.let { location ->
+                        Marker(
+                            state = MarkerState(position = location),
+                            title = "My Location",
+                            snippet = "You are here"
+                        )
+                    }
+                    
+                    // Show bike markers
+                    intramurosLocations.forEach { bikeLocation ->
+                        Marker(
+                            state = MarkerState(position = bikeLocation.location),
+                            title = "${bikeLocation.name} (${bikeLocation.type})",
+                            snippet = "${bikeLocation.price} - Click to select",
+                            icon = BitmapDescriptorFactory.defaultMarker(
+                                if (bikeLocation == selectedBike) 
+                                    BitmapDescriptorFactory.HUE_GREEN
+                                else 
+                                    BitmapDescriptorFactory.HUE_RED
+                            ),
+                            onClick = { marker ->
+                                selectedBike = bikeLocation
+                                currentLocation?.let { userLocation ->
+                                    scope.launch {
+                                        val routes = fetchDirections(userLocation, bikeLocation.location)
+                                        if (routes.isNotEmpty()) {
+                                            availableRoutes = routes
+                                            selectedRoute = routes.first()
+                                            showRouteSheet = true
+                                        }
                                     }
                                 }
+                                true
                             }
-                            true
-                        }
-                    )
-                }
+                        )
+                    }
 
-                // Draw route if available
-                if (routePoints.isNotEmpty()) {
-                    Polyline(
-                        points = routePoints,
-                        color = MaterialTheme.colorScheme.primary,
-                        width = 5f
-                    )
-                }
+                    // Draw route if available
+                    if (routePoints.isNotEmpty()) {
+                        Polyline(
+                            points = routePoints,
+                            color = MaterialTheme.colorScheme.primary,
+                            width = 5f
+                        )
+                    }
 
-                // Draw selected route if available
-                selectedRoute?.let { route ->
-                    Polyline(
-                        points = route.polylinePoints,
-                        color = if (route.isAlternative) 
-                            MaterialTheme.colorScheme.secondary 
-                        else 
-                            MaterialTheme.colorScheme.primary,
-                        width = 5f,
-                        pattern = if (route.isAlternative) 
-                            listOf(Dot(), MapGap(20f))
-                        else 
-                            null
-                    )
+                    // Draw selected route if available
+                    selectedRoute?.let { route ->
+                        Polyline(
+                            points = route.polylinePoints,
+                            color = if (route.isAlternative) 
+                                MaterialTheme.colorScheme.secondary 
+                            else 
+                                MaterialTheme.colorScheme.primary,
+                            width = 5f,
+                            pattern = if (route.isAlternative) 
+                                listOf(Dot(), MapGap(20f))
+                            else 
+                                null
+                        )
+                    }
                 }
             }
 
@@ -909,281 +886,330 @@ fun BookingsTabContent() {
 }
 
 @Composable
-fun ProfileTabContent(navController: NavController) {
-    var user by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser) }
+fun ProfileScreen(
+    navController: NavController,
+    viewModel: AuthViewModel
+) {
+    var user by remember { mutableStateOf<FirebaseUser?>(null) }
     var profileData by remember { mutableStateOf<Map<String, Any>?>(null) }
-    val colorScheme = MaterialTheme.colorScheme
-    val context = LocalContext.current
-    val scrollState = rememberScrollState()
-
-    // Refresh user data when the screen is displayed
+    var showProfileDialog by remember { mutableStateOf(false) }
+    
     LaunchedEffect(Unit) {
-        // Reload Firebase Auth user
-        FirebaseAuth.getInstance().currentUser?.reload()?.addOnSuccessListener {
-            user = FirebaseAuth.getInstance().currentUser
+        user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            navController.navigate("signin") {
+                popUpTo("home") { inclusive = true }
+            }
+            return@LaunchedEffect
         }
-
-        // Fetch Firestore data
-        user?.let { currentUser ->
-            FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(currentUser.uid)
-                .get()
-                .addOnSuccessListener { document ->
-                    if (document != null && document.exists()) {
-                        profileData = document.data
-                    }
+        
+        // Fetch user profile data from Firestore
+        FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(user!!.uid)
+            .get()
+            .addOnSuccessListener { document ->
+                if (document != null && document.exists()) {
+                    profileData = document.data
                 }
-        }
-    }
-
-    // Handle logout function
-    fun handleLogout() {
-        FirebaseAuth.getInstance().signOut()
-        navController.navigate("signIn") {
-            popUpTo("home") { inclusive = true }
-        }
+            }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
             .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Profile Header with Logout Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Profile",
-                style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = colorScheme.primary
-            )
-            
-            Button(
-                onClick = { handleLogout() },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = colorScheme.errorContainer
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                    contentDescription = "Logout",
-                    tint = colorScheme.onErrorContainer
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Logout",
-                    color = colorScheme.onErrorContainer
-                )
-            }
-        }
-
         // Profile Card
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 15.dp)
+                .clickable { showProfileDialog = true }
+                .animateContentSize(),
+            shape = RoundedCornerShape(12.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Profile Image
-                Surface(
+                // Profile Picture
+                AsyncImage(
+                    model = profileData?.get("profilePictureUrl") ?: user?.photoUrl,
+                    contentDescription = "Profile Picture",
                     modifier = Modifier
-                        .size(100.dp)
-                        .padding(bottom = 8.dp),
-                    shape = CircleShape,
-                    color = colorScheme.primaryContainer
-                ) {
-                    if (profileData?.get("profilePictureUrl") != null) {
-                        Image(
-                            painter = rememberAsyncImagePainter(profileData?.get("profilePictureUrl") as String),
-                            contentDescription = "Profile Picture",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(CircleShape),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "Profile",
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .size(48.dp),
-                            tint = colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-
-                // User Name
-                Text(
-                    text = profileData?.get("fullName") as? String ?: user?.displayName ?: "User",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = colorScheme.primary
+                        .size(60.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                    placeholder = painterResource(id = R.drawable.default_profile_picture)
                 )
 
-                // User Email
-                Text(
-                    text = user?.email ?: "",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant
-                )
-
-                if (profileData?.get("phoneNumber") != null) {
+                // Basic Info
+                Column {
                     Text(
-                        text = profileData?.get("phoneNumber") as String,
+                        text = profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = user?.email ?: "Not available",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = profileData?.get("phoneNumber")?.toString() ?: "No phone number",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
 
         // Ride History Section
-        Text(
-            text = "Ride History",
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = colorScheme.primary
-        )
-
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = colorScheme.surface
-            )
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
-                RideHistoryItem(
-                    date = "Today",
-                    bikeName = "Mountain Explorer",
-                    duration = "45 mins",
-                    cost = "₱45.00"
+                Text(
+                    text = "Ride History",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
                 )
-                Divider(modifier = Modifier.padding(vertical = 8.dp))
-                RideHistoryItem(
-                    date = "Yesterday",
-                    bikeName = "City Cruiser",
-                    duration = "30 mins",
-                    cost = "₱30.00"
-                )
+                Spacer(modifier = Modifier.height(16.dp))
+                RideHistoryContent()
             }
         }
 
         // Account Settings Section
-        Text(
-            text = "Account Settings",
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.Bold
-            ),
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = colorScheme.primary
-        )
-
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = colorScheme.surface
-            )
+            shape = RoundedCornerShape(12.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
             Column(
-                modifier = Modifier.padding(8.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
-                SettingsItem(
-                    icon = Icons.Default.Person,
-                    title = "Edit Profile",
-                    onClick = { navController.navigate("editProfile") }
+                Text(
+                    text = "Account Settings",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
                 )
-                SettingsItem(
-                    icon = Icons.Default.Lock,
-                    title = "Privacy & Security",
-                    onClick = { /* Handle privacy settings */ }
-                )
-                SettingsItem(
-                    icon = Icons.Default.Help,
-                    title = "Help & Support",
-                    onClick = { /* Handle help & support */ }
-                )
+                Spacer(modifier = Modifier.height(16.dp))
+                SettingsContent(navController, viewModel)
             }
         }
     }
+
+    // Profile Dialog
+    if (showProfileDialog) {
+        AlertDialog(
+            onDismissRequest = { showProfileDialog = false },
+            modifier = Modifier.widthIn(max = 480.dp),
+            title = {
+                Text(
+                    text = "Profile Information",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    AsyncImage(
+                        model = profileData?.get("profilePictureUrl") ?: user?.photoUrl,
+                        contentDescription = "Profile Picture",
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop,
+                        placeholder = painterResource(id = R.drawable.default_profile_picture)
+                    )
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Personal Information
+                        Text(
+                            text = "Personal Information",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available")
+                        InfoRow("Email", user?.email ?: "Not available")
+                        InfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available")
+                        InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available")
+                        
+                        // Address Information
+                        Text(
+                            text = "Address",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                        )
+                        InfoRow("Street", profileData?.get("street")?.toString() ?: "Not available")
+                        InfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available")
+                        InfoRow("City", profileData?.get("city")?.toString() ?: "Not available")
+                        
+                        // Account Information
+                        Text(
+                            text = "Account Details",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                        )
+                        InfoRow("Account Type", profileData?.get("authProvider")?.toString()?.replaceFirstChar { 
+                            if (it.isLowerCase()) it.titlecase() else it.toString() 
+                        } ?: "Email")
+                        InfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No")
+                        InfoRow("Last Sign In", user?.metadata?.lastSignInTimestamp?.let { 
+                            java.util.Date(it).toString() 
+                        } ?: "Not available")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showProfileDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-fun RideHistoryItem(
-    date: String,
+private fun RideHistoryContent() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        // Sample ride history items - replace with actual data from your backend
+        RideHistoryItem(
+            bikeName = "Mountain Bike X1",
+            date = "2024-03-15",
+            duration = "45 minutes",
+            cost = "$12.50",
+            status = "Completed"
+        )
+        Divider()
+        RideHistoryItem(
+            bikeName = "City Cruiser C2",
+            date = "2024-03-10",
+            duration = "30 minutes",
+            cost = "$8.00",
+            status = "Completed"
+        )
+    }
+}
+
+@Composable
+private fun RideHistoryItem(
     bikeName: String,
+    date: String,
     duration: String,
-    cost: String
+    cost: String,
+    status: String
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 8.dp)
     ) {
-        Column {
-            Text(
-                text = bikeName,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.Medium
-                ),
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = date,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Column(
-            horizontalAlignment = Alignment.End
+        Text(
+            text = bikeName,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = cost,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.primary
+                text = date,
+                style = MaterialTheme.typography.bodyMedium
             )
             Text(
                 text = duration,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = cost,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = status,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (status == "Completed") Color.Green else Color.Red
             )
         }
     }
 }
 
 @Composable
-fun SettingsItem(
+private fun SettingsContent(navController: NavController, viewModel: AuthViewModel) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        SettingsButton(
+            icon = Icons.Default.Edit,
+            text = "Edit Profile",
+            onClick = { navController.navigate("editProfile") }
+        )
+        SettingsButton(
+            icon = Icons.Default.Lock,
+            text = "Change Password",
+            onClick = { navController.navigate("changePassword") }
+        )
+        SettingsButton(
+            icon = Icons.Default.Help,
+            text = "Help & Support",
+            onClick = { navController.navigate("help") }
+        )
+        Divider()
+        SettingsButton(
+            icon = Icons.Default.ExitToApp,
+            text = "Sign Out",
+            onClick = {
+                viewModel.signOut()
+                navController.navigate("signin") {
+                    popUpTo("home") { inclusive = true }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SettingsButton(
     icon: ImageVector,
-    title: String,
+    text: String,
     onClick: () -> Unit
 ) {
     Surface(
@@ -1194,21 +1220,44 @@ fun SettingsItem(
     ) {
         Row(
             modifier = Modifier
-                .padding(vertical = 12.dp, horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(vertical = 12.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = title,
+                contentDescription = text,
                 tint = MaterialTheme.colorScheme.primary
             )
-            Spacer(modifier = Modifier.width(24.dp))
             Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary
+                text = text,
+                style = MaterialTheme.typography.bodyLarge
             )
         }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(120.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f)
+        )
     }
 }
 

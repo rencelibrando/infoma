@@ -11,16 +11,20 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
     <application
+        android:name=".BikeRentalApplication"
         android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Bikerental"
-        tools:targetApi="31">
+        tools:targetApi="33">
+
+        <meta-data android:name="android.hardware.vulkan.level" android:value="0"/>
 
         <meta-data
             android:name="com.google.android.geo.API_KEY"
