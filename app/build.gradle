@@ -3,6 +3,9 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'com.google.android.libraries.mapsplatform.secrets-gradle-plugin' version '2.0.1'
     id 'com.google.gms.google-services'
+    id 'kotlin-kapt'
+    id 'dagger.hilt.android.plugin'
+
 }
 
 android {
@@ -59,7 +62,10 @@ dependencies {
     implementation libs.material3
     implementation libs.androidx.navigation.compose.v276
     implementation libs.androidx.material.icons.extended
-    
+    //hilt
+    implementation libs.hilt.android
+    kapt libs.hilt.android.compiler
+    implementation libs.androidx.hilt.navigation.compose
     // Google Maps
     implementation libs.play.services.maps.v1910
     implementation libs.places
@@ -69,10 +75,14 @@ dependencies {
     implementation libs.google.maps.services
     implementation libs.android.maps.utils
     implementation libs.slf4j.simple
-    
+    implementation libs.play.services.location.v2130
+    implementation libs.material.icons.extended
+    implementation libs.androidx.material.v154
     // Google Sign-In
     implementation libs.gms.play.services.auth
-    
+    implementation libs.integrity
+    // Add App Check
+    implementation libs.firebase.appcheck.playintegrity
     // HTTP Client
     implementation libs.okhttp
     
@@ -85,10 +95,14 @@ dependencies {
     implementation libs.gms.play.services.auth
     implementation libs.firebase.auth.ktx
     implementation libs.firebase.firestore.ktx
-
+    implementation libs.firebase.database
+    implementation libs.play.services.safetynet
+    implementation libs.recaptcha
     // Image Loading
-    implementation libs.coil.compose.v250
     implementation libs.coil.svg
+    implementation libs.coil.compose
+    implementation libs.androidx.compose.material3.material3
+    implementation libs.androidx.navigation.compose.v253
     
     // Lifecycle
     implementation libs.androidx.lifecycle.runtime.compose
@@ -101,4 +115,7 @@ dependencies {
     androidTestImplementation libs.ui.test.junit4
     debugImplementation libs.ui.tooling
     debugImplementation libs.ui.test.manifest
-} 
+}
+kapt {
+    correctErrorTypes true
+}

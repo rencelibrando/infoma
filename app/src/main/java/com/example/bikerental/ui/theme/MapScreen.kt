@@ -13,30 +13,34 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.*
 import com.google.maps.android.compose.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.example.bikerental.R
+import com.example.bikerental.models.TrackableBike
 import com.example.bikerental.ui.theme.map.BikeMapMarker
-import com.example.bikerental.ui.theme.map.intramurosAvailableBikes
 import com.example.bikerental.ui.theme.map.intramurosOutlinePoints
 import com.example.bikerental.ui.theme.map.intramurosStations
+import com.example.bikerental.viewmodels.BikeViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import java.util.Locale
+import kotlinx.coroutines.isActive
 
 @Composable
 fun BikeMap(
     fusedLocationProviderClient: FusedLocationProviderClient?,
-    availableBikes: List<BikeMapMarker> = intramurosAvailableBikes,
     onBikeSelected: (BikeMapMarker) -> Unit = {},
-    requestLocationUpdate: Boolean = false
+    requestLocationUpdate: Boolean = false,
+    bikeViewModel: BikeViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     // Intramuros location (center point)
-    val intramurosLocation = remember{LatLng(14.5895, 120.9750)}
+    val intramurosLocation = remember { LatLng(14.5895, 120.9750) }
 
     // Define map properties
     val mapProperties by remember {
@@ -71,8 +75,11 @@ fun BikeMap(
     // Current user location handling
     var userLocation by remember { mutableStateOf<LatLng?>(null) }
 
-    // Bikes with distance information
-    var bikesWithDistance by remember { mutableStateOf(availableBikes) }
+    // Collect real-time bike data from ViewModel
+    val availableBikes by bikeViewModel.availableBikes.collectAsState()
+    val selectedBike by bikeViewModel.selectedBike.collectAsState()
+    val activeRide by bikeViewModel.activeRide.collectAsState()
+    val bikeLocation by bikeViewModel.bikeLocation.collectAsState()
 
     // Function to calculate distance between two LatLng points
     fun calculateDistance(start: LatLng, end: LatLng): Float {
@@ -85,20 +92,50 @@ fun BikeMap(
         return results[0] // Distance in meters
     }
 
-    // Function to update distances to all bikes
-    fun updateBikeDistances(currentLocation: LatLng) {
-        bikesWithDistance = availableBikes.map { bike ->
-            val distanceInMeters = calculateDistance(currentLocation, bike.position)
-            val distanceText = when {
-                distanceInMeters < 1000 -> "${distanceInMeters.toInt()} m"
-                else -> String.format(Locale.getDefault(), "%.1f km", distanceInMeters / 1000)
-            }
-
-            // Create a new BikeMapMarker with updated distance
-            bike.copy(
-                // Here you would ideally add a distance field to BikeMapMarker,
-                // but we'll handle this externally for now
+    // Convert TrackableBike to BikeMapMarker
+    val bikesWithDistance = remember(availableBikes, userLocation) {
+        availableBikes.map { bike ->
+            BikeMapMarker(
+                id = bike.id,
+                name = bike.name,
+                type = bike.type,
+                price = bike.price,
+                position = LatLng(bike.latitude, bike.longitude),
+                imageRes = bike.imageRes,
+                distance = if (userLocation != null) {
+                    val distanceInMeters = calculateDistance(userLocation!!, bike.position)
+                    when {
+                        distanceInMeters < 1000 -> "${distanceInMeters.toInt()} m"
+                        else -> String.format(Locale.getDefault(), "%.1f km", distanceInMeters / 1000)
+                    }
+                } else ""
             )
+        }
+    }
+
+    // Route tracking
+    var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+
+    // If there's an active ride, collect location updates
+    LaunchedEffect(activeRide) {
+        if (activeRide != null) {
+            val bikeId = activeRide?.bikeId ?: return@LaunchedEffect
+            bikeViewModel.startTrackingBike(bikeId)
+            
+            // If user is currently riding, update bike location with user location periodically
+            while (isActive && activeRide != null) {
+                userLocation?.let { location ->
+                    bikeViewModel.updateBikeLocation(bikeId, location)
+                }
+                delay(5000) // Update every 5 seconds
+            }
+        }
+    }
+
+    // Update route points when bike location changes
+    LaunchedEffect(bikeLocation) {
+        bikeLocation?.let { location ->
+            routePoints = routePoints + location
         }
     }
 
@@ -115,9 +152,6 @@ fun BikeMap(
                     val newUserLocation = LatLng(it.latitude, it.longitude)
                     userLocation = newUserLocation
 
-                    // Update distances when we get location
-                    updateBikeDistances(newUserLocation)
-
                     coroutineScope.launch {
                         cameraPositionState.animate(
                             update = CameraUpdateFactory.newLatLngZoom(
@@ -129,6 +163,21 @@ fun BikeMap(
                     }
                 }
             }
+        }
+    }
+    
+    // Function to start a ride
+    fun startRide(bike: BikeMapMarker) {
+        userLocation?.let { location ->
+            bikeViewModel.startRide(bike.id, location)
+        }
+    }
+    
+    // Function to end a ride
+    fun endRide() {
+        userLocation?.let { location ->
+            bikeViewModel.endRide(location)
+            routePoints = emptyList() // Clear route
         }
     }
 
@@ -179,32 +228,50 @@ fun BikeMap(
             )
         }
 
-        // Available bikes markers
-        bikesWithDistance.forEach { bike ->
-            MarkerInfoWindow(
-                state = MarkerState(position = bike.position),
-                title = bike.name,
-                snippet = "${bike.type} • ${bike.price}",
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
-                onClick = {
-                    // Add distance information to the selected bike before passing it
-                    userLocation?.let { location ->
-                        val distanceInMeters = calculateDistance(location, bike.position)
-                        val distanceText = when {
-                            distanceInMeters < 1000 -> "${distanceInMeters.toInt()} m"
-                            else -> String.format(Locale.getDefault(), "%.1f km", distanceInMeters / 1000)
+        // Available bikes markers - only show available bikes that aren't in use
+        bikesWithDistance
+            .filter { bike -> 
+                availableBikes.find { it.id == bike.id }?.isAvailable == true &&
+                availableBikes.find { it.id == bike.id }?.isInUse == false
+            }
+            .forEach { bike ->
+                MarkerInfoWindow(
+                    state = MarkerState(position = bike.position),
+                    title = bike.name,
+                    snippet = "${bike.type} • ${bike.price}",
+                    icon = BitmapDescriptorFactory.defaultMarker(
+                        if (selectedBike?.id == bike.id) 
+                            BitmapDescriptorFactory.HUE_GREEN 
+                        else 
+                            BitmapDescriptorFactory.HUE_RED
+                    ),
+                    onClick = {
+                        if (activeRide == null) {
+                            bikeViewModel.selectBike(bike.id)
+                            onBikeSelected(bike)
                         }
-                        // In a real implementation, you'd attach this to the bike object
-                        // Here we're just calling the function
-                    }
-                    onBikeSelected(bike)
-                    true
-                },
-                onInfoWindowClick = {
-                    onBikeSelected(bike)
-                },
-                zIndex = 1f
-            )
+                        true
+                    },
+                    onInfoWindowClick = {
+                        if (activeRide == null) {
+                            onBikeSelected(bike)
+                        }
+                    },
+                    zIndex = 1f
+                )
+            }
+            
+        // Draw the tracked bike if in use
+        bikeLocation?.let { location ->
+            if (activeRide != null) {
+                Marker(
+                    state = MarkerState(position = location),
+                    title = selectedBike?.name ?: "Your Bike",
+                    snippet = "In use",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE),
+                    zIndex = 3f
+                )
+            }
         }
 
         // Bike station markers
@@ -215,6 +282,15 @@ fun BikeMap(
                 snippet = "${station.availableBikes} bikes available",
                 icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
                 zIndex = 1f
+            )
+        }
+        
+        // Draw ride path if active
+        if (routePoints.isNotEmpty()) {
+            Polyline(
+                points = routePoints,
+                color = MaterialTheme.colorScheme.primary,
+                width = 5f
             )
         }
 

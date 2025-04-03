@@ -45,7 +45,6 @@ fun AccessAccountScreen(
 
     // Collect auth state
     val authState by viewModel.authState.collectAsState()
-    val currentUser by viewModel.currentUser.collectAsState()
 
     // Initialize Google Sign-In when the screen is first displayed
     LaunchedEffect(Unit) {
