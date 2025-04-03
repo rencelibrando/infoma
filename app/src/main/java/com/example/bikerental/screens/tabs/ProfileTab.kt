@@ -1,8 +1,6 @@
 package com.example.bikerental.screens.tabs
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -21,7 +19,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.widthIn
 import androidx.navigation.NavController
@@ -32,21 +29,16 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.collectAsState
 import android.app.Activity
 import androidx.compose.ui.platform.LocalContext
 import com.example.bikerental.viewmodels.PhoneAuthViewModel
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.OffsetMapping
-import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.text.input.ImeAction
 import com.example.bikerental.models.PhoneAuthState
@@ -62,7 +54,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.draw.alpha
-import kotlin.text.get
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -102,13 +93,13 @@ fun ProfileScreen(
                 "city"
             )
             requiredFields.all { field ->
-                !data[field].toString().isNullOrBlank()
+                data[field].toString().isNotBlank()
             }
-        } ?: false
+        } == true
     }
 
     fun isPhoneVerified(): Boolean {
-        return profileData?.get("isPhoneVerified") as? Boolean ?: false
+        return profileData?.get("isPhoneVerified") as? Boolean == true
     }
     // Function to refresh profile data
     fun refreshProfile() {
@@ -375,7 +366,7 @@ fun ProfileScreen(
                                 "city"
                             )
                             val completedFields = requiredFields.count { field ->
-                                !data[field].toString().isNullOrBlank()
+                                data[field].toString().isNotBlank()
                             }
                             completedFields.toFloat() / requiredFields.size
                         } ?: 0f
@@ -399,7 +390,7 @@ fun ProfileScreen(
                                 "city"
                             )
                             val completedFields = requiredFields.count { field ->
-                                !data[field].toString().isNullOrBlank()
+                                data[field].toString().isNotBlank()
                             }
                             (completedFields.toFloat() / requiredFields.size * 100).toInt()
                         } ?: 0)}%",
@@ -993,7 +984,7 @@ private fun VerificationContent(
             }
             
             is PhoneAuthState.Error -> {
-                val errorMessage = (uiState as PhoneAuthState.Error).message
+                val errorMessage = uiState.message
                 when {
                     errorMessage.contains("Too many") || 
                     errorMessage.contains("quota") || 
