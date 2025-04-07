@@ -58,6 +58,21 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import com.example.bikerental.utils.ColorUtils
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.runtime.rememberCoroutineScope
+import android.util.Log
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.material3.ExperimentalMaterial3Api
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun ProfileScreen(
@@ -67,6 +82,7 @@ fun ProfileScreen(
     val phoneAuthViewModel: PhoneAuthViewModel = viewModel()
     val phoneAuthState = phoneAuthViewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     
     var verificationCode by remember { mutableStateOf("") }
     var isVerificationInProgress by remember { mutableStateOf(false) }
@@ -76,12 +92,12 @@ fun ProfileScreen(
     var profileData by remember { mutableStateOf<Map<String, Any>?>(null) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showVerifyPhoneDialog by remember { mutableStateOf(false) }
+    var actuallyShowVerifyDialog by remember { mutableStateOf(false) }
+    var isCheckingRateLimit by remember { mutableStateOf(false) }
+    var verificationAttempted by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
-    val purple500 = colorResource(id = R.color.purple_500)
-    val blackcol = colorResource(id = R.color.black)
     var phoneNumber by remember { mutableStateOf("") }
-    // Function to check if profile is complete
-
+    
     // Function to check if profile is complete
     fun isProfileComplete(): Boolean {
         return profileData?.let { data ->
@@ -101,6 +117,7 @@ fun ProfileScreen(
     fun isPhoneVerified(): Boolean {
         return profileData?.get("isPhoneVerified") as? Boolean == true
     }
+    
     // Function to refresh profile data
     fun refreshProfile() {
         user = FirebaseAuth.getInstance().currentUser
@@ -132,24 +149,72 @@ fun ProfileScreen(
             }
             return@LaunchedEffect
         }
+        
+        // Check and cleanup any expired rate limits
+        phoneAuthViewModel.checkAndCleanupExpiredRateLimits()
+        
         refreshProfile()
     }
 
-    // Effect to handle verification success
+    // Effect to handle verification success and other state changes
     LaunchedEffect(phoneAuthState.value) {
         when (phoneAuthState.value) {
             is PhoneAuthState.Success -> {
                 showVerifyPhoneDialog = false
+                actuallyShowVerifyDialog = false
                 isVerificationInProgress = false
                 phoneNumber = ""
                 verificationCode = ""
+                verificationAttempted = false
                 // Refresh profile data after successful verification
                 refreshProfile()
             }
             is PhoneAuthState.CodeSent -> {
                 isVerificationInProgress = true
+                verificationAttempted = true
+            }
+            is PhoneAuthState.RateLimited -> {
+                // When rate limited, close dialog and show rate limit message
+                actuallyShowVerifyDialog = false
+                verificationAttempted = true
+            }
+            is PhoneAuthState.Initial -> {
+                // If returned to initial state and timer completed, reset verification attempted flag
+                if (verificationAttempted) {
+                    val currentState = phoneAuthState.value
+                    // Only reset if we're returning from a rate limit
+                    if (currentState is PhoneAuthState.Initial) {
+                        verificationAttempted = false
+                    }
+                }
             }
             else -> {}
+        }
+    }
+
+    // Check rate limit when user tries to open verification dialog
+    LaunchedEffect(showVerifyPhoneDialog) {
+        if (showVerifyPhoneDialog && !actuallyShowVerifyDialog && !isCheckingRateLimit) {
+            isCheckingRateLimit = true
+            
+            try {
+                val (isRateLimited, expiryTime) = phoneAuthViewModel.checkRateLimitStatus()
+                
+                if (isRateLimited) {
+                    // Use the actual server-stored expiry time
+                    val displayDuration = "3 minutes" // Default display, actual countdown will be accurate
+                    phoneAuthViewModel.resetState()
+                    phoneAuthViewModel.setRateLimited(expiryTime, displayDuration)
+                    showVerifyPhoneDialog = false  // Reset the trigger
+                } else {
+                    actuallyShowVerifyDialog = true
+                }
+            } catch (e: Exception) {
+                // If rate limit check fails, proceed with the dialog
+                actuallyShowVerifyDialog = true
+            } finally {
+                isCheckingRateLimit = false
+            }
         }
     }
     val pullRefreshState = rememberPullRefreshState(
@@ -215,7 +280,11 @@ fun ProfileScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showVerifyPhoneDialog = true },
+                        .clickable { 
+                            if (!verificationAttempted) {
+                                showVerifyPhoneDialog = true
+                            }
+                        },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
                     ),
@@ -248,7 +317,11 @@ fun ProfileScreen(
                             )
                         }
                         Button(
-                            onClick = { showVerifyPhoneDialog = true },
+                            onClick = { 
+                                if (!verificationAttempted) {
+                                    showVerifyPhoneDialog = true
+                                }
+                            },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.error
                             ),
@@ -292,7 +365,7 @@ fun ProfileScreen(
                                     color = when {
                                         !isProfileComplete() -> MaterialTheme.colorScheme.error
                                         !isPhoneVerified() -> MaterialTheme.colorScheme.error
-                                        else -> purple500
+                                        else -> ColorUtils.purple500()
                                     },
                                     shape = CircleShape
                                 ),
@@ -310,12 +383,12 @@ fun ProfileScreen(
                                 ?: user?.displayName 
                                 ?: "Complete your profile",
                             style = MaterialTheme.typography.titleMedium,
-                            color = purple500
+                            color = ColorUtils.purple500()
                         )
                         Text(
                             text = user?.email ?: "Not available",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = blackcol
+                            color = ColorUtils.blackcol()
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -328,7 +401,7 @@ fun ProfileScreen(
                                 color = when {
                                     profileData?.get("phoneNumber") == null -> MaterialTheme.colorScheme.error
                                     !isPhoneVerified() -> MaterialTheme.colorScheme.error
-                                    else -> blackcol
+                                    else -> ColorUtils.blackcol()
                                 }
                             )
                             if (profileData?.get("phoneNumber") != null) {
@@ -375,7 +448,7 @@ fun ProfileScreen(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp)),
-                    color = purple500,
+                    color = ColorUtils.purple500(),
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
                 
@@ -414,10 +487,10 @@ fun ProfileScreen(
                     Text(
                         text = "Ride History",
                         style = MaterialTheme.typography.titleLarge,
-                        color = purple500
+                        color = ColorUtils.purple500()
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    RideHistoryContent(blackcol)
+                    RideHistoryContent(ColorUtils.blackcol())
                 }
             }
 
@@ -435,10 +508,10 @@ fun ProfileScreen(
                     Text(
                         text = "Account Settings",
                         style = MaterialTheme.typography.titleLarge,
-                        color = purple500
+                        color = ColorUtils.purple500()
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    SettingsContent(navController, viewModel, blackcol)
+                    SettingsContent(navController, viewModel, ColorUtils.blackcol())
                 }
             }
         }
@@ -449,7 +522,7 @@ fun ProfileScreen(
             state = pullRefreshState,
             modifier = Modifier.align(Alignment.TopCenter),
             backgroundColor = MaterialTheme.colorScheme.surface,
-            contentColor = purple500
+            contentColor = ColorUtils.purple500()
         )
 
         // Loading overlay (optional, you can keep or remove this)
@@ -461,7 +534,7 @@ fun ProfileScreen(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    color = purple500,
+                    color = ColorUtils.purple500(),
                     modifier = Modifier.size(48.dp)
                 )
             }
@@ -469,15 +542,18 @@ fun ProfileScreen(
     }
 
     // Phone Verification Dialog
-    if (showVerifyPhoneDialog) {
+    if (actuallyShowVerifyDialog) {
         PhoneVerificationDialog(
             phoneNumber = profileData?.get("phoneNumber")?.toString()?.replace("+63", "") ?: "",
             onDismiss = { 
-                showVerifyPhoneDialog = false
+                actuallyShowVerifyDialog = false
                 isVerificationInProgress = false
             },
             viewModel = phoneAuthViewModel,
-            activity = context as Activity
+            activity = context as Activity,
+            verificationAttemptedRef = remember { mutableStateOf(verificationAttempted) },
+            showVerifyPhoneDialogRef = remember { mutableStateOf(showVerifyPhoneDialog) },
+            actuallyShowVerifyDialogRef = remember { mutableStateOf(actuallyShowVerifyDialog) }
         )
     }
 
@@ -490,7 +566,7 @@ fun ProfileScreen(
                 Text(
                     text = "Profile Information",
                     style = MaterialTheme.typography.titleLarge,
-                    color = purple500
+                    color = ColorUtils.purple500()
                 )
             },
             text = {
@@ -520,42 +596,42 @@ fun ProfileScreen(
                         Text(
                             text = "Personal Information",
                             style = MaterialTheme.typography.titleMedium,
-                            color = purple500
+                            color = ColorUtils.purple500()
                         )
-                        InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available", blackcol)
-                        InfoRow("Email", user?.email ?: "Not available", blackcol)
-                        InfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available", blackcol)
-                        InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", blackcol)
+                        InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("Email", user?.email ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
                         // Address Information
                         Text(
                             text = "Address",
                             style = MaterialTheme.typography.titleMedium,
-                            color = purple500
+                            color = ColorUtils.purple500()
                         )
-                        InfoRow("Street", profileData?.get("street")?.toString() ?: "Not available", blackcol)
-                        InfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available", blackcol)
-                        InfoRow("City", profileData?.get("city")?.toString() ?: "Not available", blackcol)
+                        InfoRow("Street", profileData?.get("street")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("City", profileData?.get("city")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
                         // Account Information
                         Text(
                             text = "Account Details",
                             style = MaterialTheme.typography.titleMedium,
-                            color = purple500
+                            color = ColorUtils.purple500()
                         )
                         InfoRow("Account Type", profileData?.get("authProvider")?.toString()?.replaceFirstChar { 
                             if (it.isLowerCase()) it.titlecase() else it.toString() 
-                        } ?: "Email", blackcol)
-                        InfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No", blackcol)
+                        } ?: "Email", ColorUtils.blackcol())
+                        InfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No", ColorUtils.blackcol())
                         InfoRow("Last Sign In", user?.metadata?.lastSignInTimestamp?.let { 
                             java.util.Date(it).toString() 
-                        } ?: "Not available", blackcol)
+                        } ?: "Not available", ColorUtils.blackcol())
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showProfileDialog = false }) {
-                    Text("Close", color = purple500)
+                    Text("Close", color = ColorUtils.purple500())
                 }
             }
         )
@@ -765,17 +841,46 @@ class PhilippinesPhoneNumberTransformation : VisualTransformation {
     }
 }
 
-// Add this new composable to handle rate limiting
+// Update the RateLimitedSection to properly reset verification state on completion
 @Composable
 private fun RateLimitedSection(
     onDismiss: () -> Unit,
-    uiState: PhoneAuthState.RateLimited
+    uiState: PhoneAuthState.RateLimited,
+    viewModel: PhoneAuthViewModel
 ) {
-    // Calculate initial remaining time
-    val expireTimeMillis = uiState.expireTimeMillis
+    // More accurate timer calculation
+    val expireTimeMillis = remember(uiState.expireTimeMillis) { 
+        // Ensure we don't show negative times
+        uiState.expireTimeMillis.coerceAtLeast(System.currentTimeMillis())
+    }
+    
+    val scope = rememberCoroutineScope()
     
     // Create a state that will hold the formatted time
     var formattedTime by remember { mutableStateOf("") }
+    var timerCompleted by remember { mutableStateOf(false) }
+    var timeRemainingRatio by remember { mutableStateOf(1f) }
+    
+    // Calculate how much total time was initially set
+    val totalDurationMillis by remember { 
+        mutableStateOf(
+            if (expireTimeMillis > System.currentTimeMillis()) {
+                if (uiState.isDeviceBlock) {
+                    // For device blocks, use 24 hours as the display duration
+                    24 * 60 * 60 * 1000L
+                } else {
+                    // For regular rate limits, use a shorter duration
+                    (expireTimeMillis - System.currentTimeMillis()).coerceAtMost(3 * 60 * 1000L)
+                }
+            } else {
+                if (uiState.isDeviceBlock) {
+                    24 * 60 * 60 * 1000L
+                } else {
+                    3 * 60 * 1000L
+                }
+            }
+        )
+    }
     
     // Create a timer that updates every second
     LaunchedEffect(expireTimeMillis) {
@@ -785,17 +890,55 @@ private fun RateLimitedSection(
             
             if (remainingMillis <= 0) {
                 formattedTime = "0 seconds"
+                timerCompleted = true
+                timeRemainingRatio = 0f
+                
+                // Only attempt to reset on regular rate limits
+                // For device blocks, the user will need to wait the full duration
+                if (!uiState.isDeviceBlock) {
+                    // Reset the verification state when timer completes
+                    viewModel.resetState()
+                    
+                    // Cleanup any expired rate limits from server to ensure state consistency
+                    scope.launch {
+                        delay(500) // Short delay to ensure state update completes
+                        viewModel.checkAndCleanupExpiredRateLimits()
+                    }
+                } else {
+                    // For device blocks, check if it's truly expired on the server
+                    scope.launch {
+                        viewModel.checkIfDeviceBlockExpired()
+                    }
+                }
+                
                 break
             }
             
-            // Format the remaining time
-            val minutes = remainingMillis / (60 * 1000)
-            val seconds = (remainingMillis % (60 * 1000)) / 1000
+            // Calculate progress ratio for visual indicator
+            timeRemainingRatio = (remainingMillis.toFloat() / totalDurationMillis).coerceIn(0f, 1f)
             
-            formattedTime = if (minutes > 0) {
-                "$minutes min $seconds sec"
+            // Format the remaining time based on duration
+            formattedTime = if (uiState.isDeviceBlock) {
+                // For device blocks, show hours and minutes
+                val hours = remainingMillis / (60 * 60 * 1000)
+                val minutes = (remainingMillis % (60 * 60 * 1000)) / (60 * 1000)
+                
+                if (hours > 0) {
+                    "$hours hr $minutes min"
+                } else {
+                    val seconds = (remainingMillis % (60 * 1000)) / 1000
+                    "$minutes min $seconds sec"
+                }
             } else {
-                "$seconds seconds"
+                // For regular rate limits, show minutes and seconds
+                val minutes = remainingMillis / (60 * 1000)
+                val seconds = (remainingMillis % (60 * 1000)) / 1000
+                
+                if (minutes > 0) {
+                    "$minutes min $seconds sec"
+                } else {
+                    "$seconds seconds"
+                }
             }
             
             // Delay for 1 second before updating again
@@ -805,7 +948,10 @@ private fun RateLimitedSection(
     
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.errorContainer,
+        color = if (uiState.isDeviceBlock) 
+                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                else 
+                    MaterialTheme.colorScheme.errorContainer,
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(
@@ -814,75 +960,106 @@ private fun RateLimitedSection(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Default.Timer,
+                    imageVector = if (uiState.isDeviceBlock) Icons.Default.Block else Icons.Default.Timer,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Verification Limit Reached",
+                    text = if (uiState.isDeviceBlock) "Device Temporarily Blocked" else "Verification Limit Reached",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
             
             Text(
-                text = "You've reached the maximum number of verification attempts for this phone number.",
+                text = if (uiState.isDeviceBlock) 
+                         "Your device has been temporarily blocked due to unusual verification activity. This is a security measure to prevent abuse."
+                       else 
+                         "You've reached the maximum number of verification attempts for this phone number.",
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodyMedium
             )
             
             Divider(modifier = Modifier.padding(vertical = 8.dp))
             
-            // Custom countdown display with pulsating animation
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val infiniteTransition = rememberInfiniteTransition()
-                val alpha by infiniteTransition.animateFloat(
-                    initialValue = 0.6f,
-                    targetValue = 1.0f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1000),
-                        repeatMode = RepeatMode.Reverse
+            // Progress indicator
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (uiState.isDeviceBlock) "Block will expire in:" else "Try again in:",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium
                     )
-                )
+                    
+                    Text(
+                        text = formattedTime,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 
-                Icon(
-                    imageVector = Icons.Default.HourglassTop,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = alpha),
-                    modifier = Modifier.size(24.dp)
-                )
+                Spacer(modifier = Modifier.height(8.dp))
                 
-                Spacer(modifier = Modifier.width(8.dp))
-                
-                Text(
-                    text = "Try again in:",
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                
-                Spacer(modifier = Modifier.width(8.dp))
-                
-                Text(
-                    text = formattedTime,
+                // Linear progress indicator
+                LinearProgressIndicator(
+                    progress = { timeRemainingRatio },
+                    modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.alpha(alpha)
+                    trackColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                 )
+                
+                // Add help text for device blocks
+                if (uiState.isDeviceBlock) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Why am I blocked?",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Firebase has detected unusual verification activity from this device. This is usually caused by too many failed verification attempts in a short period.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "You can try again in 24 hours, or use a different device for verification.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
             }
             
             Button(
-                onClick = onDismiss,
+                onClick = {
+                    if (timerCompleted) {
+                        // If timer completed, reset state before dismissing
+                        viewModel.resetState()
+                    }
+                    onDismiss()
+                },
                 modifier = Modifier.align(Alignment.End),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.error
                 )
             ) {
-                Text("OK")
+                Text(if (timerCompleted) "Try Again" else "OK")
             }
         }
     }
@@ -952,7 +1129,7 @@ private fun AppIdentifierErrorSection(
     }
 }
 
-// Update VerificationContent to handle this specific error
+// Fix the VerificationContent composable to properly handle OTP verification
 @Composable
 private fun VerificationContent(
     uiState: PhoneAuthState,
@@ -961,8 +1138,47 @@ private fun VerificationContent(
     phoneNumber: String,
     onRetry: () -> Unit,
     onRecaptchaBypass: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    viewModel: PhoneAuthViewModel,
+    verificationAttemptedRef: MutableState<Boolean>
 ) {
+    // Use state to track if we're checking rate limits and store error message
+    var checkingRateLimit by remember { mutableStateOf(false) }
+    var errorToCheck by remember { mutableStateOf<String?>(null) }
+    
+    // LaunchedEffect to handle rate limit checking
+    LaunchedEffect(errorToCheck) {
+        if (errorToCheck != null && !checkingRateLimit) {
+            val errorMessage = errorToCheck ?: ""
+            if (errorMessage.contains("Too many") || 
+                errorMessage.contains("quota") || 
+                errorMessage.contains("limit")) {
+                
+                checkingRateLimit = true
+                
+                val rateLimitResult = try {
+                    viewModel.checkRateLimitStatus()
+                } catch (e: Exception) {
+                    // Fallback if checking fails: create a 3-minute mock
+                    Pair(true, System.currentTimeMillis() + (3 * 60 * 1000))
+                }
+                
+                val isRateLimited = rateLimitResult.first
+                val expiryTime = rateLimitResult.second
+                
+                // Use the actual server-stored rate limit expiry time
+                if (isRateLimited) {
+                    val displayDuration = "3 minutes" // Default display
+                    viewModel.resetState()
+                    viewModel.setRateLimited(expiryTime, displayDuration)
+                }
+                
+                checkingRateLimit = false
+                errorToCheck = null
+            }
+        }
+    }
+    
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -979,40 +1195,51 @@ private fun VerificationContent(
                     otpValue = otpValue,
                     onOtpValueChange = onOtpChange,
                     phoneNumber = phoneNumber,
-                    onResend = onRetry
+                    onResend = onRetry,
+                    onVerify = { 
+                        if (otpValue.length == 6) {
+                            // Call verification with the entered code
+                            viewModel.verifyPhoneNumberWithCode(otpValue)
+                        }
+                    }
                 )
             }
             
             is PhoneAuthState.Error -> {
                 val errorMessage = uiState.message
-                when {
-                    errorMessage.contains("Too many") || 
+                // Set the error to check in state instead of launching directly
+                if ((errorMessage.contains("Too many") || 
                     errorMessage.contains("quota") || 
-                    errorMessage.contains("limit") -> {
-                        // Create a mock RateLimited state with current time + 5 min
-                        val expiryTime = System.currentTimeMillis() + (5 * 60 * 1000)
-                        RateLimitedSection(
-                            onDismiss = onDismiss,
-                            uiState = PhoneAuthState.RateLimited(expiryTime, "5 minutes")
-                        )
-                    }
-                    errorMessage.contains("missing a valid app identifier") ||
+                    errorMessage.contains("limit")) && 
+                    errorToCheck == null && !checkingRateLimit) {
+                    errorToCheck = errorMessage
+                    LoadingSection()
+                } else if (errorMessage.contains("missing a valid app identifier") ||
                     errorMessage.contains("Play Integrity") ||
-                    errorMessage.contains("reCAPTCHA") -> {
-                        AppIdentifierErrorSection(
-                            onRetry = onRetry,
-                            onDismiss = onDismiss
-                        )
-                    }
-                    else -> {
-                        ErrorSection(
-                            errorMessage = errorMessage,
-                            onRetry = onRetry
-                        )
-                    }
+                    errorMessage.contains("reCAPTCHA")) {
+                    AppIdentifierErrorSection(
+                        onRetry = onRetry,
+                        onDismiss = onDismiss
+                    )
+                } else if (errorToCheck == null || !checkingRateLimit) {
+                    ErrorSection(
+                        errorMessage = errorMessage,
+                        onRetry = onRetry
+                    )
+                } else {
+                    // Show loading while checking
+                    LoadingSection()
                 }
             }
             
+            is PhoneAuthState.RateLimited -> {
+                RateLimitedSection(
+                    onDismiss = onDismiss,
+                    uiState = uiState,
+                    viewModel = viewModel
+                )
+            }
+
             is PhoneAuthState.RecaptchaError -> {
                 RecaptchaErrorSection(
                     onBypass = onRecaptchaBypass
@@ -1021,74 +1248,116 @@ private fun VerificationContent(
             
             is PhoneAuthState.Success -> {
                 SuccessSection()
+                // Reset verification attempted flag
+                verificationAttemptedRef.value = false
             }
             
-            PhoneAuthState.Initial -> {
-                Text("Preparing verification...")
-            }
-            
-            is PhoneAuthState.RateLimited -> {
-                RateLimitedSection(
-                    onDismiss = onDismiss,
-                    uiState = uiState
-                )
-            }
-
-            PhoneAuthState.AppCheckError -> {
-                AppIdentifierErrorSection(
-                    onRetry = onRetry,
-                    onDismiss = onDismiss
-                )
+            is PhoneAuthState.Initial, is PhoneAuthState.AppCheckError -> {
+                // Just show a loading indicator for these states
+                LoadingSection()
             }
         }
     }
 }
 
+// Add or update the OtpInputSection to include a verify function
 @Composable
-private fun RecaptchaErrorSection(
-    onBypass: () -> Unit
+private fun OtpInputSection(
+    otpValue: String,
+    onOtpValueChange: (String) -> Unit,
+    phoneNumber: String,
+    onResend: () -> Unit,
+    onVerify: () -> Unit
 ) {
-    Surface(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.errorContainer,
-        shape = RoundedCornerShape(8.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Text(
+            text = "Enter the 6-digit verification code sent to:",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        
+        Text(
+            text = "+63$phoneNumber",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        
+        // OTP input field
+        OutlinedTextField(
+            value = otpValue,
+            onValueChange = onOtpValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Verification Code") },
+            placeholder = { Text("6-digit code") },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done
+            ),
+            leadingIcon = { Icon(Icons.Default.Pin, "Verification Code") },
+            singleLine = true,
+            trailingIcon = {
+                if (otpValue.length == 6) {
+                    Icon(
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Valid Code",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        )
+        
+        // Character counter
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
         ) {
             Text(
-                text = "reCAPTCHA Verification Issue",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.error
+                text = "${otpValue.length}/6",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            
-            Text(
-                text = "We're having trouble with the reCAPTCHA verification. This sometimes happens due to network issues or security settings.",
-                style = MaterialTheme.typography.bodyMedium
+        }
+        
+        // Verify button
+        Button(
+            onClick = onVerify,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = otpValue.length == 6
+        ) {
+            Icon(Icons.Default.Check, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Verify")
+        }
+        
+        // Resend link
+        TextButton(
+            onClick = onResend,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            Icon(
+                Icons.Default.Refresh,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
             )
-            
-            Button(
-                onClick = onBypass,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier.align(Alignment.End)
-            ) {
-                Text("Try Direct Verification")
-            }
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Resend Code")
         }
     }
 }
 
-// Then update the PhoneVerificationDialog function:
-
+// Fix the PhoneVerificationDialog to properly handle the reCAPTCHA retry
 @Composable
 fun PhoneVerificationDialog(
     phoneNumber: String,
     onDismiss: () -> Unit,
     viewModel: PhoneAuthViewModel,
-    activity: Activity
+    activity: Activity,
+    verificationAttemptedRef: MutableState<Boolean> = remember { mutableStateOf(false) },
+    showVerifyPhoneDialogRef: MutableState<Boolean> = remember { mutableStateOf(false) },
+    actuallyShowVerifyDialogRef: MutableState<Boolean> = remember { mutableStateOf(false) }
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var otpValue by remember { mutableStateOf("") }
@@ -1103,13 +1372,80 @@ fun PhoneVerificationDialog(
             }
         ) 
     }
-    var isPhoneNumberEntered by remember { mutableStateOf(phoneNumber.isNotEmpty()) }
+    var isPhoneNumberEntered by remember { mutableStateOf(phoneNumber.isNotBlank()) }
     var confirmingCancellation by remember { mutableStateOf(false) }
     var showingRecaptchaMessage by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     
-    // Cancel dialog handler
+    // Optimization: Memoize the formatted phone number to avoid repeated string operations
+    val formattedPhoneNumber by remember(localPhoneNumber) {
+        derivedStateOf {
+            if (localPhoneNumber.startsWith("+63")) {
+                localPhoneNumber
+            } else {
+                "+63$localPhoneNumber"
+            }
+        }
+    }
+    
+    // Memory optimization: Dispose WebView when dialog is dismissed
+    DisposableEffect(Unit) {
+        onDispose {
+            // Clean up any resources when dialog is closed
+            if (uiState is PhoneAuthState.RateLimited || uiState is PhoneAuthState.Error) {
+                viewModel.resetState()
+            }
+        }
+    }
+    
+    // Handle dialog dismissal
     BackHandler(enabled = uiState is PhoneAuthState.CodeSent || uiState is PhoneAuthState.Loading) {
         confirmingCancellation = true
+    }
+    
+    // Monitor state transitions with stable key extraction
+    val stateKey = when (uiState) {
+        is PhoneAuthState.RecaptchaError -> "recaptcha_error"
+        is PhoneAuthState.Error -> "error:${(uiState as PhoneAuthState.Error).message}"
+        is PhoneAuthState.RateLimited -> "rate_limited:${(uiState as PhoneAuthState.RateLimited).expireTimeMillis}"
+        is PhoneAuthState.CodeSent -> "code_sent"
+        is PhoneAuthState.Success -> "success"
+        is PhoneAuthState.Loading -> "loading"
+        else -> "initial"
+    }
+    
+    // Monitor state transitions with improved performance
+    LaunchedEffect(stateKey) {
+        when (uiState) {
+            is PhoneAuthState.RecaptchaError -> {
+                showingRecaptchaMessage = true
+            }
+            is PhoneAuthState.Error -> {
+                val errorMessage = (uiState as PhoneAuthState.Error).message
+                // Common pattern matching for reCAPTCHA-related errors 
+                if (errorMessage.contains("reCAPTCHA", ignoreCase = true) ||
+                    errorMessage.contains("INVALID_APP_CREDENTIAL", ignoreCase = true) ||
+                    errorMessage.contains("Error: 39", ignoreCase = true) ||
+                    errorMessage.contains("missing app identifier", ignoreCase = true)) {
+                    showingRecaptchaMessage = true
+                }
+            }
+            is PhoneAuthState.Success -> {
+                // Reset verification flags on success
+                verificationAttemptedRef.value = false
+                showVerifyPhoneDialogRef.value = false
+                actuallyShowVerifyDialogRef.value = false
+                // Delay dismiss to allow success animation/feedback
+                delay(800)
+                onDismiss()
+            }
+            else -> {
+                // Reset recaptcha message flag for non-error states
+                if (uiState !is PhoneAuthState.Loading) {
+                    showingRecaptchaMessage = false
+                }
+            }
+        }
     }
     
     // Cancellation confirmation dialog
@@ -1123,6 +1459,8 @@ fun PhoneVerificationDialog(
                     onClick = {
                         confirmingCancellation = false
                         viewModel.resetState()
+                        showVerifyPhoneDialogRef.value = false
+                        actuallyShowVerifyDialogRef.value = false
                         onDismiss()
                     }
                 ) {
@@ -1137,27 +1475,96 @@ fun PhoneVerificationDialog(
         )
     }
     
-    // reCAPTCHA info dialog
+    // Special dialog for reCAPTCHA issues with improved error information
     if (showingRecaptchaMessage) {
-        RecaptchaInfoDialog(
-            phoneNumber = localPhoneNumber,
-            onContinue = {
-                showingRecaptchaMessage = false
-                // Ensure the phone number starts with +63
-                val formattedNumber = if (localPhoneNumber.startsWith("+63")) {
-                    localPhoneNumber
-                } else {
-                    "+63${localPhoneNumber}"
-                }
-                viewModel.startPhoneNumberVerification(formattedNumber, activity, "GearTick")
+        AlertDialog(
+            onDismissRequest = { /* Don't dismiss on outside click */ },
+            title = { 
+                Text(
+                    text = "reCAPTCHA Verification Issue", 
+                    style = MaterialTheme.typography.titleMedium
+                ) 
             },
-            onBack = {
-                showingRecaptchaMessage = false
+            text = { 
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    
+                    Text(
+                        text = "We're having trouble with the security verification. This is often due to browser security settings or network issues.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    // Additional troubleshooting info
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Troubleshooting tips:",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text("• Try using Chrome (most reliable)", style = MaterialTheme.typography.bodySmall)
+                            Text("• Disable VPN, proxy or ad blockers", style = MaterialTheme.typography.bodySmall)
+                            Text("• Try on cellular data instead of WiFi", style = MaterialTheme.typography.bodySmall)
+                            Text("• Clear browser cookies and cache", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showingRecaptchaMessage = false
+                        scope.launch {
+                            try {
+                                // Use the memoized phone number
+                                delay(500) // Short delay to avoid race conditions
+                                viewModel.retryWithoutRecaptcha(formattedPhoneNumber, activity)
+                            } catch (e: Exception) {
+                                Log.e("ProfileTab", "Error during retry: ${e.message}")
+                                // If retry fails, reset to initial state after a delay
+                                delay(500)
+                                viewModel.resetState()
+                            }
+                        }
+                    }
+                ) {
+                    Text("Try Alternative Method")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { 
+                        showingRecaptchaMessage = false
+                        viewModel.resetState()
+                    }
+                ) {
+                    Text("Cancel")
+                }
             }
         )
+        return
     }
-
-    // Main verification dialog
+    
+    // Main verification dialog - optimized
     AlertDialog(
         onDismissRequest = {
             if (uiState is PhoneAuthState.CodeSent || uiState is PhoneAuthState.Loading) {
@@ -1183,22 +1590,55 @@ fun PhoneVerificationDialog(
                 if (!isPhoneNumberEntered || uiState is PhoneAuthState.Initial) {
                     PhoneNumberInputSection(
                         phoneNumber = localPhoneNumber,
-                        onPhoneNumberChange = { localPhoneNumber = it }
+                        onPhoneNumberChange = { 
+                            // Improved validation - only accept digits and limit to 10 digits
+                            val filtered = it.replace(Regex("[^0-9]"), "")
+                            if (filtered.length <= 10) {
+                                localPhoneNumber = filtered
+                            }
+                        }
                     )
                 } else {
                     VerificationContent(
                         uiState = uiState,
                         otpValue = otpValue,
-                        onOtpChange = { otpValue = it },
+                        onOtpChange = { 
+                            // Only accept 6 digits
+                            if (it.length <= 6 && it.all { char -> char.isDigit() }) {
+                                otpValue = it
+                            }
+                        },
                         phoneNumber = localPhoneNumber,
-                        onRetry = { showingRecaptchaMessage = true },
+                        onRetry = { 
+                            scope.launch {
+                                try {
+                                    if (isPhoneNumberEntered) {
+                                        // Use the memoized phone number
+                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("ProfileTab", "Error during retry: ${e.message}")
+                                    showingRecaptchaMessage = true
+                                }
+                            }
+                        },
                         onRecaptchaBypass = {
-                            viewModel.retryWithoutRecaptcha("+63$localPhoneNumber", activity)
+                            scope.launch {
+                                try {
+                                    viewModel.retryWithoutRecaptcha(formattedPhoneNumber, activity)
+                                } catch (e: Exception) {
+                                    Log.e("ProfileTab", "Error during recaptcha bypass: ${e.message}")
+                                    viewModel.resetState()
+                                    showingRecaptchaMessage = true
+                                }
+                            }
                         },
                         onDismiss = {
                             viewModel.resetState()
                             onDismiss()
-                        }
+                        },
+                        viewModel = viewModel,
+                        verificationAttemptedRef = verificationAttemptedRef
                     )
                 }
             }
@@ -1210,7 +1650,16 @@ fun PhoneVerificationDialog(
                         onClick = {
                             if (localPhoneNumber.length >= 9) {
                                 isPhoneNumberEntered = true
-                                showingRecaptchaMessage = true
+                                
+                                // Start verification when user clicks Continue
+                                scope.launch {
+                                    try {
+                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                    } catch (e: Exception) {
+                                        Log.e("ProfileTab", "Error during verification start: ${e.message}")
+                                        showingRecaptchaMessage = true
+                                    }
+                                }
                             }
                         },
                         enabled = localPhoneNumber.length >= 9
@@ -1220,7 +1669,12 @@ fun PhoneVerificationDialog(
                 }
                 uiState is PhoneAuthState.CodeSent -> {
                     Button(
-                        onClick = { viewModel.verifyPhoneNumberWithCode(otpValue) },
+                        onClick = { 
+                            if (otpValue.length == 6) {
+                                Log.d("PhoneVerificationDialog", "Verifying code: $otpValue")
+                                viewModel.verifyPhoneNumberWithCode(otpValue) 
+                            }
+                        },
                         enabled = otpValue.length == 6
                     ) {
                         Text("Verify")
@@ -1233,7 +1687,24 @@ fun PhoneVerificationDialog(
                 }
                 uiState is PhoneAuthState.Error -> {
                     Button(
-                        onClick = { showingRecaptchaMessage = true }
+                        onClick = { 
+                            val errorMessage = (uiState as PhoneAuthState.Error).message
+                            if (errorMessage.contains("reCAPTCHA", ignoreCase = true) ||
+                                errorMessage.contains("INVALID_APP_CREDENTIAL", ignoreCase = true) ||
+                                errorMessage.contains("Error: 39", ignoreCase = true)) {
+                                showingRecaptchaMessage = true
+                            } else {
+                                // For other errors, simply retry
+                                scope.launch {
+                                    try {
+                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                    } catch (e: Exception) {
+                                        Log.e("ProfileTab", "Error during retry: ${e.message}")
+                                        showingRecaptchaMessage = true
+                                    }
+                                }
+                            }
+                        }
                     ) {
                         Text("Try Again")
                     }
@@ -1281,11 +1752,10 @@ private fun RecaptchaInfoDialog(
                 Text(
                     "You'll be redirected to Google's reCAPTCHA verification."
                 )
-                
                 Text(
                     "After verification, GearTick will send a code to +63 $phoneNumber."
                 )
-                
+
                 Text(
                     "Please complete the verification when prompted.",
                     fontWeight = FontWeight.Bold
@@ -1305,50 +1775,70 @@ private fun RecaptchaInfoDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PhoneNumberInputSection(
     phoneNumber: String,
     onPhoneNumberChange: (String) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            text = "Enter your Philippine mobile number:",
-            style = MaterialTheme.typography.bodyMedium
+            text = "Enter your phone number",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         
-        OutlinedTextField(
-            value = phoneNumber,
-            onValueChange = { value ->
-                // Only accept digits and limit to 10 digits
-                if (value.all { it.isDigit() } && value.length <= 10) {
-                    // Only store the number part without the prefix
-                    val cleanNumber = value.replace(Regex("^\\+?63"), "")
-                    if (cleanNumber.isEmpty() || cleanNumber.startsWith("9")) {
-                        onPhoneNumberChange(cleanNumber)
-                    }
-                }
-            },
-            visualTransformation = PhilippinesPhoneNumberTransformation(),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Phone,
-                imeAction = ImeAction.Done
-            ),
-            leadingIcon = {
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Country code prefix
+            Surface(
+                modifier = Modifier
+                    .padding(end = 8.dp)
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.outline,
+                        shape = MaterialTheme.shapes.small
+                    ),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
                 Text(
                     text = "+63",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = 16.dp)
+                    modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp),
+                    style = MaterialTheme.typography.bodyLarge
                 )
-            },
-            label = { Text("Phone Number") },
-            placeholder = { Text("9XXXXXXXXX") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
+            }
+            
+            // Phone number input - use OutlinedTextField with basic properties to avoid experimental API
+            OutlinedTextField(
+                value = phoneNumber,
+                onValueChange = onPhoneNumberChange,
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("9xxxxxxxxx") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
+            )
+        }
+        
+        // Validation message
+        AnimatedVisibility(visible = phoneNumber.isNotEmpty() && phoneNumber.length < 9) {
+            Text(
+                text = "Please enter a valid phone number (9 or 10 digits)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
         
         Text(
-            text = "Enter a 10-digit number starting with 9",
-            style = MaterialTheme.typography.bodySmall
+            text = "We'll send a verification code to this number",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -1368,48 +1858,6 @@ private fun LoadingSection() {
             text = "Verifying...",
             style = MaterialTheme.typography.bodyMedium
         )
-    }
-}
-
-@Composable
-private fun OtpInputSection(
-    otpValue: String,
-    onOtpValueChange: (String) -> Unit,
-    phoneNumber: String,
-    onResend: () -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "GearTick sent a code to +63 $phoneNumber",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold
-        )
-        
-        OutlinedTextField(
-            value = otpValue,
-            onValueChange = { 
-                if (it.length <= 6 && it.all { char -> char.isDigit() }) {
-                    onOtpValueChange(it)
-                }
-            },
-            label = { Text("Code") },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.NumberPassword,
-                imeAction = ImeAction.Done
-            ),
-            placeholder = { Text("6-digit code") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            TextButton(onClick = onResend) {
-                Text("Resend Code")
-            }
-        }
     }
 }
 
@@ -1466,13 +1914,11 @@ private fun ErrorSection(
                     style = MaterialTheme.typography.titleMedium
                 )
             }
-            
             Text(
                 text = errorMessage,
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodyMedium
             )
-            
             Button(
                 onClick = onRetry,
                 modifier = Modifier.align(Alignment.End),
@@ -1485,5 +1931,45 @@ private fun ErrorSection(
         }
     }
 }
+
+@Composable
+private fun RecaptchaErrorSection(
+    onBypass: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(48.dp)
+        )
+        
+        Text(
+            text = "reCAPTCHA Verification Issue",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.error
+        )
+        
+        Text(
+            text = "We're having trouble with the security verification. This is often due to browser security settings or network issues.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center
+        )
+        
+        Button(
+            onClick = { onBypass() },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Text("Try Alternative Verification")
+        }
+    }
+}
+
 
 

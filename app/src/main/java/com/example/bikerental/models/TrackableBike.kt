@@ -45,30 +45,4 @@ data class TrackableBike(
     @get:Exclude
     val position: LatLng
         get() = LatLng(latitude, longitude)
-}
-
-// Bike ride tracking data
-data class BikeRide(
-    val rideId: String = "",
-    val bikeId: String = "",
-    val userId: String = "",
-    val startTime: Long = 0,
-    val endTime: Long = 0,
-    val startLocation: BikeLocation = BikeLocation(),
-    val endLocation: BikeLocation = BikeLocation(),
-    val route: List<BikeLocation> = emptyList(),
-    val distance: Double = 0.0,
-    val cost: Double = 0.0,
-    val status: String = "active" // active, completed, cancelled
-)
-
-// Location point for tracking
-data class BikeLocation(
-    val latitude: Double = 0.0,
-    val longitude: Double = 0.0,
-    val timestamp: Long = 0
-) {
-    @get:Exclude
-    val position: LatLng
-        get() = LatLng(latitude, longitude)
 } 

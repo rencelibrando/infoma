@@ -32,9 +32,25 @@ class AuthViewModel : ViewModel() {
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser
 
+    // Add isCurrentUserAdmin property if it doesn't exist
+    private val _isCurrentUserAdmin = MutableStateFlow(false)
+    val isCurrentUserAdmin: StateFlow<Boolean> = _isCurrentUserAdmin
+    
+    // Update user admin status whenever the current user changes
     init {
-        // Check if user is already signed in
-        checkCurrentUser()
+        viewModelScope.launch {
+            currentUser.collect { user ->
+                _isCurrentUserAdmin.value = user?.isAdmin == true
+            }
+        }
+    }
+
+    init {
+        // Important: We no longer automatically check or modify the current auth state on init
+        // This prevents unexpected redirects during login input
+        
+        // Initialize admin account silently in the background without affecting auth state
+        initializeAdminAccountSilently()
     }
 
     private fun checkCurrentUser() {
@@ -43,8 +59,9 @@ class AuthViewModel : ViewModel() {
                 try {
                     val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
                     if (userDoc.exists()) {
-                        _currentUser.value = userDoc.toObject(User::class.java)
-                        _authState.value = AuthState.Authenticated
+                        val user = userDoc.toObject(User::class.java)
+                        _currentUser.value = user
+                        _authState.value = AuthState.Authenticated(user!!)
                     } else {
                         // User exists in Firebase Auth but not in Firestore
                         _authState.value = AuthState.NeedsAdditionalInfo(
@@ -57,6 +74,97 @@ class AuthViewModel : ViewModel() {
                     Log.e("AuthViewModel", "Error fetching user data", e)
                     _authState.value = AuthState.Error("Failed to fetch user data")
                 }
+            }
+        }
+    }
+
+    // Separate method to initialize admin account without affecting UI state at all
+    private fun initializeAdminAccountSilently() {
+        viewModelScope.launch {
+            try {
+                Log.d("AuthViewModel", "Silently checking admin account")
+                // Use a separate Firebase Auth instance that doesn't trigger auth state changes
+                val tempAuth = FirebaseAuth.getInstance()
+                val tempCurrentUser = tempAuth.currentUser
+                
+                // Query Firestore directly without affecting auth state
+                val adminQuery = db.collection("users")
+                    .whereEqualTo("email", "admin@bikerental.com")
+                    .whereEqualTo("isAdmin", true)
+                    .limit(1)
+                    .get()
+                    .await()
+                
+                if (adminQuery.isEmpty) {
+                    Log.d("AuthViewModel", "Admin account does not exist, creating silently in background")
+                    // Do not update _authState at all during this process
+                    
+                    try {
+                        // Try to sign in to check if account exists but lacks admin flag
+                        tempAuth.signInWithEmailAndPassword("admin@bikerental.com", "Admin-123").await()
+                        
+                        // Account exists in Auth, just add admin flag in Firestore if needed
+                        tempAuth.currentUser?.let { firebaseUser ->
+                            val adminUser = User(
+                                id = firebaseUser.uid,
+                                email = "admin@bikerental.com",
+                                fullName = "System Administrator",
+                                createdAt = System.currentTimeMillis(),
+                                isAdmin = true
+                            )
+                            
+                            // Quietly update Firestore, don't affect auth state
+                            db.collection("users").document(firebaseUser.uid)
+                                .set(adminUser)
+                                .await()
+                            
+                            Log.d("AuthViewModel", "Admin account updated silently in Firestore")
+                        }
+                        
+                        // Silently sign out from the temp auth instance
+                        tempAuth.signOut()
+                    } catch (e: Exception) {
+                        // Silent fail - just log
+                        Log.d("AuthViewModel", "Admin account doesn't exist in Auth, trying to create")
+                        try {
+                            // Create new account
+                            val authResult = tempAuth.createUserWithEmailAndPassword("admin@bikerental.com", "Admin-123").await()
+                            
+                            authResult.user?.let { firebaseUser ->
+                                val adminUser = User(
+                                    id = firebaseUser.uid,
+                                    email = "admin@bikerental.com",
+                                    fullName = "System Administrator",
+                                    createdAt = System.currentTimeMillis(),
+                                    isAdmin = true
+                                )
+                                
+                                // Quietly update Firestore
+                                db.collection("users").document(firebaseUser.uid)
+                                    .set(adminUser)
+                                    .await()
+                                
+                                Log.d("AuthViewModel", "Admin account created silently")
+                            }
+                            
+                            // Silently sign out
+                            tempAuth.signOut()
+                        } catch (createEx: Exception) {
+                            // Silent fail - just log, don't update UI state
+                            Log.e("AuthViewModel", "Failed to create admin account silently", createEx)
+                        }
+                    }
+                } else {
+                    Log.d("AuthViewModel", "Admin account already exists")
+                }
+                
+                // Restore the original user if there was one
+                if (tempCurrentUser != null && tempAuth.currentUser?.uid != tempCurrentUser.uid) {
+                    tempAuth.updateCurrentUser(tempCurrentUser).await()
+                }
+            } catch (e: Exception) {
+                // Silent fail - just log
+                Log.e("AuthViewModel", "Silent admin check failed", e)
             }
         }
     }
@@ -147,7 +255,7 @@ class AuthViewModel : ViewModel() {
                             
                             Log.d("AuthViewModel", "User created successfully")
                             _currentUser.value = user
-                            _authState.value = AuthState.Authenticated
+                            _authState.value = AuthState.Authenticated(user)
                         } catch (e: Exception) {
                             Log.e("AuthViewModel", "Failed to save user data", e)
                             _authState.value = AuthState.Error("Failed to save user data: ${e.localizedMessage}")
@@ -181,7 +289,7 @@ class AuthViewModel : ViewModel() {
                             val updatedUserDoc = db.collection("users").document(firebaseUser.uid).get().await()
                             val updatedUser = updatedUserDoc.toObject(User::class.java)
                             _currentUser.value = updatedUser
-                            _authState.value = AuthState.Authenticated
+                            _authState.value = AuthState.Authenticated(updatedUser!!)
                             Log.d("AuthViewModel", "User updated successfully")
                         } catch (e: Exception) {
                             Log.e("AuthViewModel", "Failed to update user data", e)
@@ -254,7 +362,7 @@ class AuthViewModel : ViewModel() {
                             .await()
                         
                         _currentUser.value = user
-                        _authState.value = AuthState.Authenticated
+                        _authState.value = AuthState.Authenticated(user)
                     } catch (e: Exception) {
                         Log.e("AuthViewModel", "Failed to save user data", e)
                         _authState.value = AuthState.Error("Failed to save user data: ${e.localizedMessage}")
@@ -286,8 +394,9 @@ class AuthViewModel : ViewModel() {
                 authResult.user?.let { firebaseUser ->
                     val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
                     if (userDoc.exists()) {
-                        _currentUser.value = userDoc.toObject(User::class.java)
-                        _authState.value = AuthState.Authenticated
+                        val user = userDoc.toObject(User::class.java)
+                        _currentUser.value = user
+                        _authState.value = AuthState.Authenticated(user!!)
                     } else {
                         _authState.value = AuthState.Error("User data not found")
                     }
@@ -297,6 +406,100 @@ class AuthViewModel : ViewModel() {
                 _authState.value = AuthState.Error(e.message ?: "Sign in failed")
             }
         }
+    }
+
+    /**
+     * Sign in as an admin user with email and password
+     * This method checks if the user exists and has admin privileges
+     */
+    fun signInAsAdmin(email: String, password: String) {
+        viewModelScope.launch {
+            try {
+                Log.d("AuthViewModel", "Attempting admin sign in with email: $email")
+                _authState.value = AuthState.Loading
+                
+                // Special handling for the default admin account
+                val isDefaultAdmin = email.trim().equals("admin@bikerental.com", ignoreCase = true)
+                Log.d("AuthViewModel", "Is default admin account: $isDefaultAdmin")
+                
+                val authResult = auth.signInWithEmailAndPassword(email, password).await()
+                
+                authResult.user?.let { firebaseUser ->
+                    Log.d("AuthViewModel", "Firebase auth successful for user: ${firebaseUser.uid}")
+                    val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
+                    
+                    if (isDefaultAdmin) {
+                        // For the default admin account, always ensure admin privileges
+                        val adminUser = if (userDoc.exists()) {
+                            Log.d("AuthViewModel", "Admin document exists, updating with admin privileges")
+                            // Get existing user data
+                            val existingUser = userDoc.toObject(User::class.java)
+                            // Create a copy with isAdmin set to true
+                            existingUser?.copy(isAdmin = true) ?: User(
+                                id = firebaseUser.uid,
+                                email = email,
+                                fullName = "System Administrator",
+                                createdAt = System.currentTimeMillis(),
+                                isAdmin = true
+                            )
+                        } else {
+                            Log.d("AuthViewModel", "Admin document doesn't exist, creating new one")
+                            // Create new admin user
+                            User(
+                                id = firebaseUser.uid,
+                                email = email,
+                                fullName = "System Administrator",
+                                createdAt = System.currentTimeMillis(),
+                                isAdmin = true
+                            )
+                        }
+                        
+                        // Update or create the admin document
+                        db.collection("users").document(firebaseUser.uid)
+                            .set(adminUser)
+                            .await()
+                        
+                        Log.d("AuthViewModel", "Successfully set admin user in Firestore: ${adminUser.id}, isAdmin=${adminUser.isAdmin}")
+                        
+                        _currentUser.value = adminUser
+                        _authState.value = AuthState.Authenticated(adminUser)
+                        Log.d("AuthViewModel", "Admin login successful (default admin account)")
+                    } else {
+                        // Regular admin user flow
+                        if (userDoc.exists()) {
+                            val user = userDoc.toObject(User::class.java)
+                            Log.d("AuthViewModel", "User document exists, isAdmin=${user?.isAdmin}")
+                            
+                            if (user?.isAdmin == true) {
+                                _currentUser.value = user
+                                _authState.value = AuthState.Authenticated(user)
+                                Log.d("AuthViewModel", "Admin login successful")
+                            } else {
+                                Log.d("AuthViewModel", "User is not an admin, access denied")
+                                _authState.value = AuthState.Error("Access denied: Admin privileges required")
+                                signOut()
+                            }
+                        } else {
+                            Log.d("AuthViewModel", "User document not found in Firestore")
+                            _authState.value = AuthState.Error("User data not found")
+                        }
+                    }
+                } ?: run {
+                    Log.e("AuthViewModel", "Firebase auth returned null user")
+                    _authState.value = AuthState.Error("Authentication failed: No user returned")
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Admin sign in failed", e)
+                _authState.value = AuthState.Error("Invalid admin credentials: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Check if the current user has admin privileges
+     */
+    fun isCurrentUserAdmin(): Boolean {
+        return _currentUser.value?.isAdmin == true
     }
 
     fun completeGoogleSignUp(phone: String) {
@@ -322,7 +525,7 @@ class AuthViewModel : ViewModel() {
                         
                         // Update current user and authentication state
                         _currentUser.value = user
-                        _authState.value = AuthState.Authenticated
+                        _authState.value = AuthState.Authenticated(user)
                     } ?: run {
                         _authState.value = AuthState.Error("User not found")
                         signOut() // Sign out if user data is not available
@@ -384,6 +587,78 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error during permission clearing and sign out", e)
                 _authState.value = AuthState.Error("Failed to clear permissions and sign out")
+            }
+        }
+    }
+
+    // Add a function to force create and set up admin account
+    fun forceCreateAdminAccount() {
+        viewModelScope.launch {
+            try {
+                _authState.value = AuthState.Loading
+                
+                // Try to sign in with admin credentials first
+                try {
+                    val authResult = auth.signInWithEmailAndPassword("admin@bikerental.com", "Admin-123").await()
+                    
+                    // Update the user document with admin privileges
+                    authResult.user?.let { firebaseUser ->
+                        // Create admin user object with isAdmin = true
+                        val adminUser = User(
+                            id = firebaseUser.uid,
+                            email = "admin@bikerental.com",
+                            fullName = "System Administrator",
+                            createdAt = System.currentTimeMillis(),
+                            isAdmin = true
+                        )
+                        
+                        // Force write to Firestore with admin privileges
+                        db.collection("users").document(firebaseUser.uid)
+                            .set(adminUser)
+                            .await()
+                        
+                        Log.d("AuthViewModel", "Admin account updated with admin privileges")
+                        
+                        // Sign in as admin and update auth state
+                        _currentUser.value = adminUser
+                        _authState.value = AuthState.Authenticated(adminUser)
+                    }
+                } catch (e: Exception) {
+                    Log.e("AuthViewModel", "Failed to sign in as admin: ${e.message}")
+                    
+                    // Create a new admin account if sign-in failed
+                    try {
+                        val authResult = auth.createUserWithEmailAndPassword("admin@bikerental.com", "Admin-123").await()
+                        
+                        authResult.user?.let { firebaseUser ->
+                            // Create admin user with admin privileges
+                            val adminUser = User(
+                                id = firebaseUser.uid,
+                                email = "admin@bikerental.com",
+                                fullName = "System Administrator",
+                                createdAt = System.currentTimeMillis(),
+                                isAdmin = true
+                            )
+                            
+                            // Write to Firestore
+                            db.collection("users").document(firebaseUser.uid)
+                                .set(adminUser)
+                                .await()
+                            
+                            Log.d("AuthViewModel", "New admin account created with admin privileges")
+                            
+                            // Update auth state
+                            _currentUser.value = adminUser
+                            _authState.value = AuthState.Authenticated(adminUser)
+                        }
+                    } catch (createEx: Exception) {
+                        Log.e("AuthViewModel", "Failed to create admin account: ${createEx.message}")
+                        _authState.value = AuthState.Error("Failed to set up admin account: ${createEx.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error in forceCreateAdminAccount", e)
+                _authState.value = AuthState.Error("Error creating admin account: ${e.message}")
             }
         }
     }

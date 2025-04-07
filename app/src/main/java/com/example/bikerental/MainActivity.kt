@@ -1,6 +1,6 @@
 package com.example.bikerental
 
-import GearTickLoginScreen
+import com.example.bikerental.screens.login.GearTickLoginScreen
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,16 +31,32 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
+import com.example.bikerental.screens.admin.AdminDashboardScreen
+import com.example.bikerental.navigation.Screen
+import androidx.lifecycle.ViewModelProvider
+import android.util.Log
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavHostController
+import com.example.bikerental.models.AuthState
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private val auth = FirebaseAuth.getInstance()
     private val phoneAuthViewModel: PhoneAuthViewModel by viewModels()
+    private lateinit var authViewModel: AuthViewModel
+    
+    // Move isLoginScreenActive to be a class property with a default value
+    private var isLoginScreenActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Initialize AuthViewModel - do this after setting up auth state listener
+        authViewModel = ViewModelProvider(this)[AuthViewModel::class.java]
 
         // Initialize FusedLocationProviderClient
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -52,41 +68,34 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // Handle auth state changes
-        auth.addAuthStateListener { firebaseAuth ->
-            firebaseAuth.currentUser?.let { user ->
-                phoneAuthViewModel.updateAuthState(user)
-            }
-        }
-
         setContent {
             BikerentalTheme {
                 var isLoading by remember { mutableStateOf(true) }
                 var showSplash by remember { mutableStateOf(true) }
                 var isLoggedIn by remember { mutableStateOf(false) }
-
-                // Handle auth state changes
-                DisposableEffect(Unit) {
-                    val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-                        isLoggedIn = firebaseAuth.currentUser != null
-                        firebaseAuth.currentUser?.let { user ->
-                            phoneAuthViewModel.updateAuthState(user)
-                        }
-                    }
-                    auth.addAuthStateListener(authStateListener)
-                    onDispose {
-                        auth.removeAuthStateListener(authStateListener)
-                    }
-                }
-
+                
                 // Initial auth check
                 LaunchedEffect(Unit) {
-                    isLoggedIn = auth.currentUser != null
+                    val currentUser = auth.currentUser
+                    // Allow automatic login for all users, including admins
+                    isLoggedIn = currentUser != null
                     isLoading = false
                 }
 
                 val authState by phoneAuthViewModel.uiState.collectAsState()
-
+                val userIsAdmin by authViewModel.isCurrentUserAdmin.collectAsState(initial = false)
+                
+                val startDestination = if (isLoggedIn) {
+                    if (userIsAdmin) {
+                        Screen.AdminDashboard.route
+                    } else {
+                        Screen.Home.route
+                    }
+                } else {
+                    Screen.Initial.route
+                }
+                Log.d("MainActivity", "Calculated start destination: $startDestination")
+                
                 if (isLoading) {
                     LoadingScreen()
                 } else {
@@ -94,7 +103,9 @@ class MainActivity : ComponentActivity() {
                         isLoggedIn = isLoggedIn,
                         showSplash = showSplash,
                         onSplashComplete = { showSplash = false },
-                        fusedLocationClient = fusedLocationClient
+                        fusedLocationClient = fusedLocationClient,
+                        onLoginScreenChange = { isActive -> isLoginScreenActive = isActive },
+                        onLoginStateChange = { loggedIn -> isLoggedIn = loggedIn }
                     )
                 }
             }
@@ -124,61 +135,130 @@ private fun NavigationContent(
     isLoggedIn: Boolean,
     showSplash: Boolean,
     onSplashComplete: () -> Unit,
-    fusedLocationClient: FusedLocationProviderClient
+    fusedLocationClient: FusedLocationProviderClient,
+    onLoginScreenChange: (Boolean) -> Unit,
+    onLoginStateChange: (Boolean) -> Unit
 ) {
     val navController = rememberNavController()
-
+    val authViewModel = viewModel<AuthViewModel>()
+    val currentUser by authViewModel.currentUser.collectAsState()
+    val userIsAdmin by authViewModel.isCurrentUserAdmin.collectAsState(initial = false)
+    
+    // Track login screen state locally
+    var isLoginScreenActive by remember { mutableStateOf(false) }
+    
+    // Update the parent whenever local state changes
+    LaunchedEffect(isLoginScreenActive) {
+        onLoginScreenChange(isLoginScreenActive)
+    }
+    
+    // Determine start destination based on login state and user role
+    val startDestination = if (isLoggedIn) {
+        if (userIsAdmin) {
+            Screen.AdminDashboard.route
+        } else {
+            Screen.Home.route
+        }
+    } else {
+        Screen.Initial.route
+    }
+    
     NavHost(
         navController = navController,
-        startDestination = if (isLoggedIn) "home" else "initial",
+        startDestination = startDestination,
         modifier = Modifier.fillMaxSize()
     ) {
-        composable("initial") {
+        composable(Screen.Initial.route) {
+            // Update login screen state locally
+            isLoginScreenActive = true
+            Log.d("Navigation", "Rendering initial login screen")
             GearTickLoginScreen(navController)
         }
         
-        composable("signIn") {
+        composable(Screen.SignIn.route) {
+            // Update login screen state locally
+            isLoginScreenActive = true
+            Log.d("Navigation", "Rendering sign in screen")
+            
             if (isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    navController.navigate("home") {
-                        popUpTo("initial") { inclusive = true }
+                    Log.d("Navigation", "Already logged in, redirecting based on user role")
+                    if (userIsAdmin) {
+                        navController.navigate(Screen.AdminDashboard.route) {
+                            popUpTo(Screen.Initial.route) { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Initial.route) { inclusive = true }
+                        }
                     }
                 }
             }
             AccessAccountScreen(navController)
         }
         
-        composable("signUp") {
+        composable(Screen.SignUp.route) {
+            // Update login screen state locally
+            isLoginScreenActive = true
+            Log.d("Navigation", "Rendering sign up screen")
+            
             if (isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    navController.navigate("home") {
-                        popUpTo("initial") { inclusive = true }
+                    Log.d("Navigation", "Already logged in, redirecting based on user role")
+                    if (userIsAdmin) {
+                        navController.navigate(Screen.AdminDashboard.route) {
+                            popUpTo(Screen.Initial.route) { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(Screen.Initial.route) { inclusive = true }
+                        }
                     }
                 }
             }
             SignUpScreen(navController)
         }
         
-        composable("home") {
-            if (!isLoggedIn) {
-                LaunchedEffect(Unit) {
-                    navController.navigate("initial") {
-                        popUpTo("home") { inclusive = true }
-                    }
-                }
-            }
+        composable(Screen.Home.route) {
+            // Update login screen state locally
+            isLoginScreenActive = false
+            Log.d("Navigation", "Rendering home screen")
+            
             if (showSplash && isLoggedIn) {
                 SplashScreen(onSplashComplete)
             } else {
                 HomeScreen(navController, fusedLocationClient)
             }
         }
+
+        // Admin Dashboard
+        composable(Screen.AdminDashboard.route) {
+            // Update login screen state locally
+            isLoginScreenActive = false
+            Log.d("Navigation", "Rendering admin dashboard")
+            
+            // Only allow access if logged in as an admin
+            if (isLoggedIn && userIsAdmin) {
+                AdminDashboardScreen(navController)
+            } else {
+                LaunchedEffect(Unit) {
+                    Log.d("Navigation", "Not logged in as admin, redirecting to initial")
+                    navController.navigate(Screen.Initial.route) {
+                        popUpTo(Screen.AdminDashboard.route) { inclusive = true }
+                    }
+                }
+            }
+        }
         
-        composable("profile") {
+        composable(Screen.Profile.route) {
+            // Update login screen state locally
+            isLoginScreenActive = false
+            
             if (!isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    navController.navigate("initial") {
-                        popUpTo("profile") { inclusive = true }
+                    Log.d("Navigation", "Not logged in, redirecting to initial")
+                    navController.navigate(Screen.Initial.route) {
+                        popUpTo(Screen.Profile.route) { inclusive = true }
                     }
                 }
             }
@@ -186,15 +266,58 @@ private fun NavigationContent(
             ProfileScreen(navController, viewModel)
         }
         
-        composable("editProfile") {
+        composable(Screen.EditProfile.route) {
+            // Update login screen state locally
+            isLoginScreenActive = false
+            
             if (!isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    navController.navigate("initial") {
-                        popUpTo("editProfile") { inclusive = true }
+                    Log.d("Navigation", "Not logged in, redirecting to initial")
+                    navController.navigate(Screen.Initial.route) {
+                        popUpTo(Screen.EditProfile.route) { inclusive = true }
                     }
                 }
             }
             EditProfileScreen(navController)
+        }
+    }
+    
+    // Pass navController and the local login screen state to the auth state listener
+    AuthStateListener(navController, isLoginScreenActive, onLoginStateChange)
+}
+
+@Composable
+private fun AuthStateListener(
+    navController: NavHostController,
+    isLoginScreenActive: Boolean,
+    onLoginStateChange: (Boolean) -> Unit
+) {
+    val authViewModel = viewModel<AuthViewModel>()
+    val phoneAuthViewModel = viewModel<PhoneAuthViewModel>()
+    
+    DisposableEffect(Unit) {
+        val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            val currentUser = firebaseAuth.currentUser
+            Log.d("MainActivityListener", "Auth state changed. Current user: ${currentUser?.uid}, isLoginScreenActive: $isLoginScreenActive")
+            
+            // Skip auth state changes when on login screen to prevent redirect issues
+            if (!isLoginScreenActive) {
+                Log.d("MainActivityListener", "Processing auth state change (not on login screen). Current route: ${navController.currentDestination?.route}")
+                
+                // Update login state for all users, including admins
+                val isLoggedIn = currentUser != null
+                onLoginStateChange(isLoggedIn)
+                if (currentUser != null) {
+                    phoneAuthViewModel.updateAuthState(currentUser)
+                }
+            }
+        }
+        
+        val auth = FirebaseAuth.getInstance()
+        auth.addAuthStateListener(authStateListener)
+        onDispose {
+            Log.d("MainActivityListener", "Removing auth state listener")
+            auth.removeAuthStateListener(authStateListener)
         }
     }
 }

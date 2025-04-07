@@ -1,5 +1,5 @@
 package com.example.bikerental.ui.theme
-import BottomNavigationBar
+import com.example.bikerental.components.BottomNavigationBar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

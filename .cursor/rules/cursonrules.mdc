@@ -1,0 +1,32 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# Your rule content
+- You may @mention files directly in your responses.
+
+- You can use Markdown formatting for clarity, but it’s not required.
+
+- Do not automatically modify or delete any Gradle files.
+
+- Do not change the app's design (UI/UX) unless explicitly instructed.
+
+- When working with Firebase, always use the correct Firebase SDK syntax.
+
+- Use the proper and up-to-date Google Maps API implementation.
+
+- Before adding a new function, scan the codebase to check if it already exists.
+
+- Maintain consistency with existing variable names and conventions in the codebase.
+
+- Always write code in Kotlin — no other languages should be used.
+
+- Before fixing an error, analyze the codebase to understand the existing logic and structure.     
+
+- When fixing code, always aim for the most efficient and optimized solution—prioritize performance, readability, and maintainability.
+
+- Pay close attention to the provided instructions or prompts. Ensure all requirements are met before submitting or finalizing changes.
+
+- When designing a new page, make sure it aligns with the existing app theme—this includes colors, typography, spacing, and overall visual style.

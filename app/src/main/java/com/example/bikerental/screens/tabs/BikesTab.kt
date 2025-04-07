@@ -9,13 +9,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.bikerental.R
-import com.example.bikerental.model.Bike
+import com.example.bikerental.models.Bike
+import com.example.bikerental.utils.ColorUtils
+import com.example.bikerental.utils.LocationManager
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.maps.model.LatLng
 import kotlin.math.*
@@ -27,8 +27,21 @@ fun BikesTab(
 ) {
     var bikes by remember { mutableStateOf(listOf<Bike>()) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
-    val black = colorResource(id = R.color.black)
-    val purple500 = colorResource(id = R.color.purple_500)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val locationManager = remember { LocationManager.getInstance(context) }
+    
+    // Get location
+    LaunchedEffect(fusedLocationProviderClient) {
+        locationManager.getLastLocation(
+            onSuccess = { location ->
+                currentLocation = location
+            },
+            onFailure = {
+                // Handle failure
+            }
+        )
+    }
+    
     // Simulated bike data
     LaunchedEffect(Unit) {
         bikes = listOf(
@@ -36,17 +49,21 @@ fun BikesTab(
                 id = "1",
                 name = "Mountain Bike",
                 type = "Mountain",
-                price = 25.0,
+                price = "₱25/hr",
+                priceValue = 25.0,
                 imageUrl = "https://example.com/bike1.jpg",
-                location = LatLng(14.5890, 120.9760)
+                latitude = 14.5890,
+                longitude = 120.9760
             ),
             Bike(
                 id = "2",
                 name = "Road Bike",
                 type = "Road",
-                price = 30.0,
+                price = "₱30/hr",
+                priceValue = 30.0,
                 imageUrl = "https://example.com/bike2.jpg",
-                location = LatLng(14.5895, 120.9765)
+                latitude = 14.5895,
+                longitude = 120.9765
             ),
             // Add more bikes as needed
         )
@@ -62,7 +79,6 @@ fun BikesTab(
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
-
         )
 
         LazyVerticalGrid(
@@ -114,7 +130,7 @@ fun BikeCard(
             )
 
             Text(
-                text = "$${bike.price}/hour",
+                text = bike.price,
                 fontSize = 14.sp,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -129,8 +145,8 @@ fun BikeCard(
                 val distance = calculateDistance(
                     location.latitude,
                     location.longitude,
-                    bike.location.latitude,
-                    bike.location.longitude
+                    bike.latitude,
+                    bike.longitude
                 )
                 Text(
                     text = "%.1f km away".format(distance),

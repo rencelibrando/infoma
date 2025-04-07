@@ -22,6 +22,7 @@ import com.example.bikerental.components.GoogleSignInButton
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
 import com.example.bikerental.models.AuthState
+import com.example.bikerental.navigation.Screen
 import com.example.bikerental.viewmodels.AuthViewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
@@ -29,6 +30,12 @@ import android.util.Log
 import android.util.Patterns
 import android.widget.Toast
 import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
+import com.example.bikerental.navigation.NavigationUtils
+
+// Define login modes
+enum class LoginMode {
+    USER, ADMIN
+}
 
 @Composable
 fun AccessAccountScreen(
@@ -39,12 +46,16 @@ fun AccessAccountScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
+    var loginMode by remember { mutableStateOf(LoginMode.USER) }
 
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
 
     // Collect auth state
     val authState by viewModel.authState.collectAsState()
+
+    // Add a state to track if we've already processed the auth state to prevent duplicate triggers
+    var authStateProcessed by remember { mutableStateOf(false) }
 
     // Initialize Google Sign-In when the screen is first displayed
     LaunchedEffect(Unit) {
@@ -81,39 +92,94 @@ fun AccessAccountScreen(
         }
     }
 
-    // Handle auth state changes
+    // Handle auth state changes - make this more robust to prevent unintended redirects
     LaunchedEffect(authState) {
+        Log.d("AccessAccountScreen", "Auth state changed: $authState, loginMode: $loginMode, processed: $authStateProcessed")
+        
+        // Skip initial auth state updates which could cause redirects when typing
+        if (authState is AuthState.Initial) {
+            Log.d("AccessAccountScreen", "Ignoring Initial auth state")
+            return@LaunchedEffect
+        }
+        
+        // Skip re-processing of the same auth state
+        if (authStateProcessed && !(authState is AuthState.Error)) {
+            Log.d("AccessAccountScreen", "Ignoring already processed auth state: $authState")
+            return@LaunchedEffect
+        }
+        
         when (authState) {
             is AuthState.Authenticated -> {
-                navController.navigate("home") {
-                    popUpTo("signIn") { inclusive = true }
+                // Only proceed with navigation if we have a valid authentication
+                val authenticated = authState as AuthState.Authenticated
+                Log.d("AccessAccountScreen", "Auth state is Authenticated, user: ${authenticated.user}")
+                
+                if (authenticated.user.id.isNotBlank()) {
+                    // Mark as processed before navigating
+                    authStateProcessed = true
+                    Log.d("AccessAccountScreen", "Auth state processed, navigating...")
+                    
+                    if (loginMode == LoginMode.ADMIN && authenticated.user.isAdmin) {
+                        Log.i("AccessAccountScreen", "ADMIN LOGIN CONFIRMED - Navigating to AdminDashboard")
+                        NavigationUtils.navigateToAdminDashboard(navController)
+                    } else {
+                        Log.d("AccessAccountScreen", "User login successful - navigating to Home")
+                        NavigationUtils.navigateToHome(navController)
+                    }
+                } else {
+                    Log.e("AccessAccountScreen", "Authenticated but user ID is blank, state: $authState")
                 }
             }
             is AuthState.Error -> {
+                Log.e("AccessAccountScreen", "Auth Error: ${(authState as AuthState.Error).message}")
                 Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
+                authStateProcessed = false // Allow reprocessing after error
             }
             is AuthState.NeedsAdditionalInfo -> {
-                navController.navigate("signUp")
+                Log.d("AccessAccountScreen", "Auth state: NeedsAdditionalInfo")
+                authStateProcessed = true
+                NavigationUtils.navigateToSignUp(navController)
             }
             is AuthState.PasswordResetSent -> {
+                Log.d("AccessAccountScreen", "Auth state: PasswordResetSent")
                 Toast.makeText(context, "Password reset email sent", Toast.LENGTH_LONG).show()
                 showForgotPasswordDialog = false
+                authStateProcessed = false // Reset to allow reprocessing
             }
-            else -> {}
+            else -> {
+                Log.d("AccessAccountScreen", "Unhandled auth state: $authState")
+                authStateProcessed = false // Reset to allow reprocessing
+            }
         }
     }
 
     fun validateInputs(): Boolean {
-        return when {
-            email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
-                Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
-                false
+        return if (loginMode == LoginMode.ADMIN) {
+            // Less strict validation for admin username
+            when {
+                email.isBlank() -> {
+                    Toast.makeText(context, "Please enter your username", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                password.isBlank() -> {
+                    Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                else -> true
             }
-            password.isBlank() -> {
-                Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
-                false
+        } else {
+            // Regular validation for user email
+            when {
+                email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                    Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                password.isBlank() -> {
+                    Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
+                    false
+                }
+                else -> true
             }
-            else -> true
         }
     }
 
@@ -131,14 +197,14 @@ fun AccessAccountScreen(
             horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = "Welcome Back",
+                text = if (loginMode == LoginMode.ADMIN) "Admin Portal" else "Welcome Back",
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Bold
                 ),
                 color = colorScheme.primary
             )
             Text(
-                text = "Sign in to continue",
+                text = if (loginMode == LoginMode.ADMIN) "Admin access only" else "Sign in to continue",
                 style = MaterialTheme.typography.titleMedium,
                 color = colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
@@ -152,14 +218,55 @@ fun AccessAccountScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Login Mode Selector
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { loginMode = LoginMode.USER }
+            ) {
+                RadioButton(
+                    selected = loginMode == LoginMode.USER,
+                    onClick = { loginMode = LoginMode.USER }
+                )
+                Text(
+                    text = "User",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(24.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { loginMode = LoginMode.ADMIN }
+            ) {
+                RadioButton(
+                    selected = loginMode == LoginMode.ADMIN,
+                    onClick = { loginMode = LoginMode.ADMIN }
+                )
+                Text(
+                    text = "Admin",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
 
         // Form Fields
         ResponsiveTextField(
             value = email,
             onValueChange = { email = it.trim() },
-            label = "Email",
-            leadingIcon = { Icon(Icons.Default.Email, "Email") }
+            label = if (loginMode == LoginMode.ADMIN) "Username" else "Email",
+            leadingIcon = { Icon(Icons.Default.Email, contentDescription = if (loginMode == LoginMode.ADMIN) "Username" else "Email") },
+            isError = false
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -182,15 +289,17 @@ fun AccessAccountScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Forgot Password Link
-        Text(
-            text = "Forgot Password?",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colorScheme.primary,
-            modifier = Modifier
-                .align(Alignment.End)
-                .clickable { showForgotPasswordDialog = true }
-        )
+        // Forgot Password Link - Only show in User mode
+        if (loginMode == LoginMode.USER) {
+            Text(
+                text = "Forgot Password?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.primary,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .clickable { showForgotPasswordDialog = true }
+            )
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -198,72 +307,79 @@ fun AccessAccountScreen(
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                    viewModel.signInWithEmailPassword(email, password)
-                }
-            },
-            text = "Sign In",
-            isLoading = authState is AuthState.Loading
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // OR Separator
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = "—————  Or  —————",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Google Sign In Button
-        GoogleSignInButton(
-            onClick = {
-                try {
-                    val googleSignInClient = viewModel.getGoogleSignInClient(context)
-                    googleLauncher.launch(googleSignInClient.signInIntent)
-                } catch (e: Exception) {
-                    Log.e("AccessAccountScreen", "Failed to start Google Sign-In", e)
-                    Toast.makeText(
-                        context,
-                        "Failed to start Google Sign-In. Please try again.",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            isLoading = authState is AuthState.Loading
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Sign Up Link
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Don't have an account? ",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = "Sign Up",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = colorScheme.primary,
-                modifier = Modifier.clickable {
-                    navController.navigate("signUp") {
-                        popUpTo("signIn") { inclusive = true }
+                    if (loginMode == LoginMode.ADMIN) {
+                        viewModel.signInAsAdmin(email, password)
+                    } else {
+                        viewModel.signInWithEmailPassword(email, password)
                     }
                 }
+            },
+            text = if (loginMode == LoginMode.ADMIN) "Admin Sign In" else "Sign In",
+            isLoading = authState is AuthState.Loading
+        )
+        
+        // Only show Google Sign-in and Sign Up options for User mode
+        if (loginMode == LoginMode.USER) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // OR Separator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "—————  Or  —————",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Google Sign In Button
+            GoogleSignInButton(
+                onClick = {
+                    try {
+                        val googleSignInClient = viewModel.getGoogleSignInClient(context)
+                        googleLauncher.launch(googleSignInClient.signInIntent)
+                    } catch (e: Exception) {
+                        Log.e("AccessAccountScreen", "Failed to start Google Sign-In", e)
+                        Toast.makeText(
+                            context,
+                            "Failed to start Google Sign-In. Please try again.",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                isLoading = authState is AuthState.Loading
             )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Sign Up Link
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Don't have an account? ",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Sign Up",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = colorScheme.primary,
+                    modifier = Modifier.clickable {
+                        navController.navigate(Screen.SignUp.route) {
+                            popUpTo(Screen.SignIn.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(32.dp))

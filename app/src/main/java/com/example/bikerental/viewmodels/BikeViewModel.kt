@@ -160,12 +160,12 @@ class BikeViewModel : ViewModel() {
             )
             
             val ride = BikeRide(
-                rideId = newRideId,
+                id = newRideId,
                 bikeId = bikeId,
                 userId = user.uid,
                 startTime = System.currentTimeMillis(),
                 startLocation = startLocation,
-                route = listOf(startLocation),
+                path = listOf(startLocation),
                 status = "active"
             )
             
@@ -209,7 +209,7 @@ class BikeViewModel : ViewModel() {
                 timestamp = System.currentTimeMillis()
             )
             
-            ridesRef.child(ride.rideId).child("route")
+            ridesRef.child(ride.id).child("path")
                 .push()
                 .setValue(locationUpdate)
         }
@@ -245,7 +245,7 @@ class BikeViewModel : ViewModel() {
                 "status" to "completed"
             )
             
-            ridesRef.child(ride.rideId).updateChildren(updates)
+            ridesRef.child(ride.id).updateChildren(updates)
                 .addOnSuccessListener {
                     // Reset active ride
                     _activeRide.value = null
@@ -282,7 +282,7 @@ class BikeViewModel : ViewModel() {
             firestore.collection("users")
                 .document(user.uid)
                 .collection("rideHistory")
-                .document(ride.rideId)
+                .document(ride.id)
                 .set(ride)
                 .addOnFailureListener { e ->
                     Log.e(TAG, "Error saving ride to history", e)
@@ -293,7 +293,7 @@ class BikeViewModel : ViewModel() {
     // Cancel a ride
     fun cancelRide() {
         _activeRide.value?.let { ride ->
-            ridesRef.child(ride.rideId).child("status").setValue("cancelled")
+            ridesRef.child(ride.id).child("status").setValue("cancelled")
                 .addOnSuccessListener {
                     // Make bike available again
                     ride.bikeId.let { bikeId ->
