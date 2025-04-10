@@ -1,5 +1,6 @@
 package com.example.bikerental.screens.login
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,10 +34,9 @@ fun GearTickLoginScreen(navController: NavHostController) {
             verticalArrangement = Arrangement.Center
         ) {
             // App Logo
-            Icon(
-                painter = painterResource(id = R.drawable.cyclist), // Replace with actual logo
-                contentDescription = "BikeShare Logo",
-                tint = Color.White,
+            Image(
+                painter = painterResource(id = R.drawable.bambike),
+                contentDescription = "Bambike Logo",
                 modifier = Modifier.size(80.dp)
             )
 
@@ -44,13 +44,22 @@ fun GearTickLoginScreen(navController: NavHostController) {
 
             // App Title
             Text(
-                text = "GearTick",
+                text = "Bambike",
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
 
             // App Subtitle
+            Text(
+                text = "REVOLUTION CYCLES",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp)
+            )
+            
+            // App Description
             Text(
                 text = "Discover convenient bike rental services at your fingertips.",
                 fontSize = 14.sp,

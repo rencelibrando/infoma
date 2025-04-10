@@ -45,16 +45,6 @@ object NavigationUtils {
     }
 
     /**
-     * Navigate to the admin dashboard and clear back stack
-     */
-    fun navigateToAdminDashboard(navController: NavController) {
-        Log.d("NavigationUtils", "Navigating to admin dashboard")
-        navController.navigate(Screen.AdminDashboard.route) {
-            popUpTo(0) { inclusive = true }
-        }
-    }
-
-    /**
      * Navigate to sign in screen with options
      */
     fun navigateToSignIn(navController: NavController, popUpRoute: String? = null) {

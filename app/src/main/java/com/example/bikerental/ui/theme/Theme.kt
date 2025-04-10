@@ -55,8 +55,13 @@ fun BikerentalTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
+            // Make status bar transparent and use light icons for better visibility
+            window.statusBarColor = Color.Transparent.toArgb()
+            // Change this to 'true' for light status bar icons, 'false' for dark icons
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+            
+            // Enable edge-to-edge UI
+            WindowCompat.setDecorFitsSystemWindows(window, false)
         }
     }
 

@@ -276,7 +276,7 @@ fun SignUpScreen(
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                        viewModel.signUpWithEmailPassword(email, password, fullName, phone)
+                        viewModel.createUserWithEmailPassword(email, password, fullName, phone)
                 }
             },
             text = "Sign Up",

@@ -11,9 +11,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.bikerental.R
@@ -22,65 +25,126 @@ import kotlinx.coroutines.delay
 @Composable
 fun SplashScreen(onSplashComplete: () -> Unit) {
     var startAnimation by remember { mutableStateOf(false) }
-    val alphaAnim = animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 1000
-        )
-    )
-
-    val scaleAnim = animateFloatAsState(
+    
+    // Logo animations
+    val logoScale = animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.5f,
         animationSpec = tween(
-            durationMillis = 1000,
-            easing = FastOutSlowInEasing
+            durationMillis = 800,
+            easing = EaseOutBack
         )
     )
-
+    
+    val logoRotation = animateFloatAsState(
+        targetValue = if (startAnimation) 0f else -45f,
+        animationSpec = tween(
+            durationMillis = 1000,
+            easing = EaseOutQuart
+        )
+    )
+    
+    val logoAlpha = animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 800
+        )
+    )
+    
+    // First text animations
+    val titleAlpha = animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 800,
+            delayMillis = 400
+        )
+    )
+    
+    val titleSlide = animateFloatAsState(
+        targetValue = if (startAnimation) 0f else -100f,
+        animationSpec = tween(
+            durationMillis = 1000,
+            delayMillis = 400,
+            easing = EaseOutQuint
+        )
+    )
+    
+    // Second text animations
+    val subtitleAlpha = animateFloatAsState(
+        targetValue = if (startAnimation) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 800,
+            delayMillis = 600
+        )
+    )
+    
+    val subtitleSlide = animateFloatAsState(
+        targetValue = if (startAnimation) 0f else 100f,
+        animationSpec = tween(
+            durationMillis = 1000,
+            delayMillis = 600,
+            easing = EaseOutQuint
+        )
+    )
+    
+    // Startup and completion
     LaunchedEffect(key1 = true) {
         startAnimation = true
-        delay(2000)
+        delay(2500) // Slightly longer to allow animations to complete
         onSplashComplete()
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF6C63FF)), // Same blue as GearTick
+            .background(Color.LightGray),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
         ) {
+            // Logo with scale, rotation and fade animations
             Image(
-                painter = painterResource(id = R.drawable.cyclist),
-                contentDescription = "App Logo",
+                painter = painterResource(id = R.drawable.bambikelogo),
+                contentDescription = "Bambike Logo",
                 modifier = Modifier
                     .size(120.dp)
-                    .scale(scaleAnim.value)
-                    .alpha(alphaAnim.value)
+                    .scale(logoScale.value)
+                    .rotate(logoRotation.value)
+                    .alpha(logoAlpha.value)
             )
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            // Main title with slide and fade animations
             Text(
-                text = "GearTick",
-                color = Color.White,
+                text = "Bambike",
+                color = Color(0xFF6C63FF),
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.alpha(alphaAnim.value)
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Discover convenient bike rental services at your fingertips.",
-                color = Color.White,
-                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .alpha(alphaAnim.value)
-                    .padding(horizontal = 32.dp)
+                    .alpha(titleAlpha.value)
+                    .offset(x = titleSlide.value.dp)
+                    .fillMaxWidth()
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Subtitle with slide and fade animations (from opposite direction)
+            Text(
+                text = "REVOLUTION CYCLES",
+                color = Color.DarkGray,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .alpha(subtitleAlpha.value)
+                    .offset(x = subtitleSlide.value.dp)
+                    .fillMaxWidth()
             )
         }
     }

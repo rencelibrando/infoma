@@ -40,6 +40,7 @@ import com.google.android.gms.maps.model.Gap as MapGap
 import com.google.android.gms.maps.model.Dot
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import com.example.bikerental.utils.ColorUtils
 
 @Composable
 fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
@@ -217,64 +218,6 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
             )
         )
 
-        // Settings Button (Top Left)
-        IconButton(
-            onClick = { /* Handle settings click */ },
-            modifier = Modifier
-                .padding(16.dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color(0xFF6750A4) // Purple tint
-            )
-        }
-
-        // Search Bar (Top Center)
-        TextField(
-            value = "",
-            onValueChange = { },
-            placeholder = { Text("Search location...") },
-            modifier = Modifier
-                .padding(top = 16.dp, start = 72.dp, end = 72.dp)
-                .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(24.dp)),
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                focusedContainerColor = MaterialTheme.colorScheme.surface,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent
-            ),
-            singleLine = true
-        )
-
-        // Messages Button (Top Right)
-        IconButton(
-            onClick = { /* Handle messages click */ },
-            modifier = Modifier
-                .padding(16.dp)
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                .align(Alignment.TopEnd)
-        ) {
-            BadgedBox(
-                badge = {
-                    Badge { Text("6") }
-                }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Email,
-                    contentDescription = "Messages",
-                    tint = Color(0xFF6750A4)
-                )
-            }
-        }
-
         // Bottom Action Buttons
         Column(
             modifier = Modifier
@@ -284,23 +227,35 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Check in and SOS Buttons Row
+            // SCAN Button Row (Previously SOS)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 Button(
-                    onClick = { /* Handle SOS */ },
+                    onClick = { /* Handle QR Scan */ },
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
                         .padding(start = 4.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF6750A4)
+                        containerColor = ColorUtils.Purple40
                     ),
                     shape = RoundedCornerShape(24.dp)
                 ) {
-                    Text("SOS", color = Color.White)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = "Scan QR Code",
+                            modifier = Modifier.size(24.dp),
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("SCAN", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

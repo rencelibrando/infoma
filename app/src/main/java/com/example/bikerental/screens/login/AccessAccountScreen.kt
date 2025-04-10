@@ -32,11 +32,6 @@ import android.widget.Toast
 import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.example.bikerental.navigation.NavigationUtils
 
-// Define login modes
-enum class LoginMode {
-    USER, ADMIN
-}
-
 @Composable
 fun AccessAccountScreen(
     navController: NavController,
@@ -46,7 +41,6 @@ fun AccessAccountScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
-    var loginMode by remember { mutableStateOf(LoginMode.USER) }
 
     val context = LocalContext.current
     val colorScheme = MaterialTheme.colorScheme
@@ -94,7 +88,7 @@ fun AccessAccountScreen(
 
     // Handle auth state changes - make this more robust to prevent unintended redirects
     LaunchedEffect(authState) {
-        Log.d("AccessAccountScreen", "Auth state changed: $authState, loginMode: $loginMode, processed: $authStateProcessed")
+        Log.d("AccessAccountScreen", "Auth state changed: $authState, processed: $authStateProcessed")
         
         // Skip initial auth state updates which could cause redirects when typing
         if (authState is AuthState.Initial) {
@@ -119,13 +113,8 @@ fun AccessAccountScreen(
                     authStateProcessed = true
                     Log.d("AccessAccountScreen", "Auth state processed, navigating...")
                     
-                    if (loginMode == LoginMode.ADMIN && authenticated.user.isAdmin) {
-                        Log.i("AccessAccountScreen", "ADMIN LOGIN CONFIRMED - Navigating to AdminDashboard")
-                        NavigationUtils.navigateToAdminDashboard(navController)
-                    } else {
-                        Log.d("AccessAccountScreen", "User login successful - navigating to Home")
-                        NavigationUtils.navigateToHome(navController)
-                    }
+                    Log.d("AccessAccountScreen", "User login successful - navigating to Home")
+                    NavigationUtils.navigateToHome(navController)
                 } else {
                     Log.e("AccessAccountScreen", "Authenticated but user ID is blank, state: $authState")
                 }
@@ -154,32 +143,16 @@ fun AccessAccountScreen(
     }
 
     fun validateInputs(): Boolean {
-        return if (loginMode == LoginMode.ADMIN) {
-            // Less strict validation for admin username
-            when {
-                email.isBlank() -> {
-                    Toast.makeText(context, "Please enter your username", Toast.LENGTH_SHORT).show()
-                    false
-                }
-                password.isBlank() -> {
-                    Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
-                    false
-                }
-                else -> true
+        return when {
+            email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+                Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
+                false
             }
-        } else {
-            // Regular validation for user email
-            when {
-                email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
-                    Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
-                    false
-                }
-                password.isBlank() -> {
-                    Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
-                    false
-                }
-                else -> true
+            password.isBlank() -> {
+                Toast.makeText(context, "Please enter your password", Toast.LENGTH_SHORT).show()
+                false
             }
+            else -> true
         }
     }
 
@@ -197,14 +170,14 @@ fun AccessAccountScreen(
             horizontalAlignment = Alignment.Start
         ) {
             Text(
-                text = if (loginMode == LoginMode.ADMIN) "Admin Portal" else "Welcome Back",
+                text = "Welcome Back",
                 style = MaterialTheme.typography.headlineLarge.copy(
                     fontWeight = FontWeight.Bold
                 ),
                 color = colorScheme.primary
             )
             Text(
-                text = if (loginMode == LoginMode.ADMIN) "Admin access only" else "Sign in to continue",
+                text = "Sign in to continue",
                 style = MaterialTheme.typography.titleMedium,
                 color = colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
@@ -218,54 +191,14 @@ fun AccessAccountScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Login Mode Selector
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { loginMode = LoginMode.USER }
-            ) {
-                RadioButton(
-                    selected = loginMode == LoginMode.USER,
-                    onClick = { loginMode = LoginMode.USER }
-                )
-                Text(
-                    text = "User",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(24.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { loginMode = LoginMode.ADMIN }
-            ) {
-                RadioButton(
-                    selected = loginMode == LoginMode.ADMIN,
-                    onClick = { loginMode = LoginMode.ADMIN }
-                )
-                Text(
-                    text = "Admin",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(48.dp))
 
         // Form Fields
         ResponsiveTextField(
             value = email,
             onValueChange = { email = it.trim() },
-            label = if (loginMode == LoginMode.ADMIN) "Username" else "Email",
-            leadingIcon = { Icon(Icons.Default.Email, contentDescription = if (loginMode == LoginMode.ADMIN) "Username" else "Email") },
+            label = "Email",
+            leadingIcon = { Icon(Icons.Default.Email, contentDescription = "Email") },
             isError = false
         )
 
@@ -289,17 +222,15 @@ fun AccessAccountScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Forgot Password Link - Only show in User mode
-        if (loginMode == LoginMode.USER) {
-            Text(
-                text = "Forgot Password?",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.primary,
-                modifier = Modifier
-                    .align(Alignment.End)
-                    .clickable { showForgotPasswordDialog = true }
-            )
-        }
+        // Forgot Password Link
+        Text(
+            text = "Forgot Password?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colorScheme.primary,
+            modifier = Modifier
+                .align(Alignment.End)
+                .clickable { showForgotPasswordDialog = true }
+        )
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -307,79 +238,72 @@ fun AccessAccountScreen(
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                    if (loginMode == LoginMode.ADMIN) {
-                        viewModel.signInAsAdmin(email, password)
-                    } else {
-                        viewModel.signInWithEmailPassword(email, password)
-                    }
+                    viewModel.signInWithEmailPassword(email, password)
                 }
             },
-            text = if (loginMode == LoginMode.ADMIN) "Admin Sign In" else "Sign In",
+            text = "Sign In",
             isLoading = authState is AuthState.Loading
         )
-        
-        // Only show Google Sign-in and Sign Up options for User mode
-        if (loginMode == LoginMode.USER) {
-            Spacer(modifier = Modifier.height(16.dp))
 
-            // OR Separator
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "—————  Or  —————",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant
-                )
-            }
+        Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Google Sign In Button
-            GoogleSignInButton(
-                onClick = {
-                    try {
-                        val googleSignInClient = viewModel.getGoogleSignInClient(context)
-                        googleLauncher.launch(googleSignInClient.signInIntent)
-                    } catch (e: Exception) {
-                        Log.e("AccessAccountScreen", "Failed to start Google Sign-In", e)
-                        Toast.makeText(
-                            context,
-                            "Failed to start Google Sign-In. Please try again.",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
-                },
-                isLoading = authState is AuthState.Loading
+        // OR Separator
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "—————  Or  —————",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.onSurfaceVariant
             )
+        }
 
-            Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-            // Sign Up Link
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Don't have an account? ",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Sign Up",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = colorScheme.primary,
-                    modifier = Modifier.clickable {
-                        navController.navigate(Screen.SignUp.route) {
-                            popUpTo(Screen.SignIn.route) { inclusive = true }
-                        }
+        // Google Sign In Button
+        GoogleSignInButton(
+            onClick = {
+                try {
+                    val googleSignInClient = viewModel.getGoogleSignInClient(context)
+                    googleLauncher.launch(googleSignInClient.signInIntent)
+                } catch (e: Exception) {
+                    Log.e("AccessAccountScreen", "Failed to start Google Sign-In", e)
+                    Toast.makeText(
+                        context,
+                        "Failed to start Google Sign-In. Please try again.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            },
+            isLoading = authState is AuthState.Loading
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Sign Up Link
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Don't have an account? ",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Sign Up",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = colorScheme.primary,
+                modifier = Modifier.clickable {
+                    navController.navigate(Screen.SignUp.route) {
+                        popUpTo(Screen.SignIn.route) { inclusive = true }
                     }
-                )
-            }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(32.dp))

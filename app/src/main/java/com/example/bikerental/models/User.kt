@@ -23,8 +23,7 @@ data class User(
     val displayName: String? = null,
     val lastSignInTime: Long = 0,
     val provider: String = "email", // "email" or "google"
-    val googleId: String? = null,
-    val isAdmin: Boolean = false
+    val googleId: String? = null
 ) {
     // No-argument constructor for Firestore deserialization
     constructor() : this(
@@ -53,8 +52,7 @@ data class User(
             "displayName" to displayName,
             "lastSignInTime" to lastSignInTime,
             "provider" to provider,
-            "googleId" to googleId,
-            "isAdmin" to isAdmin
+            "googleId" to googleId
         )
     }
 } 

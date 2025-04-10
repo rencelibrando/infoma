@@ -72,6 +72,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.unit.Dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -477,7 +478,7 @@ fun ProfileScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Column(
                     modifier = Modifier
@@ -498,7 +499,7 @@ fun ProfileScreen(
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Column(
                     modifier = Modifier
@@ -725,6 +726,8 @@ private fun SettingsContent(
     viewModel: AuthViewModel,
     purple200: Color
 ) {
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -757,7 +760,97 @@ private fun SettingsContent(
                     popUpTo("home") { inclusive = true }
                 }
             },
-            purple200 = purple200
+            purple200 = purple200,
+            elevation = 4.dp
+        )
+        
+        Divider(modifier = Modifier.padding(top = 8.dp))
+        
+        // Delete Account Button - Using a custom button with red color
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { showDeleteAccountDialog = true },
+            color = Color.Transparent,
+            shadowElevation = 2.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete Account",
+                    tint = Color.Red
+                )
+                Text(
+                    text = "Delete Account",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.Red
+                )
+            }
+        }
+    }
+    
+    // Delete Account Confirmation Dialog
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = {
+                Text(
+                    text = "Delete Account",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.Red
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Are you sure you want to delete your account? This action cannot be undone.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "All your data, including profile information, ride history, and payment details will be permanently removed.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        // Call the delete account function in the view model
+                        viewModel.deleteAccount(
+                            onSuccess = {
+                                // Navigate to sign-in screen after successful deletion
+                                navController.navigate("signin") {
+                                    popUpTo("home") { inclusive = true }
+                                }
+                            },
+                            onError = { /* Handle error if needed */ }
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Red
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 4.dp,
+                        pressedElevation = 8.dp
+                    )
+                ) {
+                    Text("Delete My Account")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteAccountDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -767,13 +860,15 @@ private fun SettingsButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     text: String,
     onClick: () -> Unit,
-    purple200: Color
+    purple200: Color,
+    elevation: Dp = 0.dp
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        color = Color.Transparent
+        color = Color.Transparent,
+        shadowElevation = elevation
     ) {
         Row(
             modifier = Modifier

@@ -16,6 +16,7 @@ import com.example.bikerental.ui.theme.HomeScreen
 import com.google.android.gms.location.*
 import com.google.firebase.auth.FirebaseAuth
 import com.example.bikerental.screens.profile.EditProfileScreen
+import com.example.bikerental.screens.profile.ChangePasswordScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,7 +32,6 @@ import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
-import com.example.bikerental.screens.admin.AdminDashboardScreen
 import com.example.bikerental.navigation.Screen
 import androidx.lifecycle.ViewModelProvider
 import android.util.Log
@@ -77,20 +77,14 @@ class MainActivity : ComponentActivity() {
                 // Initial auth check
                 LaunchedEffect(Unit) {
                     val currentUser = auth.currentUser
-                    // Allow automatic login for all users, including admins
                     isLoggedIn = currentUser != null
                     isLoading = false
                 }
 
                 val authState by phoneAuthViewModel.uiState.collectAsState()
-                val userIsAdmin by authViewModel.isCurrentUserAdmin.collectAsState(initial = false)
                 
                 val startDestination = if (isLoggedIn) {
-                    if (userIsAdmin) {
-                        Screen.AdminDashboard.route
-                    } else {
-                        Screen.Home.route
-                    }
+                    Screen.Home.route
                 } else {
                     Screen.Initial.route
                 }
@@ -142,7 +136,6 @@ private fun NavigationContent(
     val navController = rememberNavController()
     val authViewModel = viewModel<AuthViewModel>()
     val currentUser by authViewModel.currentUser.collectAsState()
-    val userIsAdmin by authViewModel.isCurrentUserAdmin.collectAsState(initial = false)
     
     // Track login screen state locally
     var isLoginScreenActive by remember { mutableStateOf(false) }
@@ -152,13 +145,9 @@ private fun NavigationContent(
         onLoginScreenChange(isLoginScreenActive)
     }
     
-    // Determine start destination based on login state and user role
+    // Determine start destination based on login state
     val startDestination = if (isLoggedIn) {
-        if (userIsAdmin) {
-            Screen.AdminDashboard.route
-        } else {
-            Screen.Home.route
-        }
+        Screen.Home.route
     } else {
         Screen.Initial.route
     }
@@ -182,15 +171,9 @@ private fun NavigationContent(
             
             if (isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    Log.d("Navigation", "Already logged in, redirecting based on user role")
-                    if (userIsAdmin) {
-                        navController.navigate(Screen.AdminDashboard.route) {
-                            popUpTo(Screen.Initial.route) { inclusive = true }
-                        }
-                    } else {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.Initial.route) { inclusive = true }
-                        }
+                    Log.d("Navigation", "Already logged in, redirecting to home")
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Initial.route) { inclusive = true }
                     }
                 }
             }
@@ -204,15 +187,9 @@ private fun NavigationContent(
             
             if (isLoggedIn) {
                 LaunchedEffect(Unit) {
-                    Log.d("Navigation", "Already logged in, redirecting based on user role")
-                    if (userIsAdmin) {
-                        navController.navigate(Screen.AdminDashboard.route) {
-                            popUpTo(Screen.Initial.route) { inclusive = true }
-                        }
-                    } else {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(Screen.Initial.route) { inclusive = true }
-                        }
+                    Log.d("Navigation", "Already logged in, redirecting to home")
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Initial.route) { inclusive = true }
                     }
                 }
             }
@@ -228,25 +205,6 @@ private fun NavigationContent(
                 SplashScreen(onSplashComplete)
             } else {
                 HomeScreen(navController, fusedLocationClient)
-            }
-        }
-
-        // Admin Dashboard
-        composable(Screen.AdminDashboard.route) {
-            // Update login screen state locally
-            isLoginScreenActive = false
-            Log.d("Navigation", "Rendering admin dashboard")
-            
-            // Only allow access if logged in as an admin
-            if (isLoggedIn && userIsAdmin) {
-                AdminDashboardScreen(navController)
-            } else {
-                LaunchedEffect(Unit) {
-                    Log.d("Navigation", "Not logged in as admin, redirecting to initial")
-                    navController.navigate(Screen.Initial.route) {
-                        popUpTo(Screen.AdminDashboard.route) { inclusive = true }
-                    }
-                }
             }
         }
         
@@ -280,6 +238,22 @@ private fun NavigationContent(
             }
             EditProfileScreen(navController)
         }
+        
+        composable(Screen.ChangePassword.route) {
+            // Update login screen state locally
+            isLoginScreenActive = false
+            
+            if (!isLoggedIn) {
+                LaunchedEffect(Unit) {
+                    Log.d("Navigation", "Not logged in, redirecting to initial")
+                    navController.navigate(Screen.Initial.route) {
+                        popUpTo(Screen.ChangePassword.route) { inclusive = true }
+                    }
+                }
+            }
+            // Use the existing AuthViewModel from the parent scope
+            ChangePasswordScreen(navController, authViewModel)
+        }
     }
     
     // Pass navController and the local login screen state to the auth state listener
@@ -304,7 +278,7 @@ private fun AuthStateListener(
             if (!isLoginScreenActive) {
                 Log.d("MainActivityListener", "Processing auth state change (not on login screen). Current route: ${navController.currentDestination?.route}")
                 
-                // Update login state for all users, including admins
+                // Update login state
                 val isLoggedIn = currentUser != null
                 onLoginStateChange(isLoggedIn)
                 if (currentUser != null) {
