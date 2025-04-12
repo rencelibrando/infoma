@@ -13,6 +13,8 @@ sealed class Screen(val route: String) {
     object SignIn : Screen("signIn")
     object SignUp : Screen("signUp")
     object AccessAccount : Screen("accessAccount")
+    object GoogleVerification : Screen("googleVerification")
+    object EmailVerification : Screen("emailVerification")
     
     // Profile related screens
     object Profile : Screen("profile")

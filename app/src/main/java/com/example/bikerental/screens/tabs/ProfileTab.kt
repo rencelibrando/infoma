@@ -16,7 +16,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
@@ -48,12 +47,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.TransformedText
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.ui.draw.alpha
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -65,14 +58,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import android.util.Log
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.unit.Dp
+import com.example.bikerental.navigation.Screen
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -123,19 +115,44 @@ fun ProfileScreen(
     fun refreshProfile() {
         user = FirebaseAuth.getInstance().currentUser
         if (user != null) {
-            FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(user!!.uid)
-                .get()
-                .addOnSuccessListener { document ->
-                    if (document != null && document.exists()) {
-                        profileData = document.data
+            // First reload Firebase Auth user to get fresh data
+            user?.reload()?.addOnCompleteListener { reloadTask ->
+                if (reloadTask.isSuccessful) {
+                    Log.d("ProfileTab", "Firebase Auth user reloaded successfully")
+                    // Get the refreshed user instance
+                    user = FirebaseAuth.getInstance().currentUser
+                } else {
+                    Log.e("ProfileTab", "Failed to reload Firebase Auth user: ${reloadTask.exception?.message}")
+                }
+                
+                // After reload (successful or not), fetch from Firestore
+                FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(user!!.uid)
+                    .get()
+                    .addOnSuccessListener { document ->
+                        if (document != null && document.exists()) {
+                            profileData = document.data
+                            
+                            // If Firestore is missing email but Firebase Auth has it, update Firestore
+                            val firestoreEmail = profileData?.get("email")?.toString()
+                            val firebaseEmail = user?.email
+                            
+                            if (firestoreEmail.isNullOrEmpty() && !firebaseEmail.isNullOrEmpty()) {
+                                Log.d("ProfileTab", "Updating missing email in Firestore: $firebaseEmail")
+                                FirebaseFirestore.getInstance()
+                                    .collection("users")
+                                    .document(user!!.uid)
+                                    .update("email", firebaseEmail)
+                            }
+                            
+                            isRefreshing = false
+                        }
+                    }
+                    .addOnFailureListener {
                         isRefreshing = false
                     }
-                }
-                .addOnFailureListener {
-                    isRefreshing = false
-                }
+            }
         } else {
             isRefreshing = false
         }
@@ -145,8 +162,8 @@ fun ProfileScreen(
     LaunchedEffect(Unit) {
         user = FirebaseAuth.getInstance().currentUser
         if (user == null) {
-            navController.navigate("signin") {
-                popUpTo("home") { inclusive = true }
+            navController.navigate(Screen.SignIn.route) {
+                popUpTo(Screen.Home.route) { inclusive = true }
             }
             return@LaunchedEffect
         }
@@ -155,6 +172,25 @@ fun ProfileScreen(
         phoneAuthViewModel.checkAndCleanupExpiredRateLimits()
         
         refreshProfile()
+    }
+
+    // Handle sign out action
+    val handleSignOut = {
+        coroutineScope.launch {
+            try {
+                Log.d("ProfileTab", "User signing out")
+                viewModel.signOut()
+                
+                // Navigate to sign in screen after sign out
+                navController.navigate(Screen.SignIn.route) {
+                    popUpTo(0) { inclusive = true } // Clear the entire back stack
+                }
+                
+                Log.d("ProfileTab", "Sign out completed, navigated to sign in")
+            } catch (e: Exception) {
+                Log.e("ProfileTab", "Error during sign out: ${e.message}")
+            }
+        }
     }
 
     // Effect to handle verification success and other state changes
@@ -276,6 +312,94 @@ fun ProfileScreen(
                 }
             }
 
+            // Email Verification Warning
+            if (!(profileData?.get("isEmailVerified") as? Boolean ?: false)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navController.navigate("emailVerification") },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Email,
+                            contentDescription = "Warning",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Verify Your Email",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = "Email verification required to access booking and payment features",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            // Add verification benefits list
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Book bikes",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Access payment features",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = { navController.navigate("emailVerification") },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            ),
+                            modifier = Modifier.padding(start = 8.dp)
+                        ) {
+                            Text(
+                                text = "Verify",
+                                color = MaterialTheme.colorScheme.onError
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Phone Verification Warning
             if (profileData?.get("phoneNumber") != null && !isPhoneVerified()) {
                 Card(
@@ -366,7 +490,7 @@ fun ProfileScreen(
                                     color = when {
                                         !isProfileComplete() -> MaterialTheme.colorScheme.error
                                         !isPhoneVerified() -> MaterialTheme.colorScheme.error
-                                        else -> ColorUtils.purple500()
+                                        else -> ColorUtils.DarkGreen
                                     },
                                     shape = CircleShape
                                 ),
@@ -384,10 +508,24 @@ fun ProfileScreen(
                                 ?: user?.displayName 
                                 ?: "Complete your profile",
                             style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.purple500()
+                            color = ColorUtils.DarkGreen
                         )
+                        // Improved email display with multiple fallbacks
+                        val emailToShow = when {
+                            // First try Firestore data
+                            profileData?.get("email")?.toString()?.isNotEmpty() == true -> 
+                                profileData?.get("email")?.toString()
+                            // Then try Firebase Auth user - use safe call for email
+                            user?.email?.isNotEmpty() == true -> 
+                                user?.email
+                            // Then try current user from Firebase Auth (might be more up-to-date)
+                            FirebaseAuth.getInstance().currentUser?.email?.isNotEmpty() == true ->
+                                FirebaseAuth.getInstance().currentUser?.email
+                            // Fallback
+                            else -> "Email not available"
+                        }
                         Text(
-                            text = user?.email ?: "Not available",
+                            text = emailToShow ?: "Email not available",
                             style = MaterialTheme.typography.bodyMedium,
                             color = ColorUtils.blackcol()
                         )
@@ -449,7 +587,7 @@ fun ProfileScreen(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp)),
-                    color = ColorUtils.purple500(),
+                    color = ColorUtils.DarkGreen,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
                 
@@ -488,7 +626,7 @@ fun ProfileScreen(
                     Text(
                         text = "Ride History",
                         style = MaterialTheme.typography.titleLarge,
-                        color = ColorUtils.purple500()
+                        color = ColorUtils.DarkGreen
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     RideHistoryContent(ColorUtils.blackcol())
@@ -509,10 +647,10 @@ fun ProfileScreen(
                     Text(
                         text = "Account Settings",
                         style = MaterialTheme.typography.titleLarge,
-                        color = ColorUtils.purple500()
+                        color = ColorUtils.DarkGreen
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    SettingsContent(navController, viewModel, ColorUtils.blackcol())
+                    SettingsContent(navController, viewModel, ColorUtils.blackcol(), coroutineScope)
                 }
             }
         }
@@ -523,7 +661,7 @@ fun ProfileScreen(
             state = pullRefreshState,
             modifier = Modifier.align(Alignment.TopCenter),
             backgroundColor = MaterialTheme.colorScheme.surface,
-            contentColor = ColorUtils.purple500()
+            contentColor = ColorUtils.DarkGreen
         )
 
         // Loading overlay (optional, you can keep or remove this)
@@ -535,7 +673,7 @@ fun ProfileScreen(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    color = ColorUtils.purple500(),
+                    color = ColorUtils.DarkGreen,
                     modifier = Modifier.size(48.dp)
                 )
             }
@@ -567,7 +705,7 @@ fun ProfileScreen(
                 Text(
                     text = "Profile Information",
                     style = MaterialTheme.typography.titleLarge,
-                    color = ColorUtils.purple500()
+                    color = ColorUtils.DarkGreen
                 )
             },
             text = {
@@ -597,10 +735,10 @@ fun ProfileScreen(
                         Text(
                             text = "Personal Information",
                             style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.purple500()
+                            color = ColorUtils.DarkGreen
                         )
                         InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available", ColorUtils.blackcol())
-                        InfoRow("Email", user?.email ?: "Not available", ColorUtils.blackcol())
+                        InfoRow("Email", profileData?.get("email")?.toString() ?: user?.email ?: "Not available", ColorUtils.blackcol())
                         InfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available", ColorUtils.blackcol())
                         InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
@@ -608,7 +746,7 @@ fun ProfileScreen(
                         Text(
                             text = "Address",
                             style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.purple500()
+                            color = ColorUtils.DarkGreen
                         )
                         InfoRow("Street", profileData?.get("street")?.toString() ?: "Not available", ColorUtils.blackcol())
                         InfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available", ColorUtils.blackcol())
@@ -618,7 +756,7 @@ fun ProfileScreen(
                         Text(
                             text = "Account Details",
                             style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.purple500()
+                            color = ColorUtils.DarkGreen
                         )
                         InfoRow("Account Type", profileData?.get("authProvider")?.toString()?.replaceFirstChar { 
                             if (it.isLowerCase()) it.titlecase() else it.toString() 
@@ -632,7 +770,7 @@ fun ProfileScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showProfileDialog = false }) {
-                    Text("Close", color = ColorUtils.purple500())
+                    Text("Close", color = ColorUtils.DarkGreen)
                 }
             }
         )
@@ -724,7 +862,8 @@ private fun RideHistoryItem(
 private fun SettingsContent(
     navController: NavController, 
     viewModel: AuthViewModel,
-    purple200: Color
+    purple200: Color,
+    coroutineScope: CoroutineScope
 ) {
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     
@@ -735,34 +874,63 @@ private fun SettingsContent(
         SettingsButton(
             icon = Icons.Default.Edit,
             text = "Edit Profile",
-            onClick = { navController.navigate("editProfile") },
-            purple200 = purple200
+            onClick = { navController.navigate(Screen.EditProfile.route) },
+            purple200 = Color.Black
         )
         SettingsButton(
             icon = Icons.Default.Lock,
             text = "Change Password",
-            onClick = { navController.navigate("changePassword") },
-            purple200 = purple200
+            onClick = { navController.navigate(Screen.ChangePassword.route) },
+            purple200 = Color.Black
         )
-        SettingsButton(
-            icon = Icons.Default.Help,
-            text = "Help & Support",
-            onClick = { navController.navigate("help") },
-            purple200 = purple200
-        )
-        Divider()
-        SettingsButton(
-            icon = Icons.Default.ExitToApp,
-            text = "Sign Out",
+        // Help & Support section removed
+        
+        Divider(modifier = Modifier.padding(vertical = 8.dp))
+        
+        // Modern Sign Out button with proper coroutineScope usage
+        Button(
             onClick = {
-                viewModel.signOut()
-                navController.navigate("signin") {
-                    popUpTo("home") { inclusive = true }
+                // Correctly use the passed coroutineScope parameter
+                coroutineScope.launch(Dispatchers.Main) {
+                    try {
+                        Log.d("ProfileTab", "User signing out")
+                        viewModel.signOut()
+                        
+                        // Navigate to sign in screen after sign out
+                        navController.navigate(Screen.SignIn.route) {
+                            popUpTo(0) { inclusive = true } // Clear the entire back stack
+                        }
+                        
+                        Log.d("ProfileTab", "Sign out completed, navigated to sign in")
+                    } catch (e: Exception) {
+                        Log.e("ProfileTab", "Error during sign out: ${e.message}")
+                    }
                 }
             },
-            purple200 = purple200,
-            elevation = 4.dp
-        )
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.LightGray.copy(alpha = 0.4f),
+                contentColor = Color.Black
+            ),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = 0.dp,
+                pressedElevation = 2.dp
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.ExitToApp,
+                contentDescription = "Sign Out",
+                tint = Color.Black,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Sign Out",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.Black
+            )
+        }
         
         Divider(modifier = Modifier.padding(top = 8.dp))
         
@@ -772,7 +940,7 @@ private fun SettingsContent(
                 .fillMaxWidth()
                 .clickable { showDeleteAccountDialog = true },
             color = Color.Transparent,
-            shadowElevation = 2.dp
+            shadowElevation = 0.dp
         ) {
             Row(
                 modifier = Modifier
@@ -826,8 +994,8 @@ private fun SettingsContent(
                         viewModel.deleteAccount(
                             onSuccess = {
                                 // Navigate to sign-in screen after successful deletion
-                                navController.navigate("signin") {
-                                    popUpTo("home") { inclusive = true }
+                                navController.navigate(Screen.SignIn.route) {
+                                    popUpTo(Screen.Home.route) { inclusive = true }
                                 }
                             },
                             onError = { /* Handle error if needed */ }
@@ -837,8 +1005,8 @@ private fun SettingsContent(
                         containerColor = Color.Red
                     ),
                     elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 4.dp,
-                        pressedElevation = 8.dp
+                        defaultElevation = 1.dp,
+                        pressedElevation = 4.dp
                     )
                 ) {
                     Text("Delete My Account")

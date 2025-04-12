@@ -32,7 +32,11 @@ import com.example.bikerental.utils.ColorUtils
 fun AppTopBar(
     onMenuClick: () -> Unit
 ) {
-    val purple500 = ColorUtils.Purple40 // Using the app's main purple color
+    // Use dark green color for interactive elements and important text
+    val greenColor = ColorUtils.DarkGreen
+    
+    // Define the same gray background color used in the sidebar
+    val grayBackground = Color(0xFFE0E0E0)
 
     CenterAlignedTopAppBar(
         title = {
@@ -49,7 +53,7 @@ fun AppTopBar(
                     text = "Bambike",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    color = purple500
+                    color = greenColor
                 )
             }
         },
@@ -58,14 +62,14 @@ fun AppTopBar(
                 Icon(
                     imageVector = Icons.Default.Menu,
                     contentDescription = "Menu",
-                    tint = purple500
+                    tint = greenColor
                 )
             }
         },
         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = Color.Transparent,
-            titleContentColor = purple500,
-            navigationIconContentColor = purple500
+            containerColor = grayBackground,
+            titleContentColor = greenColor,
+            navigationIconContentColor = greenColor
         )
     )
 } 

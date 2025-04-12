@@ -11,6 +11,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,6 +37,51 @@ import androidx.compose.foundation.background
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bikerental.models.AuthState
 import com.example.bikerental.viewmodels.AuthViewModel
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.example.bikerental.navigation.Screen
+
+/**
+ * Formats a Philippine phone number to the international format (+63)
+ */
+fun formatPhilippinePhoneNumber(phoneNumber: String): String {
+    val digitsOnly = phoneNumber.replace(Regex("[^0-9]"), "")
+    
+    return when {
+        // If it already starts with +63, return as is
+        phoneNumber.startsWith("+63") -> phoneNumber
+        
+        // If it starts with 0, replace with +63
+        digitsOnly.startsWith("0") && digitsOnly.length >= 11 -> {
+            "+63${digitsOnly.substring(1)}"
+        }
+        
+        // If it's just the 9-digit number (without 0 or +63)
+        digitsOnly.length >= 9 && !digitsOnly.startsWith("0") && !digitsOnly.startsWith("63") -> {
+            "+63$digitsOnly"
+        }
+        
+        // If it starts with 63 (without +)
+        digitsOnly.startsWith("63") && digitsOnly.length >= 12 -> {
+            "+$digitsOnly"
+        }
+        
+        // Otherwise, don't modify (will fail validation)
+        else -> phoneNumber
+    }
+}
+
+/**
+ * Validates if the input is a valid Philippine phone number
+ */
+fun isValidPhilippinePhoneNumber(phoneNumber: String): Boolean {
+    val trimmedPhone = phoneNumber.trim()
+    
+    // Check if it matches the pattern of a Philippine phone number
+    // Valid formats: +639XXXXXXXXX, 09XXXXXXXXX, 9XXXXXXXXX, 639XXXXXXXXX
+    return trimmedPhone.matches(Regex("^(\\+63|0|)9\\d{9}$")) || 
+           trimmedPhone.matches(Regex("^63\\d{10}$"))
+}
 
 @Composable
 fun SignUpScreen(
@@ -46,9 +93,30 @@ fun SignUpScreen(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
+    var formattedPhoneNumber by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
 
+    // Password validation states
+    var hasMinLength by remember { mutableStateOf(false) }
+    var hasUppercase by remember { mutableStateOf(false) }
+    var hasLowercase by remember { mutableStateOf(false) }
+    var hasDigit by remember { mutableStateOf(false) }
+    var hasSpecialChar by remember { mutableStateOf(false) }
+
+    // Update password validation whenever password changes
+    LaunchedEffect(password) {
+        hasMinLength = password.length >= 8
+        hasUppercase = password.any { it.isUpperCase() }
+        hasLowercase = password.any { it.isLowerCase() }
+        hasDigit = password.any { it.isDigit() }
+        hasSpecialChar = password.any { !it.isLetterOrDigit() }
+    }
+
+    // Function to check if the password meets all requirements
+    fun isPasswordValid(): Boolean {
+        return hasMinLength && hasUppercase && hasLowercase && hasDigit && hasSpecialChar
+    }
 
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -57,21 +125,62 @@ fun SignUpScreen(
     // Collect auth state
     val authState by viewModel.authState.collectAsState()
 
-
     // Initialize Google Sign-In
     LaunchedEffect(Unit) {
         viewModel.initializeGoogleSignIn(context)
     }
+    
+    // Add a direct Firebase Auth listener as backup
+    val currentFirebaseUser = remember { mutableStateOf<FirebaseUser?>(null) }
+    
+    DisposableEffect(Unit) {
+        val authStateListener = FirebaseAuth.AuthStateListener { auth ->
+            val user = auth.currentUser
+            if (user != null && user != currentFirebaseUser.value) {
+                Log.d("SignUpScreen", "Firebase Auth state changed - user is now logged in: ${user.uid}")
+                currentFirebaseUser.value = user
+            }
+        }
+        
+        // Register the listener
+        FirebaseAuth.getInstance().addAuthStateListener(authStateListener)
+        
+        // Clean up on dispose
+        onDispose {
+            FirebaseAuth.getInstance().removeAuthStateListener(authStateListener)
+        }
+    }
+    
+    // Navigate when Firebase Auth changes directly (backup for authState)
+    LaunchedEffect(currentFirebaseUser.value) {
+        val user = currentFirebaseUser.value
+        if (user != null) {
+            Log.d("SignUpScreen", "Detected Firebase Auth user directly, navigating to home: ${user.uid}")
+            try {
+                // Wait briefly to let Firestore user creation complete
+                kotlinx.coroutines.delay(500)
+                navController.navigate(Screen.Home.route) {
+                    popUpTo(0) { inclusive = true }
+                    launchSingleTop = true
+                }
+            } catch (e: Exception) {
+                Log.e("SignUpScreen", "Navigation failed after direct auth detection", e)
+            }
+        }
+    }
 
-    // Handle auth state changes
+    // Original auth state handler - enhanced with additional logging and error handling
     LaunchedEffect(authState) {
         Log.d("SignUpScreen", "Auth state changed to: $authState")
         when (authState) {
             is AuthState.Authenticated -> {
                 Log.d("SignUpScreen", "Authentication successful, navigating to home")
                 try {
-                    navController.navigate("home") {
-                        popUpTo(0) // Clear the entire back stack
+                    // Add a brief delay to ensure Firestore updates complete
+                    kotlinx.coroutines.delay(300)
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) { inclusive = true }
+                        launchSingleTop = true
                     }
                 } catch (e: Exception) {
                     Log.e("SignUpScreen", "Navigation failed", e)
@@ -80,6 +189,35 @@ fun SignUpScreen(
                         "Navigation error: ${e.message}",
                         Toast.LENGTH_LONG
                     ).show()
+                }
+            }
+            is AuthState.NeedsEmailVerification -> {
+                Log.d("SignUpScreen", "Email verification needed")
+                
+                // Check if user signed in with Google
+                val currentUser = FirebaseAuth.getInstance().currentUser
+                val isGoogleUser = currentUser?.providerData?.any { it.providerId == "google.com" } == true
+                
+                if (isGoogleUser) {
+                    // Google users bypass email verification
+                    Log.d("SignUpScreen", "Google user detected, skipping verification")
+                    navController.navigate(Screen.Home.route) {
+                        popUpTo(0) // Clear the entire back stack
+                    }
+                } else {
+                    // Regular email/password users need verification
+                    try {
+                        navController.navigate(Screen.EmailVerification.route) {
+                            popUpTo(Screen.SignUp.route)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("SignUpScreen", "Navigation to verification failed", e)
+                        Toast.makeText(
+                            context,
+                            "Navigation error: ${e.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
             is AuthState.Error -> {
@@ -139,31 +277,34 @@ fun SignUpScreen(
     }
 
     fun validateInputs(): Boolean {
+        // Format phone number before validation
+        formattedPhoneNumber = formatPhilippinePhoneNumber(phone.trim())
+        
         return when {
-            fullName.isBlank() -> {
+            fullName.trim().isBlank() -> {
                 Toast.makeText(context, "Please enter your full name", Toast.LENGTH_SHORT).show()
                 false
             }
-            email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email).matches() -> {
+            email.trim().isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches() -> {
                 Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
                 false
             }
-            password.length < 8 -> {
-                Toast.makeText(context, "Password must be at least 8 characters", Toast.LENGTH_SHORT).show()
+            !isPasswordValid() -> {
+                Toast.makeText(context, "Password does not meet all requirements", Toast.LENGTH_SHORT).show()
                 false
             }
             password != confirmPassword -> {
                 Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
                 false
             }
-            phone.isBlank() || !Patterns.PHONE.matcher(phone).matches() -> {
-                Toast.makeText(context, "Please enter a valid phone number", Toast.LENGTH_SHORT).show()
+            !isValidPhilippinePhoneNumber(phone.trim()) -> {
+                Toast.makeText(context, "Please enter a valid Philippine phone number", Toast.LENGTH_SHORT).show()
                 false
             }
             else -> true
         }
     }
-
+    
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -211,7 +352,7 @@ fun SignUpScreen(
             // Form Fields
             ResponsiveTextField(
                 value = fullName,
-                onValueChange = { fullName = it },
+                onValueChange = { fullName = it.trim() },
                 label = "Full Name",
                 leadingIcon = { Icon(Icons.Default.Person, "Name") }
             )
@@ -240,7 +381,32 @@ fun SignUpScreen(
                         )
                     }
                 },
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation()
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                supportingText = {
+                    Column {
+                        Text("Password must contain:")
+                        PasswordRequirementItem(
+                            text = "At least 8 characters",
+                            isValid = hasMinLength
+                        )
+                        PasswordRequirementItem(
+                            text = "At least one uppercase letter",
+                            isValid = hasUppercase
+                        )
+                        PasswordRequirementItem(
+                            text = "At least one lowercase letter",
+                            isValid = hasLowercase
+                        )
+                        PasswordRequirementItem(
+                            text = "At least one number",
+                            isValid = hasDigit
+                        )
+                        PasswordRequirementItem(
+                            text = "At least one special character",
+                            isValid = hasSpecialChar
+                        )
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -265,9 +431,22 @@ fun SignUpScreen(
 
             ResponsiveTextField(
                 value = phone,
-                onValueChange = { phone = it },
-                label = "Phone Number",
-                leadingIcon = { Icon(Icons.Default.Phone, "Phone") }
+                onValueChange = { 
+                    // Store raw input
+                    phone = it
+                    
+                    // Show formatted preview if valid
+                    if (isValidPhilippinePhoneNumber(it.trim())) {
+                        formattedPhoneNumber = formatPhilippinePhoneNumber(it.trim())
+                    }
+                },
+                label = "Phone Number (e.g., 09123456789)",
+                leadingIcon = { Icon(Icons.Default.Phone, "Phone") },
+                supportingText = {
+                    if (phone.isNotEmpty() && isValidPhilippinePhoneNumber(phone.trim())) {
+                        Text("Will be saved as: $formattedPhoneNumber")
+                    }
+                }
             )
 
         Spacer(modifier = Modifier.height(32.dp))
@@ -276,12 +455,18 @@ fun SignUpScreen(
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                        viewModel.createUserWithEmailPassword(email, password, fullName, phone)
+                    // Use the formatted phone number for registration
+                    viewModel.createUserWithEmailPassword(
+                        email.trim(), 
+                        password, 
+                        fullName.trim(), 
+                        formattedPhoneNumber
+                    )
                 }
             },
             text = "Sign Up",
-                isLoading = authState is AuthState.Loading
-            )
+            isLoading = authState is AuthState.Loading
+        )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -359,8 +544,8 @@ fun SignUpScreen(
                     ),
                     color = colorScheme.primary,
                     modifier = Modifier.clickable {
-                        navController.navigate("signIn") {
-                            popUpTo("signUp") { inclusive = true }
+                        navController.navigate(Screen.SignIn.route) {
+                            popUpTo(Screen.SignUp.route)
                         }
                     }
                 )
@@ -375,4 +560,31 @@ fun SignUpScreen(
 @Composable
 fun SignUpScreenPreview() {
     SignUpScreen(rememberNavController())
+}
+
+/**
+ * A composable for displaying a password requirement with a check mark or X icon
+ */
+@Composable
+fun PasswordRequirementItem(
+    text: String,
+    isValid: Boolean
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 2.dp)
+    ) {
+        Icon(
+            imageVector = if (isValid) Icons.Default.CheckCircle else Icons.Default.Cancel,
+            contentDescription = if (isValid) "Requirement met" else "Requirement not met",
+            tint = if (isValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }

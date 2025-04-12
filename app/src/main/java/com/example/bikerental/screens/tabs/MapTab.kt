@@ -239,7 +239,7 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
                         .height(48.dp)
                         .padding(start = 4.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = ColorUtils.Purple40
+                        containerColor = ColorUtils.DarkGreen
                     ),
                     shape = RoundedCornerShape(24.dp)
                 ) {

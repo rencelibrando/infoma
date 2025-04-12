@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.BorderStroke
 
 /**
  * A responsive text field with consistent styling across the app
@@ -31,7 +33,8 @@ fun ResponsiveTextField(
     trailingIcon: @Composable (() -> Unit)? = null,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     isError: Boolean = false,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    supportingText: @Composable (() -> Unit)? = null
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -47,7 +50,8 @@ fun ResponsiveTextField(
             colors = TextFieldDefaults.outlinedTextFieldColors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline
-            )
+            ),
+            supportingText = supportingText
         )
         
         if (isError && errorMessage != null) {
@@ -180,27 +184,48 @@ fun GoogleSignInButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().height(56.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(56.dp),
         enabled = !isLoading,
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.onBackground
-        )
+            containerColor = Color.White,
+            contentColor = Color(0xFF4285F4) // Google Blue
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 8.dp
+        ),
+        border = BorderStroke(1.dp, Color.LightGray)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp
+                    strokeWidth = 2.dp,
+                    color = Color(0xFF4285F4) // Google Blue
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Signing in...",
+                    color = Color.DarkGray
                 )
             } else {
                 // Google logo
                 GoogleLogo()
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Sign in with Google")
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Continue with Google",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Medium
+                    ),
+                    color = Color.DarkGray
+                )
             }
         }
     }

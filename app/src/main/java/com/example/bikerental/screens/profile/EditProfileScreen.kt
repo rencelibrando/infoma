@@ -528,6 +528,14 @@ private fun updateUserProfile(
                             currentUser.reload().addOnCompleteListener {
                                 println("User data reloaded")
                                 onComplete()
+                                
+                                // Navigate back to profile tab (index 3) in the HomeScreen
+                                // Use custom argument to indicate we're returning to Profile tab
+                                navController.previousBackStackEntry
+                                    ?.savedStateHandle
+                                    ?.set("returnToProfileTab", true)
+                                
+                                // Pop back without specifying destination to prevent incorrect navigation
                                 navController.popBackStack()
                             }
                         } else {

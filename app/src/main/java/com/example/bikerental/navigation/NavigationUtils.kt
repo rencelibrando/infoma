@@ -114,4 +114,27 @@ object NavigationUtils {
     fun navigateToBookingDetails(navController: NavController, bookingId: String) {
         navController.navigate(Screen.BookingDetails.createRoute(bookingId))
     }
+
+    /**
+     * Navigate to Google verification screen
+     */
+    fun navigateToGoogleVerification(navController: NavController, popUpRoute: String? = null) {
+        navController.navigate(Screen.GoogleVerification.route) {
+            if (popUpRoute != null) {
+                popUpTo(popUpRoute) { inclusive = true }
+            }
+        }
+    }
+
+    /**
+     * Navigate to Email verification screen
+     */
+    fun navigateToEmailVerification(navController: NavController, popUpRoute: String? = null) {
+        navController.navigate(Screen.EmailVerification.route) {
+            if (popUpRoute != null) {
+                popUpTo(popUpRoute) { inclusive = true }
+            }
+            launchSingleTop = true
+        }
+    }
 } 

@@ -9,10 +9,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.example.bikerental.components.RestrictedButton
 import com.example.bikerental.models.Bike
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.utils.LocationManager
@@ -23,11 +26,12 @@ import kotlin.math.*
 @Composable
 fun BikesTab(
     fusedLocationProviderClient: FusedLocationProviderClient?,
+    navController: NavController? = null,
     modifier: Modifier = Modifier
 ) {
     var bikes by remember { mutableStateOf(listOf<Bike>()) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val locationManager = remember { LocationManager.getInstance(context) }
     
     // Get location
@@ -65,7 +69,26 @@ fun BikesTab(
                 latitude = 14.5895,
                 longitude = 120.9765
             ),
-            // Add more bikes as needed
+            Bike(
+                id = "3",
+                name = "City Cruiser",
+                type = "Urban",
+                price = "₱20/hr",
+                priceValue = 20.0,
+                imageUrl = "https://example.com/bike3.jpg",
+                latitude = 14.5880,
+                longitude = 120.9750
+            ),
+            Bike(
+                id = "4",
+                name = "BMX Bike",
+                type = "BMX",
+                price = "₱35/hr",
+                priceValue = 35.0,
+                imageUrl = "https://example.com/bike4.jpg",
+                latitude = 14.5875,
+                longitude = 120.9745
+            )
         )
     }
 
@@ -91,6 +114,13 @@ fun BikesTab(
                 BikeCard(
                     bike = bike,
                     currentLocation = currentLocation,
+                    onBook = {
+                        // Would navigate to booking flow in a real implementation
+                    },
+                    onCompleteProfile = {
+                        // Navigate to profile completion
+                        navController?.navigate("editProfile")
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -103,14 +133,16 @@ fun BikesTab(
 fun BikeCard(
     bike: Bike,
     currentLocation: LatLng?,
+    onBook: (Bike) -> Unit,
+    onCompleteProfile: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier,
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
-            modifier = Modifier.padding(8.dp)
+            modifier = Modifier.padding(12.dp)
         ) {
             AsyncImage(
                 model = bike.imageUrl,
@@ -135,25 +167,42 @@ fun BikeCard(
                 color = MaterialTheme.colorScheme.primary
             )
 
-            Text(
-                text = bike.type,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            currentLocation?.let { location ->
-                val distance = calculateDistance(
-                    location.latitude,
-                    location.longitude,
-                    bike.latitude,
-                    bike.longitude
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = "%.1f km away".format(distance),
+                    text = bike.type,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                currentLocation?.let { location ->
+                    val distance = calculateDistance(
+                        location.latitude,
+                        location.longitude,
+                        bike.latitude,
+                        bike.longitude
+                    )
+                    Text(
+                        text = "%.1f km".format(distance),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Booking button with feature restriction
+            RestrictedButton(
+                text = "Book Now",
+                featureType = "booking", // This requires complete profile & verified phone
+                onClick = { onBook(bike) },
+                onCompleteProfile = onCompleteProfile,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

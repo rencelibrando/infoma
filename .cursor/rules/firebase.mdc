@@ -1,0 +1,124 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+You are an expert in Kotlin, Jetpack Compose, and Firebase Firestore, building modern Android apps with a clean architecture.
+
+Project Structure and File Naming
+- Organize by feature-based modules (e.g., auth/, home/, profile/, booking/)
+- Use Clean Architecture: data/, domain/, presentation/ layers
+- Use environment-based Firebase configs (via google-services.json variants)
+- Use Gradle build flavors for development, staging, and production
+- Integrate CI/CD (e.g., GitHub Actions, Bitrise)
+- Maintain a consistent package structure
+- Logically structure Firestore collections (users/, bikes/, bookings/)
+
+## Project Structure and Organization
+- Follow MVVM (Model-View-ViewModel) architecture
+- Use State Hoisting for composables
+- Minimize shared mutable state
+- Manage navigation using Navigation-Compose
+- Centralize all Firebase calls into Repository or UseCase classes
+- Create a FirebaseService layer to abstract Firestore/Auth/Storage logic
+- Use Kotlin Coroutines + Flow/StateFlow for reactive data streams
+- Use Result<T> or sealed classes to handle success/error states
+- Handle storage access through a centralized manager
+- Use ViewModel-scope for UI-related data and logic
+- Firebase Usage Guidelines
+- Initialize Firebase properly in Application class
+- Use Firebase Authentication for user management
+- Use Firebase Firestore for structured, scalable data
+- Create dedicated Firestore services for each collection
+- Use transactions and batch writes for atomic operations
+- Set up Firebase Security Rules for each environment
+- Use Firebase Storage for file uploads/downloads (e.g., profile pictures)
+- Use Firebase Cloud Functions for server-side logic if needed
+- Integrate Firebase Analytics for tracking behavior
+- Use Firebase Crashlytics for error and crash reporting
+- Enable offline persistence for Firestore
+- Use query cursors for paginated Firestore reads
+- Cache Firestore results where needed
+Monitor Firestore read/write quotas
+
+
+## Naming Conventions
+- camelCase: functions, variables (e.g., `getUsers`, `totalPrice`)
+- kebab-case: file names (e.g., `user-service.ts`, `home-component.ts`)
+- PascalCase: classes (e.g., `UserService`)
+- Booleans: use prefixes like 'should', 'has', 'is' (e.g., `shouldLoadData`, `isLoading`).
+- UPPERCASE: constants and global variables (e.g., `API_URL`, `APP_VERSION`).
+- Firestore collections: plural nouns (e.g., `users`, `bookings`).
+- Firestore documents: descriptive IDs (e.g., `user-${uid}`, `booking-${timestamp}`).
+
+## Dependencies and Frameworks
+- Avoid using any external frameworks or libraries unless its absolutely required.
+- Use native plugins through Ionic Native wrappers with proper fallbacks for a smooth user experience in both web and native platforms.
+- While choosing any external dependency, check for the following things:
+- Device compatibility
+- Active maintenance
+- Security
+- Documentation
+- Ease of integration and upgrade
+- Use native components for both mobile and web if available and fullfill the requirements.
+- If any native plugin is being used for andriod or ios, it should be handled in a centralized service and should not be used directly in the component.
+- Use official Firebase SDKs and AngularFire for Firestore integration.
+- Implement proper Firebase initialization and configuration.
+- Handle Firebase Authentication properly.
+- Set up appropriate Firebase Security Rules.
+
+## UI and Styles
+- Use Material3 and Jetpack Compose best practices
+- Reuse UI components across screens
+- Use rememberSaveable, derivedStateOf, and StateFlow to manage state
+- Handle loading states and errors for all Firebase interactions
+- Support real-time updates using Firestore snapshot listeners
+- Gracefully handle offline mode with cached Firestore data
+
+##Firebase Usage Guidelines
+- Initialize Firebase properly in Application class
+- Use Firebase Authentication for user management
+- Use Firebase Firestore for structured, scalable data
+- Create dedicated Firestore services for each collection
+- Use transactions and batch writes for atomic operations
+- Set up Firebase Security Rules for each environment
+- Use Firebase Storage for file uploads/downloads (e.g., profile pictures)
+- Use Firebase Cloud Functions for server-side logic if needed
+- Integrate Firebase Analytics for tracking behavior
+- Use Firebase Crashlytics for error and crash reporting
+- Enable offline persistence for Firestore
+- Use query cursors for paginated Firestore reads
+- Cache Firestore results where needed
+- Monitor Firestore read/write quotas
+
+
+## Performance and Optimization
+- Use LaunchedEffect + paging for lazy loading
+- Use Firestore query cursors (startAfter, limit) for efficient pagination
+- Use Room for caching if offline-first experience is important
+- Avoid redundant Firestore reads
+- Use indexing for commonly filtered/sorted queries
+- Wrap expensive or bulk Firestore operations in batch writes
+- Monitor and optimize Firestore document sizes and reads
+
+## UI & UX (Jetpack Compose Focus)
+- Use Material3 and Jetpack Compose best practices
+- Reuse UI components across screens
+- Use rememberSaveable, derivedStateOf, and StateFlow to manage state
+- Handle loading states and errors for all Firebase interactions
+- Support real-time updates using Firestore snapshot listeners
+- Gracefully handle offline mode with cached Firestore data
+- 
+## Testing
+- Use JUnit, MockK, and Turbine for unit and Flow testing
+- Write unit tests for ViewModels and UseCases
+- Use Firebase Emulator Suite for local testing of Firestore, Auth, and Functions
+- Mock Firebase dependencies in tests (Auth, Firestore, Storage)
+- Test offline sync behavior
+- Verify Firebase Security Rules with test scripts
+
+
+Follow official Jetpack Compose, Firebase, and Kotlin documentation and guidelines for up-to-date best practices.
+
+

@@ -18,13 +18,14 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.example.bikerental.R
 import androidx.compose.foundation.BorderStroke
+import com.example.bikerental.navigation.Screen
 
 @Composable
 fun GearTickLoginScreen(navController: NavHostController) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF6C63FF)) // Blue background
+            .background(Color(0xFFF5F5F5)) // Keeping light gray background
     ) {
         Column(
             modifier = Modifier
@@ -35,76 +36,68 @@ fun GearTickLoginScreen(navController: NavHostController) {
         ) {
             // App Logo
             Image(
-                painter = painterResource(id = R.drawable.bambike),
+                painter = painterResource(id = R.drawable.bambikelogo),
                 contentDescription = "Bambike Logo",
-                modifier = Modifier.size(80.dp)
+                modifier = Modifier.size(100.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            // App Title
+            // App Title - Changed to black
             Text(
                 text = "Bambike",
-                fontSize = 32.sp,
+                fontSize = 36.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = Color.Black // Changed from blue to black
             )
 
-            // App Subtitle
+            // App Subtitle - Changed to black
             Text(
                 text = "REVOLUTION CYCLES",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = Color.Black, // Changed from blue to black
                 modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp)
-            )
-            
-            // App Description
-            Text(
-                text = "Discover convenient bike rental services at your fingertips.",
-                fontSize = 14.sp,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp)
             )
 
             Spacer(modifier = Modifier.height(48.dp))
 
-            // Log In Button
+            // Log In Button - Changed text to black, background to gray
             Button(
-                onClick = { navController.navigate("signIn")},
+                onClick = { navController.navigate(Screen.SignIn.route) },
                 modifier = Modifier
                     .width(280.dp)
                     .height(50.dp),
                 shape = RoundedCornerShape(50.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White
+                    containerColor = Color(0xFFE0E0E0) // Light gray button
                 )
             ) {
                 Text(
                     text = "Log In",
                     fontSize = 18.sp,
-                    color = Color.Black
+                    color = Color.Black // Changed from white to black
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Sign Up Button
+            // Sign Up Button - Changed text to black, border to black
             OutlinedButton(
-                onClick = { navController.navigate("signUp") },
+                onClick = { navController.navigate(Screen.SignUp.route) },
                 modifier = Modifier
                     .width(280.dp)
                     .height(50.dp),
                 shape = RoundedCornerShape(50.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Color.White
+                    contentColor = Color.Black // Changed from blue to black
                 ),
-                border = BorderStroke(1.dp, Color.White)
+                border = BorderStroke(1.dp, Color.Black) // Changed from blue to black
             ) {
                 Text(
                     text = "Sign Up",
                     fontSize = 18.sp,
-                    color = Color.White
+                    color = Color.Black // Changed from blue to black
                 )
             }
         }

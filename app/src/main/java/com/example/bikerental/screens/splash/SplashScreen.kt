@@ -122,7 +122,7 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
             // Main title with slide and fade animations
             Text(
                 text = "Bambike",
-                color = Color(0xFF6C63FF),
+                color = Color.Black,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -137,7 +137,7 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
             // Subtitle with slide and fade animations (from opposite direction)
             Text(
                 text = "REVOLUTION CYCLES",
-                color = Color.DarkGray,
+                color = Color.Black,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
