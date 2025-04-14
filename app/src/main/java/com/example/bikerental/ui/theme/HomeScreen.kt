@@ -115,15 +115,17 @@ fun HomeScreen(
     // Handle return navigation from profile editing
     // Check if we should navigate to the profile tab (after editing profile)
     LaunchedEffect(navController) {
-        val returnToProfileTab = navController.currentBackStackEntry
-            ?.savedStateHandle
-            ?.get<Boolean>("returnToProfileTab") ?: false
+        val navBackStackEntry = navController.currentBackStackEntry
+        val returnToProfileTab = navBackStackEntry?.savedStateHandle?.get<Boolean>("returnToProfileTab") ?: false
             
         if (returnToProfileTab) {
             // Clear the flag to prevent repeated handling
             navController.currentBackStackEntry?.savedStateHandle?.remove<Boolean>("returnToProfileTab")
             // Update the selected tab to Profile (index 3)
             selectedTab = 3
+            
+            // Ensure the flag is not propagated to previous entries accidentally
+            navBackStackEntry?.savedStateHandle?.remove<Boolean>("returnToProfileTab")
         }
     }
 

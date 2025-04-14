@@ -30,7 +30,8 @@ data class Bike(
     val currentRider: String = "",  // User ID of the current rider
     val lastUpdated: Long = 0,      // Timestamp of the last location update
     val stationId: String = "",     // ID of the station where the bike is docked (if applicable)
-    val distanceToUser: String = "" // Not stored in Firebase, calculated on client
+    val distanceToUser: String = "", // Not stored in Firebase, calculated on client
+    val description: String = ""     // Bike description (new field)
 ) {
     @Exclude
     fun toMap(): Map<String, Any?> {
@@ -50,7 +51,8 @@ data class Bike(
             "isInUse" to isInUse,
             "currentRider" to currentRider,
             "lastUpdated" to lastUpdated,
-            "stationId" to stationId
+            "stationId" to stationId,
+            "description" to description
         )
     }
     
@@ -68,7 +70,8 @@ data class Bike(
             type: String,
             price: Double,
             imageUrl: String,
-            location: LatLng
+            location: LatLng,
+            description: String = ""
         ): Bike {
             return Bike(
                 id = id,
@@ -80,7 +83,8 @@ data class Bike(
                 latitude = location.latitude,
                 longitude = location.longitude,
                 isAvailable = true,
-                isInUse = false
+                isInUse = false,
+                description = description
             )
         }
     }

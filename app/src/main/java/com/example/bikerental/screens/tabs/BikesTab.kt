@@ -1,5 +1,6 @@
 package com.example.bikerental.screens.tabs
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -11,28 +12,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.example.bikerental.components.RestrictedButton
 import com.example.bikerental.models.Bike
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.utils.LocationManager
+import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.maps.model.LatLng
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.*
 
 @Composable
 fun BikesTab(
     fusedLocationProviderClient: FusedLocationProviderClient?,
     navController: NavController? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    bikeViewModel: BikeViewModel = viewModel()
 ) {
-    var bikes by remember { mutableStateOf(listOf<Bike>()) }
     var currentLocation by remember { mutableStateOf<LatLng?>(null) }
     val context = LocalContext.current
     val locationManager = remember { LocationManager.getInstance(context) }
+    
+    // Collect bikes from Firestore
+    val bikes by bikeViewModel.bikes.collectAsState()
+    val isLoading by bikeViewModel.isLoading.collectAsState()
+    val error by bikeViewModel.error.collectAsState()
     
     // Get location
     LaunchedEffect(fusedLocationProviderClient) {
@@ -46,50 +58,9 @@ fun BikesTab(
         )
     }
     
-    // Simulated bike data
+    // Refresh bikes from Firestore when the screen is shown
     LaunchedEffect(Unit) {
-        bikes = listOf(
-            Bike(
-                id = "1",
-                name = "Mountain Bike",
-                type = "Mountain",
-                price = "₱25/hr",
-                priceValue = 25.0,
-                imageUrl = "https://example.com/bike1.jpg",
-                latitude = 14.5890,
-                longitude = 120.9760
-            ),
-            Bike(
-                id = "2",
-                name = "Road Bike",
-                type = "Road",
-                price = "₱30/hr",
-                priceValue = 30.0,
-                imageUrl = "https://example.com/bike2.jpg",
-                latitude = 14.5895,
-                longitude = 120.9765
-            ),
-            Bike(
-                id = "3",
-                name = "City Cruiser",
-                type = "Urban",
-                price = "₱20/hr",
-                priceValue = 20.0,
-                imageUrl = "https://example.com/bike3.jpg",
-                latitude = 14.5880,
-                longitude = 120.9750
-            ),
-            Bike(
-                id = "4",
-                name = "BMX Bike",
-                type = "BMX",
-                price = "₱35/hr",
-                priceValue = 35.0,
-                imageUrl = "https://example.com/bike4.jpg",
-                latitude = 14.5875,
-                longitude = 120.9745
-            )
-        )
+        bikeViewModel.fetchBikesFromFirestore()
     }
 
     Column(
@@ -104,25 +75,47 @@ fun BikesTab(
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(bikes) { bike ->
-                BikeCard(
-                    bike = bike,
-                    currentLocation = currentLocation,
-                    onBook = {
-                        // Would navigate to booking flow in a real implementation
-                    },
-                    onCompleteProfile = {
-                        // Navigate to profile completion
-                        navController?.navigate("editProfile")
-                    },
-                    modifier = Modifier.fillMaxWidth()
+        if (isLoading && bikes.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (error != null && bikes.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Error loading bikes: ${error}",
+                    color = MaterialTheme.colorScheme.error
                 )
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(bikes) { bike ->
+                    BikeCard(
+                        bike = bike,
+                        currentLocation = currentLocation,
+                        onBikeClick = {
+                            // Will navigate to bike detail screen
+                        },
+                        onBook = {
+                            // Would navigate to booking flow in a real implementation
+                        },
+                        onCompleteProfile = {
+                            // Navigate to profile completion
+                            navController?.navigate("editProfile")
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
     }
@@ -133,51 +126,92 @@ fun BikesTab(
 fun BikeCard(
     bike: Bike,
     currentLocation: LatLng?,
+    onBikeClick: (Bike) -> Unit = {},
     onBook: (Bike) -> Unit,
     onCompleteProfile: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier,
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        onClick = { onBikeClick(bike) }
     ) {
         Column(
             modifier = Modifier.padding(12.dp)
         ) {
-            AsyncImage(
-                model = bike.imageUrl,
+            // Bike Image with error handling and placeholder
+            SubcomposeAsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(bike.imageUrl)
+                    .crossfade(true)
+                    .build(),
                 contentDescription = bike.name,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                loading = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
+                error = {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = bike.name.firstOrNull()?.toString() ?: "B",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Bike Name
             Text(
                 text = bike.name,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
+            // Bike Price
             Text(
                 text = bike.price,
                 fontSize = 14.sp,
-                color = MaterialTheme.colorScheme.primary
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
             )
 
+            // Type and Distance
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Bike Type
                 Text(
                     text = bike.type,
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                // Distance from user
                 currentLocation?.let { location ->
                     val distance = calculateDistance(
                         location.latitude,
@@ -192,6 +226,16 @@ fun BikeCard(
                     )
                 }
             }
+            
+            // Bike Description
+            Text(
+                text = bike.description.ifEmpty { "High quality ${bike.type.lowercase()} bike available for rent in your area." },
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
             
             Spacer(modifier = Modifier.height(8.dp))
             
@@ -227,4 +271,4 @@ private fun calculateDistance(
     val c = 2 * atan2(sqrt(a), sqrt(1 - a))
 
     return r * c
-} 
+}

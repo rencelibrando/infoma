@@ -11,14 +11,14 @@ sealed class PhoneAuthState {
     object RecaptchaError : PhoneAuthState()
     object AppCheckError : PhoneAuthState()
     
-    data class Error(val message: String) : PhoneAuthState()
+    data class Error(val message: String) : PhoneAuthState() {
+        // Add error accessor for compatibility with ProfileTab code
+        val error: Throwable? = null
+    }
     
-    // Rate limiting with server-based expiry time
+    // Rate limiting - simplified, no server/device distinction needed now
     data class RateLimited(
-        val expireTimeMillis: Long,
-        val displayDuration: String,
-        val isServerBased: Boolean = true,
-        val isDeviceBlock: Boolean = false,  // Flag for device-level blocks vs rate limits
-        val reason: String = "Too many verification attempts" // Reason for the rate limit
+        val expireTimeMillis: Long, // Keep expiry for potential UI display
+        val displayDuration: String // Keep display duration for UI
     ) : PhoneAuthState()
 } 

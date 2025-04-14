@@ -65,6 +65,37 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.unit.Dp
 import com.example.bikerental.navigation.Screen
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import android.widget.Toast
+import androidx.compose.ui.text.style.TextOverflow
+
+// Add this function near the top of the file, before the ProfileTab function
+fun formatPhilippinePhoneNumber(phoneNumber: String): String {
+    // Remove any non-digit characters
+    val digitsOnly = phoneNumber.replace(Regex("\\D"), "")
+    
+    return when {
+        // If already in international format with +63
+        digitsOnly.startsWith("63") && digitsOnly.length >= 12 -> {
+            "+$digitsOnly"
+        }
+        // If starts with 0 (local format)
+        digitsOnly.startsWith("0") && digitsOnly.length >= 11 -> {
+            "+63${digitsOnly.substring(1)}"
+        }
+        // If starts with 9 (mobile number without prefix)
+        digitsOnly.startsWith("9") && digitsOnly.length >= 10 -> {
+            "+63$digitsOnly"
+        }
+        // Otherwise keep as is
+        else -> {
+            phoneNumber
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -89,7 +120,21 @@ fun ProfileScreen(
     var isCheckingRateLimit by remember { mutableStateOf(false) }
     var verificationAttempted by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
-    var phoneNumber by remember { mutableStateOf("") }
+    var phoneNumber by remember {
+        mutableStateOf(
+            profileData?.get("phoneNumber")?.toString() ?: ""
+        )
+    }
+    var formattedPhoneNumber by remember {
+        mutableStateOf(
+            formatPhilippinePhoneNumber(
+                profileData?.get("phoneNumber")?.toString() ?: ""
+            )
+        )
+    }
+    
+    // State for tracking previous phone auth state
+    var previousPhoneAuthState by remember { mutableStateOf<PhoneAuthState?>(null) }
     
     // Function to check if profile is complete
     fun isProfileComplete(): Boolean {
@@ -97,23 +142,59 @@ fun ProfileScreen(
             val requiredFields = listOf(
                 "fullName",
                 "phoneNumber",
+                "email",
                 "street",
                 "barangay",
                 "city"
             )
             requiredFields.all { field ->
-                data[field].toString().isNotBlank()
+                val value = data[field]?.toString()
+                value != null && value.isNotBlank()
             }
-        } == true
+        } ?: false
     }
 
     fun isPhoneVerified(): Boolean {
         return profileData?.get("isPhoneVerified") as? Boolean == true
     }
     
+    // Function to update phone number in Firestore
+    fun updatePhoneNumber(formattedNumber: String) {
+        // Only update if user is authenticated and phone number has changed
+        if (user != null && formattedNumber != profileData?.get("phoneNumber")?.toString()) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(user!!.uid)
+                .update("phoneNumber", formattedNumber)
+                .addOnSuccessListener {
+                    // Update successful
+                    Toast.makeText(
+                        context,
+                        "Phone number updated successfully",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    
+                    // Update local profileData
+                    val updatedProfileData = profileData?.toMutableMap() ?: mutableMapOf()
+                    updatedProfileData["phoneNumber"] = formattedNumber
+                    profileData = updatedProfileData
+                }
+                .addOnFailureListener { e ->
+                    // Update failed
+                    Toast.makeText(
+                        context,
+                        "Failed to update phone number: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+        }
+    }
+    
     // Function to refresh profile data
     fun refreshProfile() {
+        isRefreshing = true
         user = FirebaseAuth.getInstance().currentUser
+        
         if (user != null) {
             // First reload Firebase Auth user to get fresh data
             user?.reload()?.addOnCompleteListener { reloadTask ->
@@ -121,6 +202,11 @@ fun ProfileScreen(
                     Log.d("ProfileTab", "Firebase Auth user reloaded successfully")
                     // Get the refreshed user instance
                     user = FirebaseAuth.getInstance().currentUser
+                    
+                    // After reload, update UI with the latest data
+                    formattedPhoneNumber = formatPhilippinePhoneNumber(
+                        profileData?.get("phoneNumber")?.toString() ?: ""
+                    )
                 } else {
                     Log.e("ProfileTab", "Failed to reload Firebase Auth user: ${reloadTask.exception?.message}")
                 }
@@ -134,27 +220,72 @@ fun ProfileScreen(
                         if (document != null && document.exists()) {
                             profileData = document.data
                             
-                            // If Firestore is missing email but Firebase Auth has it, update Firestore
+                            // Update phone number state with the latest data
+                            phoneNumber = profileData?.get("phoneNumber")?.toString() ?: ""
+                            formattedPhoneNumber = formatPhilippinePhoneNumber(phoneNumber)
+                            
+                            // Sync Firebase Auth email with Firestore if needed
                             val firestoreEmail = profileData?.get("email")?.toString()
                             val firebaseEmail = user?.email
                             
-                            if (firestoreEmail.isNullOrEmpty() && !firebaseEmail.isNullOrEmpty()) {
+                            if ((firestoreEmail.isNullOrEmpty() || firestoreEmail == "null") && !firebaseEmail.isNullOrEmpty()) {
                                 Log.d("ProfileTab", "Updating missing email in Firestore: $firebaseEmail")
                                 FirebaseFirestore.getInstance()
                                     .collection("users")
                                     .document(user!!.uid)
                                     .update("email", firebaseEmail)
+                                    .addOnSuccessListener {
+                                        // Update local profileData to reflect the change
+                                        val updatedProfileData = profileData?.toMutableMap() ?: mutableMapOf()
+                                        updatedProfileData["email"] = firebaseEmail
+                                        profileData = updatedProfileData
+                                        
+                                        Log.d("ProfileTab", "Updated email in Firestore successfully")
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("ProfileTab", "Failed to update email in Firestore: ${e.message}")
+                                    }
                             }
                             
-                            isRefreshing = false
+                            Log.d("ProfileTab", "Loaded profile data: $profileData")
+                        } else {
+                            Log.d("ProfileTab", "No profile document exists for user ${user?.uid}")
+                            // Create a minimal profile if none exists
+                            val minimalProfile = mapOf(
+                                "email" to (user?.email ?: ""),
+                                "fullName" to (user?.displayName ?: ""),
+                                "createdAt" to com.google.firebase.Timestamp.now()
+                            )
+                            
+                            FirebaseFirestore.getInstance()
+                                .collection("users")
+                                .document(user!!.uid)
+                                .set(minimalProfile)
+                                .addOnSuccessListener {
+                                    Log.d("ProfileTab", "Created minimal profile for user")
+                                    profileData = minimalProfile
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("ProfileTab", "Failed to create minimal profile: ${e.message}")
+                                }
                         }
-                    }
-                    .addOnFailureListener {
                         isRefreshing = false
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("ProfileTab", "Failed to load profile data: ${e.message}")
+                        isRefreshing = false
+                        
+                        // Show error toast
+                        Toast.makeText(
+                            context,
+                            "Failed to load profile data. Please try again.",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
             }
         } else {
             isRefreshing = false
+            Log.w("ProfileTab", "No user logged in, can't refresh profile")
         }
     }
 
@@ -195,7 +326,9 @@ fun ProfileScreen(
 
     // Effect to handle verification success and other state changes
     LaunchedEffect(phoneAuthState.value) {
-        when (phoneAuthState.value) {
+        val currentState = phoneAuthState.value // Capture current state for the effect
+
+        when (currentState) {
             is PhoneAuthState.Success -> {
                 showVerifyPhoneDialog = false
                 actuallyShowVerifyDialog = false
@@ -213,20 +346,33 @@ fun ProfileScreen(
             is PhoneAuthState.RateLimited -> {
                 // When rate limited, close dialog and show rate limit message
                 actuallyShowVerifyDialog = false
-                verificationAttempted = true
+                verificationAttempted = true // Keep this true to indicate an attempt happened
             }
             is PhoneAuthState.Initial -> {
-                // If returned to initial state and timer completed, reset verification attempted flag
-                if (verificationAttempted) {
-                    val currentState = phoneAuthState.value
-                    // Only reset if we're returning from a rate limit
-                    if (currentState is PhoneAuthState.Initial) {
-                        verificationAttempted = false
-                    }
+                // Only reset verificationAttempted if the state explicitly transitions
+                // back from RateLimited after the timer completes.
+                if (previousPhoneAuthState is PhoneAuthState.RateLimited) {
+                    verificationAttempted = false
+                    Log.d("ProfileTab", "Resetting verificationAttempted as state moved from RateLimited to Initial")
                 }
+                // Reset other potentially stale states if needed when returning to Initial
+                isVerificationInProgress = false
+                // Keep phoneNumber and verificationCode if user might retry immediately?
+                // Consider resetting them based on UX requirements.
             }
-            else -> {}
+            // Add handling for Error state if necessary
+            is PhoneAuthState.Error -> {
+                 // Optionally handle error state, e.g., reset progress indicators
+                 isVerificationInProgress = false
+                 // Maybe show a snackbar or log the error?
+                 Log.e("ProfileTab", "PhoneAuthState Error: \${currentState.error?.message}")
+            }
+            else -> {
+                // No specific action needed for other states like Loading or Idle in this effect
+            }
         }
+        // Update previous state *after* processing the current state
+        previousPhoneAuthState = currentState
     }
 
     // Check rate limit when user tries to open verification dialog
@@ -495,6 +641,8 @@ fun ProfileScreen(
                                     shape = CircleShape
                                 ),
                             contentScale = ContentScale.Crop,
+                            error = painterResource(id = R.drawable.default_profile_picture),
+                            fallback = painterResource(id = R.drawable.default_profile_picture),
                             placeholder = painterResource(id = R.drawable.default_profile_picture)
                         )
                     }
@@ -503,32 +651,62 @@ fun ProfileScreen(
                     Column(
                         modifier = Modifier.weight(1f)
                     ) {
+                        // Enhanced name display with fallbacks
+                        val displayName = when {
+                            !profileData?.get("fullName")?.toString().isNullOrBlank() -> 
+                                profileData?.get("fullName")?.toString()
+                            !user?.displayName.isNullOrBlank() -> 
+                                user?.displayName
+                            !user?.email.isNullOrBlank() -> 
+                                user?.email?.substringBefore('@')
+                            else -> "Complete your profile"
+                        }
+                        
                         Text(
-                            text = profileData?.get("fullName")?.toString() 
-                                ?: user?.displayName 
-                                ?: "Complete your profile",
+                            text = displayName ?: "Complete your profile",
                             style = MaterialTheme.typography.titleMedium,
                             color = ColorUtils.DarkGreen
                         )
                         // Improved email display with multiple fallbacks
                         val emailToShow = when {
                             // First try Firestore data
-                            profileData?.get("email")?.toString()?.isNotEmpty() == true -> 
+                            !profileData?.get("email")?.toString().isNullOrBlank() -> 
                                 profileData?.get("email")?.toString()
                             // Then try Firebase Auth user - use safe call for email
-                            user?.email?.isNotEmpty() == true -> 
+                            !user?.email.isNullOrBlank() -> 
                                 user?.email
                             // Then try current user from Firebase Auth (might be more up-to-date)
-                            FirebaseAuth.getInstance().currentUser?.email?.isNotEmpty() == true ->
+                            !FirebaseAuth.getInstance().currentUser?.email.isNullOrBlank() ->
                                 FirebaseAuth.getInstance().currentUser?.email
                             // Fallback
-                            else -> "Email not available"
+                            else -> "Add your email"
                         }
-                        Text(
-                            text = emailToShow ?: "Email not available",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = ColorUtils.blackcol()
-                        )
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = emailToShow ?: "Email not available",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (emailToShow.isNullOrBlank() || emailToShow == "Add your email") 
+                                    MaterialTheme.colorScheme.error 
+                                else 
+                                    ColorUtils.blackcol(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            
+                            if (user?.isEmailVerified == true || profileData?.get("isEmailVerified") == true) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Email Verified",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -724,6 +902,8 @@ fun ProfileScreen(
                             .size(120.dp)
                             .clip(CircleShape),
                         contentScale = ContentScale.Crop,
+                        error = painterResource(id = R.drawable.default_profile_picture),
+                        fallback = painterResource(id = R.drawable.default_profile_picture),
                         placeholder = painterResource(id = R.drawable.default_profile_picture)
                     )
 
@@ -738,8 +918,67 @@ fun ProfileScreen(
                             color = ColorUtils.DarkGreen
                         )
                         InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available", ColorUtils.blackcol())
-                        InfoRow("Email", profileData?.get("email")?.toString() ?: user?.email ?: "Not available", ColorUtils.blackcol())
-                        InfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            val email = profileData?.get("email")?.toString() ?: user?.email ?: ""
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = email,
+                                    onValueChange = { /* Email is not editable */ },
+                                    readOnly = true,
+                                    label = { Text("Email") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Email,
+                                            contentDescription = "Email"
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                        
+                        // Replace the InfoRow for phone with editable version
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = formattedPhoneNumber,
+                                    onValueChange = { input: String ->
+                                        // Allow only digits and some special characters
+                                        val filteredInput = input.replace(Regex("[^0-9+]"), "")
+                                        formattedPhoneNumber = filteredInput
+                                    },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    label = { Text("Phone Number") },
+                                    placeholder = { Text("+639XXXXXXXXX") },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Phone,
+                                            contentDescription = "Phone Number"
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                
+                                Spacer(modifier = Modifier.width(8.dp))
+                                
+                                Button(
+                                    onClick = {
+                                        // Format the phone number and update it
+                                        val formattedNumber = formatPhilippinePhoneNumber(formattedPhoneNumber)
+                                        updatePhoneNumber(formattedNumber)
+                                    },
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                ) {
+                                    Text("Save")
+                                }
+                            }
+                        }
+                        
                         InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
                         // Address Information
@@ -1128,19 +1367,11 @@ private fun RateLimitedSection(
     val totalDurationMillis by remember { 
         mutableStateOf(
             if (expireTimeMillis > System.currentTimeMillis()) {
-                if (uiState.isDeviceBlock) {
-                    // For device blocks, use 24 hours as the display duration
-                    24 * 60 * 60 * 1000L
-                } else {
-                    // For regular rate limits, use a shorter duration
-                    (expireTimeMillis - System.currentTimeMillis()).coerceAtMost(3 * 60 * 1000L)
-                }
+                // For regular rate limits, use a shorter duration based on expiry
+                (expireTimeMillis - System.currentTimeMillis()).coerceAtMost(3 * 60 * 1000L)
             } else {
-                if (uiState.isDeviceBlock) {
-                    24 * 60 * 60 * 1000L
-                } else {
-                    3 * 60 * 1000L
-                }
+                // Default duration if already expired (should be handled by resetState)
+                 3 * 60 * 1000L
             }
         )
     }
@@ -1156,23 +1387,8 @@ private fun RateLimitedSection(
                 timerCompleted = true
                 timeRemainingRatio = 0f
                 
-                // Only attempt to reset on regular rate limits
-                // For device blocks, the user will need to wait the full duration
-                if (!uiState.isDeviceBlock) {
-                    // Reset the verification state when timer completes
-                    viewModel.resetState()
-                    
-                    // Cleanup any expired rate limits from server to ensure state consistency
-                    scope.launch {
-                        delay(500) // Short delay to ensure state update completes
-                        viewModel.checkAndCleanupExpiredRateLimits()
-                    }
-                } else {
-                    // For device blocks, check if it's truly expired on the server
-                    scope.launch {
-                        viewModel.checkIfDeviceBlockExpired()
-                    }
-                }
+                // Always reset state when timer completes
+                viewModel.resetState()
                 
                 break
             }
@@ -1181,27 +1397,13 @@ private fun RateLimitedSection(
             timeRemainingRatio = (remainingMillis.toFloat() / totalDurationMillis).coerceIn(0f, 1f)
             
             // Format the remaining time based on duration
-            formattedTime = if (uiState.isDeviceBlock) {
-                // For device blocks, show hours and minutes
-                val hours = remainingMillis / (60 * 60 * 1000)
-                val minutes = (remainingMillis % (60 * 60 * 1000)) / (60 * 1000)
-                
-                if (hours > 0) {
-                    "$hours hr $minutes min"
-                } else {
-                    val seconds = (remainingMillis % (60 * 1000)) / 1000
-                    "$minutes min $seconds sec"
-                }
+            val minutes = remainingMillis / (60 * 1000)
+            val seconds = (remainingMillis % (60 * 1000)) / 1000
+            
+            formattedTime = if (minutes > 0) {
+                "$minutes min $seconds sec"
             } else {
-                // For regular rate limits, show minutes and seconds
-                val minutes = remainingMillis / (60 * 1000)
-                val seconds = (remainingMillis % (60 * 1000)) / 1000
-                
-                if (minutes > 0) {
-                    "$minutes min $seconds sec"
-                } else {
-                    "$seconds seconds"
-                }
+                "$seconds seconds"
             }
             
             // Delay for 1 second before updating again
@@ -1211,10 +1413,7 @@ private fun RateLimitedSection(
     
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = if (uiState.isDeviceBlock) 
-                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
-                else 
-                    MaterialTheme.colorScheme.errorContainer,
+        color = MaterialTheme.colorScheme.errorContainer,
         shape = RoundedCornerShape(8.dp)
     ) {
         Column(
@@ -1223,23 +1422,20 @@ private fun RateLimitedSection(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (uiState.isDeviceBlock) Icons.Default.Block else Icons.Default.Timer,
+                    imageVector = Icons.Default.Timer,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.error
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (uiState.isDeviceBlock) "Device Temporarily Blocked" else "Verification Limit Reached",
+                    text = "Verification Limit Reached",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.titleMedium
                 )
             }
             
             Text(
-                text = if (uiState.isDeviceBlock) 
-                         "Your device has been temporarily blocked due to unusual verification activity. This is a security measure to prevent abuse."
-                       else 
-                         "You've reached the maximum number of verification attempts for this phone number.",
+                text = "You've reached the maximum number of verification attempts for this phone number.",
                 color = MaterialTheme.colorScheme.onErrorContainer,
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -1254,7 +1450,7 @@ private fun RateLimitedSection(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (uiState.isDeviceBlock) "Block will expire in:" else "Try again in:",
+                        text = "Try again in:",
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodyMedium
                     )
@@ -1276,37 +1472,6 @@ private fun RateLimitedSection(
                     color = MaterialTheme.colorScheme.error,
                     trackColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                 )
-                
-                // Add help text for device blocks
-                if (uiState.isDeviceBlock) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Why am I blocked?",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Firebase has detected unusual verification activity from this device. This is usually caused by too many failed verification attempts in a short period.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "You can try again in 24 hours, or use a different device for verification.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
             }
             
             Button(
@@ -1390,606 +1555,6 @@ private fun AppIdentifierErrorSection(
             }
         }
     }
-}
-
-// Fix the VerificationContent composable to properly handle OTP verification
-@Composable
-private fun VerificationContent(
-    uiState: PhoneAuthState,
-    otpValue: String,
-    onOtpChange: (String) -> Unit,
-    phoneNumber: String,
-    onRetry: () -> Unit,
-    onRecaptchaBypass: () -> Unit,
-    onDismiss: () -> Unit,
-    viewModel: PhoneAuthViewModel,
-    verificationAttemptedRef: MutableState<Boolean>
-) {
-    // Use state to track if we're checking rate limits and store error message
-    var checkingRateLimit by remember { mutableStateOf(false) }
-    var errorToCheck by remember { mutableStateOf<String?>(null) }
-    
-    // LaunchedEffect to handle rate limit checking
-    LaunchedEffect(errorToCheck) {
-        if (errorToCheck != null && !checkingRateLimit) {
-            val errorMessage = errorToCheck ?: ""
-            if (errorMessage.contains("Too many") || 
-                errorMessage.contains("quota") || 
-                errorMessage.contains("limit")) {
-                
-                checkingRateLimit = true
-                
-                val rateLimitResult = try {
-                    viewModel.checkRateLimitStatus()
-                } catch (e: Exception) {
-                    // Fallback if checking fails: create a 3-minute mock
-                    Pair(true, System.currentTimeMillis() + (3 * 60 * 1000))
-                }
-                
-                val isRateLimited = rateLimitResult.first
-                val expiryTime = rateLimitResult.second
-                
-                // Use the actual server-stored rate limit expiry time
-                if (isRateLimited) {
-                    val displayDuration = "3 minutes" // Default display
-                    viewModel.resetState()
-                    viewModel.setRateLimited(expiryTime, displayDuration)
-                }
-                
-                checkingRateLimit = false
-                errorToCheck = null
-            }
-        }
-    }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        when (uiState) {
-            is PhoneAuthState.Loading -> {
-                LoadingSection()
-            }
-            
-            is PhoneAuthState.CodeSent -> {
-                OtpInputSection(
-                    otpValue = otpValue,
-                    onOtpValueChange = onOtpChange,
-                    phoneNumber = phoneNumber,
-                    onResend = onRetry,
-                    onVerify = { 
-                        if (otpValue.length == 6) {
-                            // Call verification with the entered code
-                            viewModel.verifyPhoneNumberWithCode(otpValue)
-                        }
-                    }
-                )
-            }
-            
-            is PhoneAuthState.Error -> {
-                val errorMessage = uiState.message
-                // Set the error to check in state instead of launching directly
-                if ((errorMessage.contains("Too many") || 
-                    errorMessage.contains("quota") || 
-                    errorMessage.contains("limit")) && 
-                    errorToCheck == null && !checkingRateLimit) {
-                    errorToCheck = errorMessage
-                    LoadingSection()
-                } else if (errorMessage.contains("missing a valid app identifier") ||
-                    errorMessage.contains("Play Integrity") ||
-                    errorMessage.contains("reCAPTCHA")) {
-                    AppIdentifierErrorSection(
-                        onRetry = onRetry,
-                        onDismiss = onDismiss
-                    )
-                } else if (errorToCheck == null || !checkingRateLimit) {
-                    ErrorSection(
-                        errorMessage = errorMessage,
-                        onRetry = onRetry
-                    )
-                } else {
-                    // Show loading while checking
-                    LoadingSection()
-                }
-            }
-            
-            is PhoneAuthState.RateLimited -> {
-                RateLimitedSection(
-                    onDismiss = onDismiss,
-                    uiState = uiState,
-                    viewModel = viewModel
-                )
-            }
-
-            is PhoneAuthState.RecaptchaError -> {
-                RecaptchaErrorSection(
-                    onBypass = onRecaptchaBypass
-                )
-            }
-            
-            is PhoneAuthState.Success -> {
-                SuccessSection()
-                // Reset verification attempted flag
-                verificationAttemptedRef.value = false
-            }
-            
-            is PhoneAuthState.Initial, is PhoneAuthState.AppCheckError -> {
-                // Just show a loading indicator for these states
-                LoadingSection()
-            }
-        }
-    }
-}
-
-// Add or update the OtpInputSection to include a verify function
-@Composable
-private fun OtpInputSection(
-    otpValue: String,
-    onOtpValueChange: (String) -> Unit,
-    phoneNumber: String,
-    onResend: () -> Unit,
-    onVerify: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "Enter the 6-digit verification code sent to:",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        
-        Text(
-            text = "+63$phoneNumber",
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        
-        // OTP input field
-        OutlinedTextField(
-            value = otpValue,
-            onValueChange = onOtpValueChange,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Verification Code") },
-            placeholder = { Text("6-digit code") },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done
-            ),
-            leadingIcon = { Icon(Icons.Default.Pin, "Verification Code") },
-            singleLine = true,
-            trailingIcon = {
-                if (otpValue.length == 6) {
-                    Icon(
-                        Icons.Default.CheckCircle,
-                        contentDescription = "Valid Code",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        )
-        
-        // Character counter
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Text(
-                text = "${otpValue.length}/6",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        
-        // Verify button
-        Button(
-            onClick = onVerify,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = otpValue.length == 6
-        ) {
-            Icon(Icons.Default.Check, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Verify")
-        }
-        
-        // Resend link
-        TextButton(
-            onClick = onResend,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        ) {
-            Icon(
-                Icons.Default.Refresh,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Resend Code")
-        }
-    }
-}
-
-// Fix the PhoneVerificationDialog to properly handle the reCAPTCHA retry
-@Composable
-fun PhoneVerificationDialog(
-    phoneNumber: String,
-    onDismiss: () -> Unit,
-    viewModel: PhoneAuthViewModel,
-    activity: Activity,
-    verificationAttemptedRef: MutableState<Boolean> = remember { mutableStateOf(false) },
-    showVerifyPhoneDialogRef: MutableState<Boolean> = remember { mutableStateOf(false) },
-    actuallyShowVerifyDialogRef: MutableState<Boolean> = remember { mutableStateOf(false) }
-) {
-    val uiState by viewModel.uiState.collectAsState()
-    var otpValue by remember { mutableStateOf("") }
-    var localPhoneNumber by remember { 
-        mutableStateOf(
-            if (phoneNumber.startsWith("+63")) {
-                phoneNumber.substring(3)
-            } else if (phoneNumber.startsWith("63")) {
-                phoneNumber.substring(2)
-            } else {
-                phoneNumber
-            }
-        ) 
-    }
-    var isPhoneNumberEntered by remember { mutableStateOf(phoneNumber.isNotBlank()) }
-    var confirmingCancellation by remember { mutableStateOf(false) }
-    var showingRecaptchaMessage by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    
-    // Optimization: Memoize the formatted phone number to avoid repeated string operations
-    val formattedPhoneNumber by remember(localPhoneNumber) {
-        derivedStateOf {
-            if (localPhoneNumber.startsWith("+63")) {
-                localPhoneNumber
-            } else {
-                "+63$localPhoneNumber"
-            }
-        }
-    }
-    
-    // Memory optimization: Dispose WebView when dialog is dismissed
-    DisposableEffect(Unit) {
-        onDispose {
-            // Clean up any resources when dialog is closed
-            if (uiState is PhoneAuthState.RateLimited || uiState is PhoneAuthState.Error) {
-                viewModel.resetState()
-            }
-        }
-    }
-    
-    // Handle dialog dismissal
-    BackHandler(enabled = uiState is PhoneAuthState.CodeSent || uiState is PhoneAuthState.Loading) {
-        confirmingCancellation = true
-    }
-    
-    // Monitor state transitions with stable key extraction
-    val stateKey = when (uiState) {
-        is PhoneAuthState.RecaptchaError -> "recaptcha_error"
-        is PhoneAuthState.Error -> "error:${(uiState as PhoneAuthState.Error).message}"
-        is PhoneAuthState.RateLimited -> "rate_limited:${(uiState as PhoneAuthState.RateLimited).expireTimeMillis}"
-        is PhoneAuthState.CodeSent -> "code_sent"
-        is PhoneAuthState.Success -> "success"
-        is PhoneAuthState.Loading -> "loading"
-        else -> "initial"
-    }
-    
-    // Monitor state transitions with improved performance
-    LaunchedEffect(stateKey) {
-        when (uiState) {
-            is PhoneAuthState.RecaptchaError -> {
-                showingRecaptchaMessage = true
-            }
-            is PhoneAuthState.Error -> {
-                val errorMessage = (uiState as PhoneAuthState.Error).message
-                // Common pattern matching for reCAPTCHA-related errors 
-                if (errorMessage.contains("reCAPTCHA", ignoreCase = true) ||
-                    errorMessage.contains("INVALID_APP_CREDENTIAL", ignoreCase = true) ||
-                    errorMessage.contains("Error: 39", ignoreCase = true) ||
-                    errorMessage.contains("missing app identifier", ignoreCase = true)) {
-                    showingRecaptchaMessage = true
-                }
-            }
-            is PhoneAuthState.Success -> {
-                // Reset verification flags on success
-                verificationAttemptedRef.value = false
-                showVerifyPhoneDialogRef.value = false
-                actuallyShowVerifyDialogRef.value = false
-                // Delay dismiss to allow success animation/feedback
-                delay(800)
-                onDismiss()
-            }
-            else -> {
-                // Reset recaptcha message flag for non-error states
-                if (uiState !is PhoneAuthState.Loading) {
-                    showingRecaptchaMessage = false
-                }
-            }
-        }
-    }
-    
-    // Cancellation confirmation dialog
-    if (confirmingCancellation) {
-        AlertDialog(
-            onDismissRequest = { confirmingCancellation = false },
-            title = { Text("Cancel Verification?") },
-            text = { Text("Are you sure you want to cancel phone verification?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        confirmingCancellation = false
-                        viewModel.resetState()
-                        showVerifyPhoneDialogRef.value = false
-                        actuallyShowVerifyDialogRef.value = false
-                        onDismiss()
-                    }
-                ) {
-                    Text("Yes, Cancel")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingCancellation = false }) {
-                    Text("Continue")
-                }
-            }
-        )
-    }
-    
-    // Special dialog for reCAPTCHA issues with improved error information
-    if (showingRecaptchaMessage) {
-        AlertDialog(
-            onDismissRequest = { /* Don't dismiss on outside click */ },
-            title = { 
-                Text(
-                    text = "reCAPTCHA Verification Issue", 
-                    style = MaterialTheme.typography.titleMedium
-                ) 
-            },
-            text = { 
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    
-                    Text(
-                        text = "We're having trouble with the security verification. This is often due to browser security settings or network issues.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        textAlign = TextAlign.Center
-                    )
-                    
-                    // Additional troubleshooting info
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "Troubleshooting tips:",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("• Try using Chrome (most reliable)", style = MaterialTheme.typography.bodySmall)
-                            Text("• Disable VPN, proxy or ad blockers", style = MaterialTheme.typography.bodySmall)
-                            Text("• Try on cellular data instead of WiFi", style = MaterialTheme.typography.bodySmall)
-                            Text("• Clear browser cookies and cache", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showingRecaptchaMessage = false
-                        scope.launch {
-                            try {
-                                // Use the memoized phone number
-                                delay(500) // Short delay to avoid race conditions
-                                viewModel.retryWithoutRecaptcha(formattedPhoneNumber, activity)
-                            } catch (e: Exception) {
-                                Log.e("ProfileTab", "Error during retry: ${e.message}")
-                                // If retry fails, reset to initial state after a delay
-                                delay(500)
-                                viewModel.resetState()
-                            }
-                        }
-                    }
-                ) {
-                    Text("Try Alternative Method")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { 
-                        showingRecaptchaMessage = false
-                        viewModel.resetState()
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-        return
-    }
-    
-    // Main verification dialog - optimized
-    AlertDialog(
-        onDismissRequest = {
-            if (uiState is PhoneAuthState.CodeSent || uiState is PhoneAuthState.Loading) {
-                confirmingCancellation = true
-            } else {
-                viewModel.resetState()
-                onDismiss()
-            }
-        },
-        title = {
-            Text(
-                text = "Verify Phone Number",
-                style = MaterialTheme.typography.titleLarge
-            )
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                if (!isPhoneNumberEntered || uiState is PhoneAuthState.Initial) {
-                    PhoneNumberInputSection(
-                        phoneNumber = localPhoneNumber,
-                        onPhoneNumberChange = { 
-                            // Improved validation - only accept digits and limit to 10 digits
-                            val filtered = it.replace(Regex("[^0-9]"), "")
-                            if (filtered.length <= 10) {
-                                localPhoneNumber = filtered
-                            }
-                        }
-                    )
-                } else {
-                    VerificationContent(
-                        uiState = uiState,
-                        otpValue = otpValue,
-                        onOtpChange = { 
-                            // Only accept 6 digits
-                            if (it.length <= 6 && it.all { char -> char.isDigit() }) {
-                                otpValue = it
-                            }
-                        },
-                        phoneNumber = localPhoneNumber,
-                        onRetry = { 
-                            scope.launch {
-                                try {
-                                    if (isPhoneNumberEntered) {
-                                        // Use the memoized phone number
-                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("ProfileTab", "Error during retry: ${e.message}")
-                                    showingRecaptchaMessage = true
-                                }
-                            }
-                        },
-                        onRecaptchaBypass = {
-                            scope.launch {
-                                try {
-                                    viewModel.retryWithoutRecaptcha(formattedPhoneNumber, activity)
-                                } catch (e: Exception) {
-                                    Log.e("ProfileTab", "Error during recaptcha bypass: ${e.message}")
-                                    viewModel.resetState()
-                                    showingRecaptchaMessage = true
-                                }
-                            }
-                        },
-                        onDismiss = {
-                            viewModel.resetState()
-                            onDismiss()
-                        },
-                        viewModel = viewModel,
-                        verificationAttemptedRef = verificationAttemptedRef
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            when {
-                !isPhoneNumberEntered || uiState is PhoneAuthState.Initial -> {
-                    Button(
-                        onClick = {
-                            if (localPhoneNumber.length >= 9) {
-                                isPhoneNumberEntered = true
-                                
-                                // Start verification when user clicks Continue
-                                scope.launch {
-                                    try {
-                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
-                                    } catch (e: Exception) {
-                                        Log.e("ProfileTab", "Error during verification start: ${e.message}")
-                                        showingRecaptchaMessage = true
-                                    }
-                                }
-                            }
-                        },
-                        enabled = localPhoneNumber.length >= 9
-                    ) {
-                        Text("Continue")
-                    }
-                }
-                uiState is PhoneAuthState.CodeSent -> {
-                    Button(
-                        onClick = { 
-                            if (otpValue.length == 6) {
-                                Log.d("PhoneVerificationDialog", "Verifying code: $otpValue")
-                                viewModel.verifyPhoneNumberWithCode(otpValue) 
-                            }
-                        },
-                        enabled = otpValue.length == 6
-                    ) {
-                        Text("Verify")
-                    }
-                }
-                uiState is PhoneAuthState.Success -> {
-                    Button(onClick = { onDismiss() }) {
-                        Text("Done")
-                    }
-                }
-                uiState is PhoneAuthState.Error -> {
-                    Button(
-                        onClick = { 
-                            val errorMessage = (uiState as PhoneAuthState.Error).message
-                            if (errorMessage.contains("reCAPTCHA", ignoreCase = true) ||
-                                errorMessage.contains("INVALID_APP_CREDENTIAL", ignoreCase = true) ||
-                                errorMessage.contains("Error: 39", ignoreCase = true)) {
-                                showingRecaptchaMessage = true
-                            } else {
-                                // For other errors, simply retry
-                                scope.launch {
-                                    try {
-                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
-                                    } catch (e: Exception) {
-                                        Log.e("ProfileTab", "Error during retry: ${e.message}")
-                                        showingRecaptchaMessage = true
-                                    }
-                                }
-                            }
-                        }
-                    ) {
-                        Text("Try Again")
-                    }
-                }
-                else -> { /* No button for other states */ }
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = {
-                    if (uiState is PhoneAuthState.CodeSent || uiState is PhoneAuthState.Loading) {
-                        confirmingCancellation = true
-                    } else {
-                        viewModel.resetState()
-                        onDismiss()
-                    }
-                }
-            ) {
-                Text("Cancel")
-            }
-        }
-    )
 }
 
 @Composable
@@ -2078,7 +1643,14 @@ private fun PhoneNumberInputSection(
             // Phone number input - use OutlinedTextField with basic properties to avoid experimental API
             OutlinedTextField(
                 value = phoneNumber,
-                onValueChange = onPhoneNumberChange,
+                onValueChange = { input: String ->
+                    // Allow only digits and filter out non-digit characters
+                    val filteredInput = input.replace(Regex("[^0-9]"), "")
+                    if (filteredInput.length <= 10) {
+                        // Pass the filtered input to the parent
+                        onPhoneNumberChange(filteredInput)
+                    }
+                },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("9xxxxxxxxx") },
@@ -2103,6 +1675,17 @@ private fun PhoneNumberInputSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        
+        // Show the formatted number for clarity
+        if (phoneNumber.isNotEmpty() && phoneNumber.length >= 9) {
+            val formattedNumber = formatPhilippinePhoneNumber(phoneNumber)
+            Text(
+                text = "Will be saved as: $formattedNumber",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
     }
 }
 
@@ -2232,6 +1815,236 @@ private fun RecaptchaErrorSection(
             Text("Try Alternative Verification")
         }
     }
+}
+
+// Add the PhoneVerificationDialog composable
+@Composable
+private fun PhoneVerificationDialog(
+    phoneNumber: String,
+    onDismiss: () -> Unit,
+    viewModel: PhoneAuthViewModel,
+    activity: Activity,
+    verificationAttemptedRef: MutableState<Boolean>,
+    showVerifyPhoneDialogRef: MutableState<Boolean>,
+    actuallyShowVerifyDialogRef: MutableState<Boolean>
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    var otpValue by remember { mutableStateOf("") }
+    var localPhoneNumber by remember { mutableStateOf(phoneNumber) }
+    val isPhoneNumberEntered by remember(localPhoneNumber) { mutableStateOf(localPhoneNumber.length >= 9) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    
+    AlertDialog(
+        onDismissRequest = {
+            viewModel.resetState()
+            onDismiss() 
+        },
+        title = {
+            Text(
+                text = "Phone Verification",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                when (uiState) {
+                    is PhoneAuthState.Loading -> {
+                        LoadingSection()
+                    }
+                    
+                    is PhoneAuthState.CodeSent -> {
+                        // Show OTP input
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Enter the 6-digit code sent to +63$localPhoneNumber"
+                            )
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Basic OTP input
+                            OutlinedTextField(
+                                value = otpValue,
+                                onValueChange = { 
+                                    if (it.length <= 6 && it.all { char -> char.isDigit() }) {
+                                        otpValue = it
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.NumberPassword
+                                ),
+                                placeholder = { Text("6-digit verification code") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            // Auto-verify when 6 digits entered
+                            LaunchedEffect(otpValue) {
+                                if (otpValue.length == 6) {
+                                    viewModel.verifyPhoneNumberWithCode(otpValue)
+                                }
+                            }
+                        }
+                    }
+                    
+                    is PhoneAuthState.Success -> {
+                        SuccessSection()
+                    }
+                    
+                    is PhoneAuthState.Error -> {
+                        val errorMessage = (uiState as PhoneAuthState.Error).message
+                        ErrorSection(
+                            errorMessage = errorMessage,
+                            onRetry = {
+                                val formattedPhoneNumber = "+63$localPhoneNumber"
+                                scope.launch {
+                                    viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                }
+                            }
+                        )
+                    }
+                    
+                    is PhoneAuthState.RateLimited -> {
+                        RateLimitedSection(
+                            onDismiss = onDismiss,
+                            uiState = uiState as PhoneAuthState.RateLimited,
+                            viewModel = viewModel
+                        )
+                    }
+                    
+                    is PhoneAuthState.RecaptchaError -> {
+                        RecaptchaErrorSection {
+                            val formattedPhoneNumber = "+63$localPhoneNumber"
+                            scope.launch {
+                                try {
+                                    viewModel.resetState()
+                                    // Here would be the recaptcha bypass method
+                                    viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                } catch (e: Exception) {
+                                    Log.e("PhoneVerification", "Error during retry: ${e.message}")
+                                }
+                            }
+                        }
+                    }
+                    
+                    is PhoneAuthState.AppCheckError -> {
+                        AppIdentifierErrorSection(
+                            onRetry = {
+                                val formattedPhoneNumber = "+63$localPhoneNumber"
+                                scope.launch {
+                                    viewModel.resetState()
+                                    viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                }
+                            },
+                            onDismiss = {
+                                viewModel.resetState()
+                                onDismiss()
+                            }
+                        )
+                    }
+                    
+                    is PhoneAuthState.Initial -> {
+                        // Initial state - show phone input
+                        if (!isPhoneNumberEntered) {
+                            PhoneNumberInputSection(
+                                phoneNumber = localPhoneNumber,
+                                onPhoneNumberChange = { 
+                                    val filtered = it.replace(Regex("[^0-9]"), "")
+                                    if (filtered.length <= 10) {
+                                        localPhoneNumber = filtered
+                                    }
+                                }
+                            )
+                        } else {
+                            // Phone is entered but verification not started
+                            Text(
+                                text = "Ready to verify +63$localPhoneNumber",
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    when (uiState) {
+                        is PhoneAuthState.Initial -> {
+                            if (isPhoneNumberEntered) {
+                                val formattedPhoneNumber = "+63$localPhoneNumber"
+                                verificationAttemptedRef.value = true
+                                scope.launch {
+                                    try {
+                                        viewModel.startPhoneNumberVerification(formattedPhoneNumber, activity)
+                                    } catch (e: Exception) {
+                                        Log.e("PhoneVerification", "Error starting verification: ${e.message}")
+                                    }
+                                }
+                            }
+                        }
+                        is PhoneAuthState.CodeSent -> {
+                            if (otpValue.length == 6) {
+                                viewModel.verifyPhoneNumberWithCode(otpValue)
+                            }
+                        }
+                        is PhoneAuthState.Success -> {
+                            onDismiss()
+                        }
+                        is PhoneAuthState.Error, is PhoneAuthState.RecaptchaError, is PhoneAuthState.AppCheckError -> {
+                            // For error states, just retry
+                            viewModel.resetState()
+                        }
+                        is PhoneAuthState.RateLimited -> {
+                            // For rate limited, just dismiss
+                            onDismiss()
+                        }
+                        else -> {
+                            // For other states, do nothing special
+                        }
+                    }
+                },
+                enabled = when (uiState) {
+                    is PhoneAuthState.Initial -> isPhoneNumberEntered
+                    is PhoneAuthState.CodeSent -> otpValue.length == 6
+                    is PhoneAuthState.Loading -> false
+                    else -> true
+                }
+            ) {
+                Text(
+                    text = when (uiState) {
+                        is PhoneAuthState.Initial -> if (isPhoneNumberEntered) "Send Code" else "Continue"
+                        is PhoneAuthState.CodeSent -> "Verify"
+                        is PhoneAuthState.Success -> "Done"
+                        is PhoneAuthState.Error, is PhoneAuthState.RecaptchaError, is PhoneAuthState.AppCheckError -> "Retry"
+                        is PhoneAuthState.RateLimited -> "OK"
+                        else -> "Continue"
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    viewModel.resetState()
+                    onDismiss()
+                }
+            ) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 

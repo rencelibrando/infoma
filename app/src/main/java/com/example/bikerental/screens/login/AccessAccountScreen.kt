@@ -77,16 +77,18 @@ fun AccessAccountScreen(
                 Log.d("AccessAccountScreen", "Google Sign In successful, id: ${account.id}")
                 
                 // Update a flag immediately to prevent redirect back to login
-                hasNavigatedToHome = true
+                // hasNavigatedToHome = true // Flag removed, navigation handled by observing state
                 
                 // Process the Google sign in with Firebase
                 viewModel.firebaseAuthWithGoogle(account.idToken!!)
                 
-                // Explicitly navigate to Home immediately after successful Google sign-in
+                // REMOVED: Explicit navigation to Home after successful Google sign-in
+                /*
                 CoroutineScope(Dispatchers.Main).launch {
                     delay(500) // Brief delay to let Firebase Auth complete
                     NavigationUtils.navigateToHome(navController)
                 }
+                */
             } catch (e: ApiException) {
                 val errorMsg = when(e.statusCode) {
                     GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Sign in cancelled"
@@ -127,6 +129,9 @@ fun AccessAccountScreen(
         
         when (val currentState = authState) {
             is AuthState.Authenticated -> {
+                // REMOVED: Explicit navigation check and call from here
+                // The main navigation observer in MainActivity will handle this.
+                /*
                 if (!hasNavigatedToHome) {
                     Log.d("AccessAccountScreen", "Auth state is Authenticated, user: ${currentState.user}")
                     
@@ -177,6 +182,11 @@ fun AccessAccountScreen(
                         authStateProcessed = false
                     }
                 }
+                */
+                Log.d("AccessAccountScreen", "Auth state is Authenticated. Navigation handled by MainActivity.")
+                // Ensure flags are potentially reset if needed, although MainActivity now drives navigation
+                authStateProcessed = true // Mark as processed to avoid loops if state reappears
+                hasNavigatedToHome = true // Assume navigation will happen
             }
             is AuthState.Error -> {
                 Log.e("AccessAccountScreen", "Auth Error: ${currentState.message}")
@@ -195,7 +205,8 @@ fun AccessAccountScreen(
             }
             is AuthState.NeedsEmailVerification -> {
                 Log.d("AccessAccountScreen", "Auth state: NeedsEmailVerification")
-                
+                // REMOVED: Explicit navigation from here.
+                /*
                 // Check if user signed in with Google
                 val currentUser = FirebaseAuth.getInstance().currentUser
                 val isGoogleUser = currentUser?.providerData?.any { it.providerId == "google.com" } == true
@@ -211,6 +222,8 @@ fun AccessAccountScreen(
                     Log.d("AccessAccountScreen", "Regular user detected, navigating to email verification")
                     NavigationUtils.navigateToEmailVerification(navController)
                 }
+                */
+                authStateProcessed = true // Mark as processed
             }
             is AuthState.PasswordResetSent -> {
                 Log.d("AccessAccountScreen", "Auth state: PasswordResetSent")

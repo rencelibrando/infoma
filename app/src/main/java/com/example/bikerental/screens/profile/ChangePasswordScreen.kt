@@ -8,24 +8,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import androidx.activity.compose.BackHandler
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.viewmodels.AuthViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.launch
+import com.example.bikerental.navigation.ProfileBackHandler
+import com.example.bikerental.navigation.popBackToProfileTab
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,296 +35,525 @@ fun ChangePasswordScreen(
     navController: NavController,
     viewModel: AuthViewModel = viewModel()
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+    
+    // State variables
     var currentPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     var confirmNewPassword by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
-    var isPasswordValid by remember { mutableStateOf(true) }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var successMessage by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var success by remember { mutableStateOf<String?>(null) }
     
-    // Get current user and check auth provider
-    val currentUser by viewModel.currentUser.collectAsState()
-    val context = LocalContext.current
+    // Determine authentication provider
+    var isGoogleUser by remember { mutableStateOf(false) }
     
-    // Determine if user signed in with Google
-    val isGoogleUser = remember {
-        mutableStateOf(false)
-    }
-    
+    // Check if user is signed in with Google
     LaunchedEffect(Unit) {
-        val firebaseUser = FirebaseAuth.getInstance().currentUser
-        isGoogleUser.value = firebaseUser?.providerData?.any { 
-            it.providerId == "google.com" 
-        } == true
+        val user = FirebaseAuth.getInstance().currentUser
+        isGoogleUser = user?.providerData?.any { 
+            it.providerId == GoogleAuthProvider.PROVIDER_ID 
+        } ?: false
     }
     
-    val scrollState = rememberScrollState()
-    
-    // Password validation
-    val validatePasswords = {
-        when {
-            currentPassword.isBlank() -> {
-                isPasswordValid = false
-                errorMessage = "Current password is required"
-                false
-            }
-            newPassword.length < 8 -> {
-                isPasswordValid = false
-                errorMessage = "New password must be at least 8 characters"
-                false
-            }
-            newPassword != confirmNewPassword -> {
-                isPasswordValid = false
-                errorMessage = "New passwords don't match"
-                false
-            }
-            else -> {
-                isPasswordValid = true
-                errorMessage = null
-                true
-            }
-        }
-    }
+    // Replace custom BackHandler with ProfileBackHandler
+    ProfileBackHandler(navController)
     
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Change Password") },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    IconButton(onClick = { navController.popBackToProfileTab() }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = ColorUtils.Purple40
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
-    ) { padding ->
-        Column(
+    ) { paddingValues ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-                .verticalScroll(scrollState),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(paddingValues)
         ) {
-            if (isGoogleUser.value) {
-                // Show message for Google users
-                GoogleUserPasswordMessage(navController)
-            } else {
-                // Regular password change UI for email/password users
-                PasswordChangeForm(
-                    currentPassword = currentPassword,
-                    newPassword = newPassword,
-                    confirmNewPassword = confirmNewPassword,
-                    isPasswordVisible = isPasswordVisible,
-                    isLoading = isLoading,
-                    errorMessage = errorMessage,
-                    successMessage = successMessage,
-                    onCurrentPasswordChange = { currentPassword = it },
-                    onNewPasswordChange = { newPassword = it },
-                    onConfirmNewPasswordChange = { confirmNewPassword = it },
-                    onPasswordVisibilityChange = { isPasswordVisible = it },
-                    onSubmit = {
-                        if (validatePasswords()) {
-                            isLoading = true
-                            viewModel.changePassword(
-                                currentPassword = currentPassword,
-                                newPassword = newPassword,
-                                onSuccess = {
-                                    isLoading = false
-                                    successMessage = "Password changed successfully"
-                                    // Clear input fields
-                                    currentPassword = ""
-                                    newPassword = ""
-                                    confirmNewPassword = ""
-                                },
-                                onError = { error ->
-                                    isLoading = false
-                                    errorMessage = error
-                                }
-                            )
-                        }
-                    }
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .align(Alignment.Center)
                 )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .verticalScroll(scrollState),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Different UI for Google users vs. Email/Password users
+                    if (isGoogleUser) {
+                        GoogleUserPasswordSection(navController)
+                    } else {
+                        EmailPasswordUserSection(
+                            currentPassword = currentPassword,
+                            newPassword = newPassword,
+                            confirmNewPassword = confirmNewPassword,
+                            isPasswordVisible = isPasswordVisible,
+                            onCurrentPasswordChange = { currentPassword = it },
+                            onNewPasswordChange = { newPassword = it },
+                            onConfirmPasswordChange = { confirmNewPassword = it },
+                            onPasswordVisibilityChange = { isPasswordVisible = it },
+                            error = error,
+                            success = success,
+                            onChangePassword = {
+                                coroutineScope.launch {
+                                    changePassword(
+                                        currentPassword = currentPassword,
+                                        newPassword = newPassword,
+                                        confirmNewPassword = confirmNewPassword,
+                                        onLoading = { isLoading = it },
+                                        onError = { error = it; success = null },
+                                        onSuccess = { 
+                                            success = "Password changed successfully!" 
+                                            error = null
+                                            // Clear form fields after successful change
+                                            currentPassword = ""
+                                            newPassword = ""
+                                            confirmNewPassword = ""
+                                            
+                                            // Wait a moment then navigate back
+                                            coroutineScope.launch {
+                                                kotlinx.coroutines.delay(1500)
+                                                navController.popBackStack()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
 }
 
+/**
+ * Section for Google-authenticated users explaining they need to change password via Google
+ */
 @Composable
-private fun GoogleUserPasswordMessage(navController: NavController) {
+private fun GoogleUserPasswordSection(navController: NavController) {
+    val context = LocalContext.current
+    
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         Icon(
-            imageVector = Icons.Default.Info,
-            contentDescription = "Info",
-            modifier = Modifier.size(64.dp),
+            imageVector = Icons.Default.AccountCircle,
+            contentDescription = "Google Account",
+            modifier = Modifier.size(72.dp),
             tint = MaterialTheme.colorScheme.primary
         )
         
-        Spacer(modifier = Modifier.height(16.dp))
-        
         Text(
-            "Google Account Password",
-            style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center
+            text = "Google Account Sign-In",
+            style = MaterialTheme.typography.headlineSmall
         )
         
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            "Your account is linked to Google. To change your password, you'll need to visit your Google Account settings.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Button(
-            onClick = {
-                // Open Google account settings in browser
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/security"))
-                navController.context.startActivity(intent)
-            },
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
             )
         ) {
-            Text("Go to Google Account Settings")
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "You're signed in with Google",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                Text(
+                    text = "Your password is managed by your Google account. To change your password, you'll need to visit your Google Account settings.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(16.dp))
+        
+        Button(
+            onClick = {
+                val googleAccountUrl = "https://myaccount.google.com/signinoptions/password"
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(googleAccountUrl))
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.ExitToApp,
+                contentDescription = "Go to Google",
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Manage Google Password")
+        }
         
         OutlinedButton(
             onClick = { navController.popBackStack() },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Go Back")
+            Text("Back to Profile")
         }
     }
 }
 
+/**
+ * Section for email/password users to change their password
+ */
 @Composable
-private fun PasswordChangeForm(
+private fun EmailPasswordUserSection(
     currentPassword: String,
     newPassword: String,
     confirmNewPassword: String,
     isPasswordVisible: Boolean,
-    isLoading: Boolean,
-    errorMessage: String?,
-    successMessage: String?,
     onCurrentPasswordChange: (String) -> Unit,
     onNewPasswordChange: (String) -> Unit,
-    onConfirmNewPasswordChange: (String) -> Unit,
+    onConfirmPasswordChange: (String) -> Unit,
     onPasswordVisibilityChange: (Boolean) -> Unit,
-    onSubmit: () -> Unit
+    error: String?,
+    success: String?,
+    onChangePassword: () -> Unit
 ) {
-    // Current password field
-    OutlinedTextField(
-        value = currentPassword,
-        onValueChange = onCurrentPasswordChange,
-        label = { Text("Current Password") },
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
-                Icon(
-                    imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    contentDescription = if (isPasswordVisible) "Hide password" else "Show password"
-                )
-            }
-        }
-    )
-    
-    Spacer(modifier = Modifier.height(16.dp))
-    
-    // New password field
-    OutlinedTextField(
-        value = newPassword,
-        onValueChange = onNewPasswordChange,
-        label = { Text("New Password") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
-                Icon(
-                    imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    contentDescription = if (isPasswordVisible) "Hide password" else "Show password"
-                )
-            }
-        }
-    )
-    
-    Spacer(modifier = Modifier.height(8.dp))
-    
-    // Confirm new password field
-    OutlinedTextField(
-        value = confirmNewPassword,
-        onValueChange = onConfirmNewPasswordChange,
-        label = { Text("Confirm New Password") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
-                Icon(
-                    imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    contentDescription = if (isPasswordVisible) "Hide password" else "Show password"
-                )
-            }
-        }
-    )
-    
-    // Error/Success messages
-    errorMessage?.let {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = it,
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodyMedium
-        )
-    }
-    
-    successMessage?.let {
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = it,
-            color = Color.Green,
-            style = MaterialTheme.typography.bodyMedium
-        )
-    }
-    
-    Spacer(modifier = Modifier.height(24.dp))
-    
-    // Submit button
-    Button(
-        onClick = onSubmit,
-        modifier = Modifier.fillMaxWidth(),
-        enabled = !isLoading
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (isLoading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-                strokeWidth = 2.dp
+        Text(
+            text = "Change Your Password",
+            style = MaterialTheme.typography.headlineSmall
+        )
+        
+        // Password strength tips card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "Password Requirements:",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("• Minimum 8 characters")
+                Text("• Include at least one uppercase letter")
+                Text("• Include at least one number")
+                Text("• Include at least one special character")
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Current password
+        OutlinedTextField(
+            value = currentPassword,
+            onValueChange = onCurrentPasswordChange,
+            label = { Text("Current Password") },
+            singleLine = true,
+            visualTransformation = if (isPasswordVisible) 
+                VisualTransformation.None 
+            else 
+                PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
+                    Icon(
+                        imageVector = if (isPasswordVisible) 
+                            Icons.Default.Visibility 
+                        else 
+                            Icons.Default.VisibilityOff,
+                        contentDescription = if (isPasswordVisible) 
+                            "Hide Password" 
+                        else 
+                            "Show Password"
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // New password
+        OutlinedTextField(
+            value = newPassword,
+            onValueChange = onNewPasswordChange,
+            label = { Text("New Password") },
+            singleLine = true,
+            visualTransformation = if (isPasswordVisible) 
+                VisualTransformation.None 
+            else 
+                PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
+                    Icon(
+                        imageVector = if (isPasswordVisible) 
+                            Icons.Default.Visibility 
+                        else 
+                            Icons.Default.VisibilityOff,
+                        contentDescription = if (isPasswordVisible) 
+                            "Hide Password" 
+                        else 
+                            "Show Password"
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // Password strength indicator
+        if (newPassword.isNotEmpty()) {
+            val strength = getPasswordStrength(newPassword)
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Password Strength: ${strength.label}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = strength.color
+                )
+                LinearProgressIndicator(
+                    progress = { strength.value },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp),
+                    color = strength.color,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            }
+        }
+        
+        // Confirm new password
+        OutlinedTextField(
+            value = confirmNewPassword,
+            onValueChange = onConfirmPasswordChange,
+            label = { Text("Confirm New Password") },
+            singleLine = true,
+            visualTransformation = if (isPasswordVisible) 
+                VisualTransformation.None 
+            else 
+                PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                IconButton(onClick = { onPasswordVisibilityChange(!isPasswordVisible) }) {
+                    Icon(
+                        imageVector = if (isPasswordVisible) 
+                            Icons.Default.Visibility 
+                        else 
+                            Icons.Default.VisibilityOff,
+                        contentDescription = if (isPasswordVisible) 
+                            "Hide Password" 
+                        else 
+                            "Show Password"
+                    )
+                }
+            },
+            isError = confirmNewPassword.isNotEmpty() && confirmNewPassword != newPassword,
+            supportingText = {
+                if (confirmNewPassword.isNotEmpty() && confirmNewPassword != newPassword) {
+                    Text("Passwords do not match")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        
+        // Error message
+        if (error != null) {
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth()
             )
-        } else {
+        }
+        
+        // Success message
+        if (success != null) {
+            Text(
+                text = success,
+                color = ColorUtils.DarkGreen,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Change password button
+        Button(
+            onClick = onChangePassword,
+            enabled = isPasswordChangeValid(currentPassword, newPassword, confirmNewPassword),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             Text("Change Password")
         }
     }
-} 
+}
+
+/**
+ * Function to change the user's password
+ */
+private suspend fun changePassword(
+    currentPassword: String,
+    newPassword: String,
+    confirmNewPassword: String,
+    onLoading: (Boolean) -> Unit,
+    onError: (String) -> Unit,
+    onSuccess: () -> Unit
+) {
+    // Validate inputs
+    if (currentPassword.isBlank()) {
+        onError("Current password is required")
+        return
+    }
+    
+    if (newPassword.length < 8) {
+        onError("New password must be at least 8 characters")
+        return
+    }
+    
+    if (newPassword != confirmNewPassword) {
+        onError("New passwords don't match")
+        return
+    }
+    
+    // Get current user
+    val user = FirebaseAuth.getInstance().currentUser
+    if (user == null) {
+        onError("User not authenticated")
+        return
+    }
+    
+    onLoading(true)
+    
+    try {
+        // First reauthenticate user
+        val credential = com.google.firebase.auth.EmailAuthProvider
+            .getCredential(user.email ?: "", currentPassword)
+        
+        // Reauthenticate and then update password
+        user.reauthenticate(credential).addOnCompleteListener { reauthTask ->
+            if (reauthTask.isSuccessful) {
+                // User has been reauthenticated, now we can change password
+                user.updatePassword(newPassword).addOnCompleteListener { updateTask ->
+                    if (updateTask.isSuccessful) {
+                        onSuccess()
+                    } else {
+                        onError(updateTask.exception?.message ?: "Failed to update password")
+                    }
+                    onLoading(false)
+                }
+            } else {
+                onError(reauthTask.exception?.message ?: "Authentication failed")
+                onLoading(false)
+            }
+        }
+    } catch (e: Exception) {
+        onError(e.message ?: "An error occurred")
+        onLoading(false)
+    }
+}
+
+/**
+ * Class to represent password strength
+ */
+private data class PasswordStrength(
+    val value: Float,
+    val label: String,
+    val color: androidx.compose.ui.graphics.Color
+)
+
+/**
+ * Function to calculate password strength
+ */
+@Composable
+private fun getPasswordStrength(password: String): PasswordStrength {
+    // Criteria
+    val minLength = password.length >= 8
+    val hasUppercase = password.any { it.isUpperCase() }
+    val hasLowercase = password.any { it.isLowerCase() }
+    val hasDigit = password.any { it.isDigit() }
+    val hasSpecial = password.any { !it.isLetterOrDigit() }
+    
+    // Calculate score (0.0 to 1.0)
+    val criteriaCount = listOf(minLength, hasUppercase, hasLowercase, hasDigit, hasSpecial)
+        .count { it }
+    
+    val strength = when {
+        password.length < 4 -> PasswordStrength(
+            0.1f, 
+            "Very Weak", 
+            MaterialTheme.colorScheme.error
+        )
+        criteriaCount <= 1 -> PasswordStrength(
+            0.25f, 
+            "Weak", 
+            MaterialTheme.colorScheme.error
+        )
+        criteriaCount == 2 -> PasswordStrength(
+            0.5f, 
+            "Moderate", 
+            MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+        )
+        criteriaCount == 3 -> PasswordStrength(
+            0.75f, 
+            "Strong", 
+            MaterialTheme.colorScheme.tertiary
+        )
+        else -> PasswordStrength(
+            1.0f, 
+            "Very Strong", 
+            ColorUtils.DarkGreen
+        )
+    }
+    
+    return strength
+}
+
+/**
+ * Function to check if password change is valid
+ */
+@Composable
+private fun isPasswordChangeValid(
+    currentPassword: String,
+    newPassword: String,
+    confirmNewPassword: String
+): Boolean {
+    return currentPassword.isNotBlank() && 
+           newPassword.length >= 8 && 
+           newPassword == confirmNewPassword
+}

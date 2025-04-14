@@ -3,6 +3,9 @@ package com.example.bikerental.navigation
 import android.util.Log
 import androidx.navigation.NavController
 import androidx.navigation.NavOptionsBuilder
+import androidx.navigation.NavHostController
+import androidx.compose.runtime.Composable
+import androidx.activity.compose.BackHandler
 
 /**
  * Utility class for centralized navigation handling throughout the app.
@@ -136,5 +139,38 @@ object NavigationUtils {
             }
             launchSingleTop = true
         }
+    }
+}
+
+/**
+ * Sets a flag to return to the Profile tab when navigating back
+ * @param navController The navigation controller
+ */
+fun NavController.setReturnToProfileTab() {
+    this.previousBackStackEntry?.savedStateHandle?.set("returnToProfileTab", true)
+}
+
+/**
+ * Navigates back to the previous screen with a flag to return to the Profile tab
+ * @param navController The navigation controller
+ */
+fun NavController.popBackToProfileTab() {
+    setReturnToProfileTab()
+    popBackStack()
+}
+
+/**
+ * Composable function that handles back button presses to return to the Profile tab
+ * @param navController The navigation controller
+ * @param onBackPressed Optional callback to execute additional logic on back press
+ */
+@Composable
+fun ProfileBackHandler(
+    navController: NavController, 
+    onBackPressed: (() -> Unit)? = null
+) {
+    BackHandler {
+        onBackPressed?.invoke()
+        navController.popBackToProfileTab()
     }
 } 

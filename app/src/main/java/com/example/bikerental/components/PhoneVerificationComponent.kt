@@ -33,6 +33,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.time.Duration.Companion.seconds
+import android.util.Log
 
 /**
  * A reusable phone verification component with robust reCAPTCHA handling
@@ -312,7 +313,7 @@ fun PhoneVerification(
                 if (showRetryPrompt) {
                     RecaptchaTroubleshootingCard(
                         onRetry = {
-                            viewModel.retryWithoutRecaptcha(phoneNumber, activity)
+                            viewModel.startPhoneNumberVerification(phoneNumber, activity)
                             showRetryPrompt = false
                         }
                     )
@@ -472,7 +473,7 @@ fun PhoneVerification(
                 
                 RecaptchaTroubleshootingCard(
                     onRetry = {
-                        viewModel.retryWithoutRecaptcha(phoneNumber, activity)
+                        viewModel.startPhoneNumberVerification(phoneNumber, activity)
                     },
                     showFullOptions = true
                 )
@@ -490,7 +491,7 @@ fun PhoneVerification(
                     
                     Button(
                         onClick = { 
-                            viewModel.retryWithoutRecaptcha(phoneNumber, activity)
+                            viewModel.startPhoneNumberVerification(phoneNumber, activity)
                         },
                         modifier = Modifier.weight(1f)
                     ) {
@@ -697,4 +698,17 @@ private fun RecaptchaTroubleshootingCard(
             }
         }
     }
+}
+
+@Composable
+fun OtpInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    keyboardOptions: KeyboardOptions,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true
+) {
+    // Implementation of OtpInputField
 } 

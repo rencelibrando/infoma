@@ -58,9 +58,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material3.Surface
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.auth.GoogleAuthProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -151,7 +153,6 @@ class MainActivity : ComponentActivity() {
                         
                         // Set callback to update parent's state from child navigation route
                         MainNavigation(
-                            isLoggedIn = isLoggedIn.value,
                             onLoginScreenChange = { isActive -> isLoginScreenActive = isActive },
                             fusedLocationClient = fusedLocationClient
                         )
@@ -184,302 +185,108 @@ private fun LoadingScreen() {
 
 @Composable
 fun MainNavigation(
-    isLoggedIn: Boolean,
     onLoginScreenChange: (Boolean) -> Unit,
     fusedLocationClient: FusedLocationProviderClient
 ) {
     val navController = rememberNavController()
-    val authViewModel = viewModel<AuthViewModel>()
-    val currentUser by authViewModel.currentUser.collectAsState()
-    
-    // Update the parent whenever local state changes
-    LaunchedEffect(isLoggedIn) {
-        onLoginScreenChange(!isLoggedIn)
-    }
-    
-    // Get current Firebase user - this is the source of truth
-    val firebaseUser = FirebaseAuth.getInstance().currentUser
-    
-    // Add a state to ensure Firebase has fully initialized
-    var firebaseInitialized by remember { mutableStateOf(false) }
-    
-    // Ensure Firebase Auth is fully initialized before checking user state
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(500) // Small delay to ensure auth is fully initialized
-        firebaseInitialized = true
-        Log.d("MainNavigation", "Firebase Auth initialization completed")
-    }
-    
-    // Always prioritize Firebase Auth status over the isLoggedIn parameter
-    val actuallyLoggedIn = firebaseUser != null
-    
-    // Determine start destination based on login state
-    val startDestination = if (actuallyLoggedIn && firebaseInitialized) {
-        Log.d("MainNavigation", "User authenticated: ${firebaseUser?.uid}, starting at Home")
-        Screen.Home.route
-    } else {
-        Log.d("MainNavigation", "No authenticated user, starting at Initial")
-        Screen.Initial.route
-    }
-    
-    Log.d("MainNavigation", "Start destination: $startDestination, isLoggedIn: $actuallyLoggedIn")
-    
-    NavHost(
-        navController = navController,
-        startDestination = startDestination,
-        modifier = Modifier.fillMaxSize()
-    ) {
-        composable(Screen.Initial.route) {
-            // Update login screen state locally
-            onLoginScreenChange(true)
-            Log.d("Navigation", "Rendering initial login screen")
-            GearTickLoginScreen(navController)
-        }
-        
-        composable(Screen.SignIn.route) {
-            // Update login screen state locally
-            onLoginScreenChange(true)
-            Log.d("Navigation", "Rendering sign in screen")
-            
-            // Check if already logged in (could happen if user logs in and presses back)
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            if (currentUser != null) {
-                LaunchedEffect(currentUser) {
-                    Log.d("Navigation", "User provider check: Google provider: true, Firestore provider: google, isGoogleUser: true")
-                    Log.d("Navigation", "Already logged in, redirecting to home")
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
-            } else {
-                AccessAccountScreen(navController)
-            }
-        }
-        
-        composable(Screen.SignUp.route) {
-            // Update login screen state locally
-            onLoginScreenChange(true)
-            Log.d("Navigation", "Rendering sign up screen")
-            
-            // A flag to disable auth checks when intentionally navigating to sign-up
-            val isIntentionalSignUp = remember { mutableStateOf(true) }
-            
-            // Check if already logged in - but only if not intentionally navigating to sign-up
-            val currentUser = FirebaseAuth.getInstance().currentUser
-            if (currentUser != null && !isIntentionalSignUp.value) {
-                LaunchedEffect(currentUser) {
-                    Log.d("Navigation", "Already logged in, redirecting to home")
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
-            } else {
-                // Reset the flag after initial render
-                LaunchedEffect(Unit) {
-                    // Delay to ensure the screen renders first
-                    kotlinx.coroutines.delay(300)
-                    isIntentionalSignUp.value = false
-                }
-                
-                // Show sign-up screen regardless of auth state
-                SignUpScreen(navController)
-            }
-        }
-        
-        // Add Google Verification screen
-        composable(Screen.GoogleVerification.route) {
-            // Update login screen state locally
-            onLoginScreenChange(true)
-            Log.d("Navigation", "Rendering Google verification screen")
-            
-            GoogleVerificationScreen(navController)
-        }
-        
-        // Add Email Verification screen
-        composable(Screen.EmailVerification.route) {
-            // Update login screen state locally
-            onLoginScreenChange(true)
-            Log.d("Navigation", "Rendering Email Verification screen")
-            
-            EmailVerificationScreen(navController)
-        }
-        
-        composable(Screen.Home.route) {
-            // Update login screen state locally
-            onLoginScreenChange(false)
-            
-            // Check authentication - redirect to login if not authenticated
-            if (firebaseUser == null) {
-                // User not logged in, redirect to login
-                LaunchedEffect(Unit) {
-                    Log.d("Navigation", "User not logged in, redirecting to sign in")
-                    navController.navigate(Screen.Initial.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
-                Box(modifier = Modifier.fillMaxSize()) // Empty placeholder while redirecting
-            } else {
-                // Handle verification requirements if needed
-                val emailVerified by authViewModel.emailVerified.collectAsState()
-                val authState by authViewModel.authState.collectAsState()
-                val bypassVerification = authViewModel.bypassVerification.collectAsState().value
-                
-                // Check verification status
-                LaunchedEffect(Unit) {
-                    Log.d("Navigation", "Checking email verification status in Home screen")
-                    authViewModel.checkEmailVerification()
-                }
-                
-                // Check for Google Sign-In more reliably
-                val isGoogleUser = remember {
-                    mutableStateOf(false)
-                }
-                
-                LaunchedEffect(firebaseUser) {
-                    // Check if user is signed in with Google
-                    val providers = firebaseUser.providerData
-                    val googleProvider = providers.any { 
-                        it.providerId == "google.com" || it.providerId == GoogleAuthProvider.PROVIDER_ID 
-                    }
-                    
-                    // Also check Firestore for provider info
-                    try {
-                        val userDoc = FirebaseFirestore.getInstance()
-                            .collection("users")
-                            .document(firebaseUser.uid)
-                            .get()
-                            .await()
-                            
-                        val providerFromFirestore = userDoc.getString("provider")
-                        val isGoogleFromFirestore = providerFromFirestore == "google"
-                        
-                        // Update the state with the most reliable information
-                        isGoogleUser.value = googleProvider || isGoogleFromFirestore
-                        
-                        // Force the user to be treated as verified if they're a Google user
-                        if (googleProvider || isGoogleFromFirestore) {
-                            authViewModel.updateEmailVerificationStatus(true)
-                        }
-                        
-                        Log.d("Navigation", "User provider check: Google provider: $googleProvider, " +
-                              "Firestore provider: $providerFromFirestore, isGoogleUser: ${isGoogleUser.value}")
-                    } catch (e: Exception) {
-                        // If Firestore check fails, rely on Firebase Auth providers
-                        isGoogleUser.value = googleProvider
-                        Log.d("Navigation", "Firestore provider check failed, using Auth provider only: ${isGoogleUser.value}")
-                        
-                        // Still mark Google users as verified
-                        if (googleProvider) {
-                            authViewModel.updateEmailVerificationStatus(true)
-                        }
-                    }
-                }
-                
-                // Handle verification state and redirect if needed
-                LaunchedEffect(emailVerified, authState, isGoogleUser.value) {
-                    Log.d("Navigation", "Verification state: emailVerified=${emailVerified}, " +
-                          "authState=${authState::class.simpleName}, isGoogleUser=${isGoogleUser.value}, " +
-                          "bypassVerification=$bypassVerification")
-                    
-                    // Skip redirection if:
-                    // 1. Is a Google user (Google users are auto-verified)
-                    // 2. Email is verified
-                    // 3. Verification is explicitly bypassed
-                    val shouldSkipVerification = isGoogleUser.value || 
-                        emailVerified == true || 
-                        bypassVerification
-                        
-                    if (!shouldSkipVerification && 
-                        (emailVerified == false || authState is AuthState.NeedsEmailVerification)) {
-                        Log.d("Navigation", "Email not verified, redirecting to verification screen")
-                        navController.navigate(Screen.EmailVerification.route) {
-                            popUpTo(Screen.Home.route) { inclusive = false }
-                        }
-                    } else if (isGoogleUser.value && (emailVerified == false || authState is AuthState.NeedsEmailVerification)) {
-                        // For Google users, just update their verification status without redirecting
-                        Log.d("Navigation", "Google user detected, bypassing email verification")
-                        authViewModel.checkEmailVerification()
-                    } else if (bypassVerification) {
-                        Log.d("Navigation", "Verification bypassed by user choice")
-                    }
-                }
-                
-                // User is authenticated, show the home screen
-                HomeScreen(navController, fusedLocationClient)
-            }
-        }
-        
-        // Profile-related screens
-        composable(Screen.EditProfile.route) {
-            EditProfileScreen(navController)
-        }
-        
-        composable(Screen.ChangePassword.route) {
-            ChangePasswordScreen(navController, authViewModel)
-        }
-        
-        // Additional routes for other screens...
-        // (Profile, EditProfile, etc. - include all your existing routes)
-    }
-}
+    val authViewModel: AuthViewModel = viewModel()
+    val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
-@Composable
-private fun AuthStateListener(
-    navController: NavHostController,
-    isLoginScreenActive: Boolean,
-    onLoginStateChange: (Boolean) -> Unit
-) {
-    val authViewModel = viewModel<AuthViewModel>()
-    val phoneAuthViewModel = viewModel<PhoneAuthViewModel>()
-    val currentRoute = navController.currentDestination?.route
-    
-    DisposableEffect(Unit) {
-        val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            val currentUser = firebaseAuth.currentUser
-            Log.d("MainActivityListener", "Auth state changed. Current user: ${currentUser?.uid}, isLoginScreenActive: $isLoginScreenActive")
-            
-            // Skip auth state changes when on login screen to prevent redirect issues
-            if (!isLoginScreenActive) {
-                Log.d("MainActivityListener", "Processing auth state change (not on login screen). Current route: ${navController.currentDestination?.route}")
-                
-                // Update login state - prevent excessive updates by checking if state actually changed
-                val newLoggedInState = currentUser != null
-                onLoginStateChange(newLoggedInState)
-                
-                if (currentUser != null) {
-                    phoneAuthViewModel.updateAuthState(currentUser)
-                }
-            }
-        }
-        
-        val auth = FirebaseAuth.getInstance()
-        auth.addAuthStateListener(authStateListener)
-        onDispose {
-            Log.d("MainActivityListener", "Removing auth state listener")
-            auth.removeAuthStateListener(authStateListener)
-        }
-    }
-}
+    // Remember last navigation event to prevent losing tab state
+    var lastNavigationEvent by remember { mutableStateOf("") }
+    var handlingInternalNav by remember { mutableStateOf(false) }
 
-// Create a composable to observe auth state and handle navigation
-@Composable
-fun AuthStateObserver(navController: NavHostController, authViewModel: AuthViewModel = viewModel()) {
-    val authState by authViewModel.authState.collectAsState()
-    
     LaunchedEffect(authState) {
-        when (authState) {
-            is AuthState.Initial -> {
-                // When auth state is Initial (user signed out), navigate to sign in
-                Log.d("AuthStateObserver", "AuthState is Initial, navigating to sign in")
-                navController.navigate(Screen.SignIn.route) {
-                    popUpTo(navController.graph.startDestinationId) {
-                        inclusive = true
-                    }
-                }
+        val isAuthScreen = when (authState) {
+            is AuthState.Initial,
+            is AuthState.Loading,
+            is AuthState.NeedsEmailVerification,
+            is AuthState.NeedsAppVerification,
+            is AuthState.Error -> true
+            is AuthState.Authenticated -> false
+            else -> !navController.currentDestination?.route.equals(Screen.Home.route, ignoreCase = true)
+        }
+        onLoginScreenChange(isAuthScreen)
+        Log.d("MainNavigation", "Auth State: ${authState::class.simpleName}, LoginScreenActive: $isAuthScreen")
+    }
+
+    // Track current back stack entry changes
+    val currentBackStackEntry by rememberUpdatedState(navController.currentBackStackEntry)
+    
+    // Handle tab navigation and returnToProfileTab flag
+    LaunchedEffect(currentBackStackEntry) {
+        val returnToProfileTab = currentBackStackEntry?.savedStateHandle?.get<Boolean>("returnToProfileTab") ?: false
+        if (returnToProfileTab && !handlingInternalNav) {
+            handlingInternalNav = true
+            // Record we're handling profile navigation
+            lastNavigationEvent = "profile"
+            // Clear flag after handling
+            currentBackStackEntry?.savedStateHandle?.remove<Boolean>("returnToProfileTab")
+            handlingInternalNav = false
+        }
+    }
+
+    when (authState) {
+        is AuthState.Loading, AuthState.Initial -> {
+            LoadingScreen()
+        }
+        is AuthState.Authenticated -> {
+            Log.d("MainNavigation", "Rendering NavHost for Authenticated state, starting at Home")
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Home.route,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
+                composable(Screen.EditProfile.route) { EditProfileScreen(navController) }
+                composable(Screen.ChangePassword.route) { ChangePasswordScreen(navController, authViewModel) }
+                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+                composable(Screen.SignUp.route) { SignUpScreen(navController) }
+                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
             }
-            else -> { /* Other states handled elsewhere */ }
+        }
+        is AuthState.NeedsEmailVerification -> {
+            Log.d("MainNavigation", "Rendering NavHost for NeedsEmailVerification state")
+            NavHost(
+                navController = navController,
+                startDestination = Screen.EmailVerification.route,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+                composable(Screen.SignUp.route) { SignUpScreen(navController) }
+                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
+            }
+        }
+        is AuthState.NeedsAppVerification -> {
+            Log.d("MainNavigation", "Rendering NavHost for NeedsAppVerification state (e.g., Google Verification)")
+            NavHost(
+                navController = navController,
+                startDestination = Screen.GoogleVerification.route,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Screen.GoogleVerification.route) { GoogleVerificationScreen(navController) }
+                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+                composable(Screen.SignUp.route) { SignUpScreen(navController) }
+            }
+        }
+        else -> {
+            Log.d("MainNavigation", "Rendering NavHost for Unauthenticated state (State: ${authState::class.simpleName})")
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Initial.route,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+                composable(Screen.SignUp.route) { SignUpScreen(navController) }
+                composable(Screen.GoogleVerification.route) { GoogleVerificationScreen(navController) }
+                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
+            }
         }
     }
 }

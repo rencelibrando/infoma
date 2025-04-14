@@ -38,6 +38,10 @@ import androidx.core.content.ContextCompat
 import kotlin.math.roundToInt
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
+import androidx.activity.compose.BackHandler
+import com.example.bikerental.utils.ColorUtils
+import com.example.bikerental.navigation.ProfileBackHandler
+import com.example.bikerental.navigation.popBackToProfileTab
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -208,13 +212,16 @@ fun EditProfileScreen(navController: NavController) {
         }
     }
 
+    // Use the ProfileBackHandler utility instead of custom BackHandler
+    ProfileBackHandler(navController)
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Edit Profile") },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                    IconButton(onClick = { navController.popBackToProfileTab() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )

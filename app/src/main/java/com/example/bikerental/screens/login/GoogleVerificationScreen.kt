@@ -53,7 +53,7 @@ fun GoogleVerificationScreen(
                 isLoading = false
             }
             is AuthState.Authenticated -> {
-                NavigationUtils.navigateToHome(navController)
+                Log.d("GoogleVerification", "Authenticated state received. Navigation handled by MainActivity.")
             }
             is AuthState.Error -> {
                 val message = (authState as AuthState.Error).message

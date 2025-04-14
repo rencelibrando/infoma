@@ -1,8 +1,10 @@
 package com.example.bikerental.viewmodels
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bikerental.models.Bike
 import com.example.bikerental.models.BikeLocation
 import com.example.bikerental.models.BikeRide
 import com.example.bikerental.models.TrackableBike
@@ -10,6 +12,7 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -23,8 +26,21 @@ class BikeViewModel : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
     private val database = FirebaseDatabase.getInstance()
+    private val storage = FirebaseStorage.getInstance()
     private val bikesRef = database.getReference("bikes")
     private val ridesRef = database.getReference("rides")
+    
+    // State for bikes from Firestore (new)
+    private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
+    val bikes: StateFlow<List<Bike>> = _bikes
+    
+    // Loading state (new)
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading
+    
+    // Error state (new)
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error
     
     // State for bikes
     private val _availableBikes = MutableStateFlow<List<TrackableBike>>(emptyList())
@@ -48,7 +64,88 @@ class BikeViewModel : ViewModel() {
     
     init {
         fetchAllBikes()
+        fetchBikesFromFirestore()
         checkForActiveRide()
+    }
+    
+    // Fetch bikes from Firestore (new)
+    fun fetchBikesFromFirestore() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            
+            try {
+                val bikesCollection = firestore.collection("bikes")
+                val bikesSnapshot = bikesCollection.get().await()
+                
+                val bikesList = bikesSnapshot.documents.mapNotNull { document -> 
+                    try {
+                        document.toObject(Bike::class.java)?.copy(id = document.id)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing bike data from Firestore", e)
+                        null
+                    }
+                }
+                
+                _bikes.value = bikesList
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching bikes from Firestore", e)
+                _error.value = "Failed to load bikes: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    // Upload a new bike to Firestore with image (new)
+    fun uploadBike(
+        name: String,
+        type: String,
+        price: Double,
+        imageUri: Uri,
+        location: LatLng,
+        description: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                // 1. Upload image to Firebase Storage
+                val storageRef = storage.reference.child("bikes/${UUID.randomUUID()}.jpg")
+                val uploadTask = storageRef.putFile(imageUri).await()
+                val downloadUrl = storageRef.downloadUrl.await().toString()
+                
+                // 2. Create bike object
+                val bike = Bike(
+                    id = UUID.randomUUID().toString(),
+                    name = name,
+                    type = type,
+                    price = "₱${price}/hr",
+                    priceValue = price,
+                    imageUrl = downloadUrl,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    description = description,
+                    isAvailable = true,
+                    isInUse = false
+                )
+                
+                // 3. Save to Firestore
+                firestore.collection("bikes").document(bike.id)
+                    .set(bike).await()
+                
+                // 4. Refresh the bike list
+                fetchBikesFromFirestore()
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error uploading bike", e)
+                onError("Failed to upload bike: ${e.message}")
+            } finally {
+                _isLoading.value = false
+            }
+        }
     }
     
     // Fetch all available bikes from Firebase Realtime Database

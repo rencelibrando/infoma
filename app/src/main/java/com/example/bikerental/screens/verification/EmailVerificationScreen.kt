@@ -125,16 +125,12 @@ fun EmailVerificationScreen(
             try {
                 delay(500) // Small delay for UI feedback
                 
-                // Use the application's check if available
-                if (application != null) {
-                    val isVerified = application.checkAndUpdateEmailVerification()
-                    if (isVerified) {
-                        verifiedDuringSession = true
-                    }
-                } else {
-                    // Fallback to ViewModel's check
-                    viewModel.checkEmailVerification()
-                }
+                // REMOVED: Check for application and call to application.checkAndUpdateEmailVerification()
+                // ALWAYS use the ViewModel's check now
+                Log.d("EmailVerificationScreen", "LaunchedEffect(isCheckingVerification): Calling viewModel.checkEmailVerification()")
+                viewModel.checkEmailVerification()
+                // The result will be observed via the emailVerified StateFlow
+
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     Log.e("EmailVerificationScreen", "Error checking verification: ${e.message}")
@@ -166,26 +162,29 @@ fun EmailVerificationScreen(
             verifiedDuringSession = true
             errorState = null
             
+            // REMOVED: Explicit navigation. MainActivity handles this based on state.
             // Log that verification was successful
-            Log.d("EmailVerificationScreen", "Email verification detected as TRUE, preparing to navigate to home")
-            
-            // Don't navigate immediately - let the user see the success state first
+            /*
+            Log.d("EmailVerificationScreen", 
+                "Email verification successful, attempting navigation to home")
             try {
-                delay(2000) // Reduced delay to ensure faster navigation
-                Log.d("EmailVerificationScreen", "Email verified, navigating to home after delay")
+                // Use NavigationUtils for consistent navigation
                 NavigationUtils.navigateToHome(navController)
             } catch (e: Exception) {
-                Log.e("EmailVerificationScreen", "Navigation error: ${e.message}")
-                // Fallback navigation if the first attempt fails
+                Log.e("EmailVerificationScreen", 
+                    "Error navigating to home after verification: ${e.message}", e)
+                // Fallback navigation
                 try {
-                    Log.d("EmailVerificationScreen", "Attempting fallback navigation")
                     navController.navigate(Screen.Home.route) {
                         popUpTo(0) { inclusive = true }
                     }
                 } catch (e2: Exception) {
-                    Log.e("EmailVerificationScreen", "Fallback navigation also failed: ${e2.message}")
+                     Log.e("EmailVerificationScreen", "All navigation attempts failed: ${e2.message}", e2)
+                     Toast.makeText(context, "Navigation error. Please try again.", Toast.LENGTH_SHORT).show()
                 }
             }
+            */
+            Log.d("EmailVerificationScreen", "Email verified. Navigation handled by MainActivity.")
         }
     }
     
@@ -246,16 +245,20 @@ fun EmailVerificationScreen(
                 val message = (authState as AuthState.Error).message
                 Log.e("EmailVerificationScreen", "Auth error: $message")
                 
-                // If it's an app check error, show a user-friendly message but don't count it as an error
-                if (message.contains("App attestation") || message.contains("App Check") || 
-                    message.contains("Firebase") || message.contains("token")) {
-                    errorState = "Firebase authentication issue. Please try again later."
-                    // Don't increment error count for App Check errors as these are expected in development
-                    if (!message.contains("App Check")) {
-                        apiErrorCount++
-                    }
-                } else {
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                // More specific error messages based on the error type
+                errorState = when {
+                    message.contains("network", ignoreCase = true) -> 
+                        "Network error. Please check your internet connection."
+                    message.contains("verification", ignoreCase = true) -> 
+                        "Verification failed. Please try again."
+                    message.contains("App Check", ignoreCase = true) -> 
+                        "Security verification pending. This is normal in development."
+                    else -> "Authentication issue. Please try again later."
+                }
+                
+                // Only count non-App Check errors
+                if (!message.contains("App Check", ignoreCase = true)) {
+                    apiErrorCount++
                 }
             }
             else -> {
@@ -267,8 +270,16 @@ fun EmailVerificationScreen(
     
     // One-time initial check on screen load
     LaunchedEffect(Unit) {
-        delay(500) // Initial delay to allow screen to render
+        Log.d("EmailVerificationScreen", "Initial check triggered")
         isCheckingVerification = true
+        coroutineScope.launch {
+            try {
+                // Replace call to application function with ViewModel function
+                viewModel.checkEmailVerification()
+            } finally {
+                isCheckingVerification = false
+            }
+        }
     }
     
     // Set up lightweight background polling with increasing intervals and failsafe
@@ -426,14 +437,14 @@ fun EmailVerificationScreen(
             ) {
                 // Email icon - conditionally show only if not verified
                 if (!verifiedDuringSession) {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = "Email Verification",
-                        modifier = Modifier.size(80.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    Spacer(modifier = Modifier.height(24.dp))
+                Icon(
+                    imageVector = Icons.Default.Email,
+                    contentDescription = "Email Verification",
+                    modifier = Modifier.size(80.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                
+                Spacer(modifier = Modifier.height(24.dp))
                 }
                 
                 // Title
@@ -656,21 +667,16 @@ private fun VerifiedSuccessCard(navController: NavController) {
                         
                         // Check if still authenticated before navigation
                         if (firebaseUser != null) {
-                            NavigationUtils.navigateToHome(navController)
+                            // REMOVED: Explicit Navigation
+                            // NavigationUtils.navigateToHome(navController)
+                            Log.d("EmailVerificationScreen", "User still authenticated. Navigation handled by MainActivity.")
                         } else {
                             Log.d("EmailVerificationScreen", "User is no longer authenticated, navigating to login")
-                            NavigationUtils.navigateToLogin(navController)
+                            // Let MainActivity handle the navigation based on the now-unauthenticated state
+                            // NavigationUtils.navigateToLogin(navController)
                         }
                     } catch (e: Exception) {
-                        Log.e("EmailVerificationScreen", "Navigation from success card failed: ${e.message}")
-                        // Fallback to more basic navigation if needed
-                        try {
-                            navController.navigate(Screen.Home.route) {
-                                popUpTo(0) { inclusive = true }
-                            }
-                        } catch (e2: Exception) {
-                            Log.e("EmailVerificationScreen", "All navigation attempts failed: ${e2.message}")
-                        }
+                        Log.e("EmailVerificationScreen", "Error in success card button action: ${e.message}")
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),

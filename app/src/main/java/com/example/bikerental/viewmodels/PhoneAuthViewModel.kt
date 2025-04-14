@@ -28,78 +28,48 @@ class PhoneAuthViewModel : ViewModel() {
         }
     }
     
-    fun retryWithoutRecaptcha(phoneNumber: String, activity: Activity) {
-        viewModelScope.launch {
-            verificationManager.retryWithoutRecaptcha(phoneNumber, activity)
-        }
-    }
-    
     fun verifyPhoneNumberWithCode(code: String) {
         verificationManager.verifyCode(code)
     }
     
-    suspend fun checkRateLimitStatus(): Pair<Boolean, Long> {
-        return verificationManager.checkRateLimitStatus()
-    }
-    
     fun checkAndCleanupExpiredRateLimits() {
-        viewModelScope.launch {
-            verificationManager.cleanupExpiredRateLimits()
-        }
+        Log.d("PhoneAuthViewModel", "checkAndCleanupExpiredRateLimits called, but Firestore cleanup is removed.")
     }
     
     fun checkIfDeviceBlockExpired() {
-        viewModelScope.launch {
-            try {
-                val isDeviceStillBlocked = verificationManager.checkIfDeviceStillBlocked()
-                if (!isDeviceStillBlocked) {
-                    Log.d("PhoneAuthViewModel", "Device block has expired, resetting state")
-                    resetState()
-                } else {
-                    Log.d("PhoneAuthViewModel", "Device is still blocked")
-                    val blockInfo = verificationManager.getDeviceBlockInfo()
-                    if (blockInfo.first) {
-                        setRateLimited(
-                            blockInfo.second,
-                            "24 hours",
-                            isDeviceBlock = true
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("PhoneAuthViewModel", "Error checking device block status: ${e.message}")
-            }
-        }
+        Log.d("PhoneAuthViewModel", "checkIfDeviceBlockExpired called, but device block logic is removed.")
     }
     
-    fun setRateLimited(expiryTime: Long, displayDuration: String, isDeviceBlock: Boolean = false) {
+    fun setRateLimited(expiryTime: Long, displayDuration: String) {
         _uiState.value = PhoneAuthState.RateLimited(
             expiryTime, 
-            displayDuration, 
-            isServerBased = true,
-            isDeviceBlock = isDeviceBlock
+            displayDuration
         )
     }
     
-    fun resetState() {
+    /**
+     * Checks if the user is currently rate limited for phone verification
+     * @return Pair<Boolean, Long> where first is whether user is rate limited and second is expiry time
+     */
+    fun checkRateLimitStatus(): Pair<Boolean, Long> {
+        // For now, implement a simple version that just checks the current state
+        // In a real implementation, this would check Firestore or other persistence
+        
         val currentState = _uiState.value
-        val isRateLimited = currentState is PhoneAuthState.RateLimited
-        val isDeviceBlock = if (currentState is PhoneAuthState.RateLimited) {
-            currentState.isDeviceBlock
-        } else {
-            false
+        if (currentState is PhoneAuthState.RateLimited) {
+            return Pair(true, currentState.expireTimeMillis)
         }
         
+        // Default: not rate limited, with 0 as expiry time
+        return Pair(false, 0L)
+    }
+    
+    /**
+     * Resets the phone auth state to Initial
+     */
+    fun resetState() {
         _uiState.value = PhoneAuthState.Initial
         verificationManager.reset()
-        
-        if (isRateLimited) {
-            if (!isDeviceBlock) {
-                checkAndCleanupExpiredRateLimits()
-            } else {
-                checkIfDeviceBlockExpired()
-            }
-        }
     }
     
     fun updateAuthState(user: FirebaseUser?) {
@@ -108,5 +78,18 @@ class PhoneAuthViewModel : ViewModel() {
         } else {
             _uiState.value = PhoneAuthState.Initial
         }
+    }
+    
+    /**
+     * Retry verification without reCAPTCHA when the normal flow fails
+     * @param phoneNumber The phone number to verify
+     * @param activity The activity context
+     */
+    suspend fun retryWithoutRecaptcha(phoneNumber: String, activity: Activity) {
+        Log.d("PhoneAuthViewModel", "Attempting verification without reCAPTCHA for $phoneNumber")
+        // In a production app, this might use a different verification method or
+        // set special flags for verification. For now, we'll just call the normal method
+        // but we could add special handling here in the future.
+           startPhoneNumberVerification(phoneNumber, activity, "GearTick")
     }
 } 

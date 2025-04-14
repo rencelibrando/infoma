@@ -28,6 +28,9 @@ sealed class Screen(val route: String) {
         fun createRoute(bikeId: String) = "bikeDetails/$bikeId"
     }
     
+    // Admin screens
+    object BikeUpload : Screen("bikeUpload")
+    
     // Booking related screens
     object Bookings : Screen("bookings")
     object BookingDetails : Screen("bookingDetails/{bookingId}") {
