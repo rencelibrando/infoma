@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+  	allow read, write: if request.auth != null && request.app_check.token != null;
+    
+    match /admins/{adminId} {
+      allow read: if request.auth != null && request.app_check.token != null;
+      allow write: if request.auth != null && 
+                   request.app_check.token != null &&
+                   exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    
+    // Bikes collection
+    match /bikes/{bikeId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+                   exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    match /{document=**} {
+      allow read, write: if request.time < timestamp.date(2025, 10, 1);
+    }
+  }
+}
+
+
+
