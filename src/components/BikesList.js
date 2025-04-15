@@ -38,11 +38,18 @@ const Button = styled.button`
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  background-color: ${props => props.danger ? '#ff4444' : '#4CAF50'};
+  background-color: ${props => props.danger ? '#ff4444' : props.edit ? '#2196F3' : '#4CAF50'};
   color: white;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    opacity: 0.85;
+    transform: translateY(-2px);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15);
+  }
 `;
 
-const BikesList = () => {
+const BikesList = ({ onEditBike }) => {
   const [bikes, setBikes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -73,6 +80,12 @@ const BikesList = () => {
       }
     }
   };
+  
+  const handleEdit = (bike) => {
+    if (onEditBike) {
+      onEditBike(bike);
+    }
+  };
 
   if (loading) return <div>Loading bikes...</div>;
   if (error) return <div style={{ color: 'red' }}>{error}</div>;
@@ -81,7 +94,7 @@ const BikesList = () => {
     <div>
       <h2>Manage Bikes</h2>
       {bikes.length === 0 ? (
-        <p>No bikes found. Add some bikes to get started.</p>
+        <p>No bikes available. Add some bikes to get started.</p>
       ) : (
         <Table>
           <thead>
@@ -95,29 +108,26 @@ const BikesList = () => {
             </tr>
           </thead>
           <tbody>
-            {bikes.map(bike => (
+            {bikes.map((bike) => (
               <TableRow key={bike.id}>
                 <TableCell>
                   <img 
                     src={bike.imageUrl} 
                     alt={bike.name} 
-                    width="60" 
-                    height="60" 
-                    style={{ objectFit: 'cover', borderRadius: '4px' }}
+                    style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px' }} 
                   />
                 </TableCell>
                 <TableCell>{bike.name}</TableCell>
                 <TableCell>{bike.type}</TableCell>
                 <TableCell>{bike.price}</TableCell>
                 <TableCell>
-                  <span style={{ 
-                    color: bike.isAvailable ? 'green' : 'red',
-                    fontWeight: 'bold'
-                  }}>
-                    {bike.isAvailable ? 'Available' : 'Not Available'}
-                  </span>
+                  {bike.isAvailable ? 
+                    <span style={{ color: 'green' }}>Available</span> : 
+                    <span style={{ color: 'red' }}>Not Available</span>
+                  }
                 </TableCell>
                 <TableCell>
+                  <Button edit onClick={() => handleEdit(bike)}>Edit</Button>
                   <Button danger onClick={() => handleDelete(bike.id)}>Delete</Button>
                 </TableCell>
               </TableRow>

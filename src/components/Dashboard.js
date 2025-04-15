@@ -4,6 +4,7 @@ import { auth } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import BikesList from './BikesList';
 import AddBike from './AddBike';
+import EditBike from './EditBike';
 import styled from 'styled-components';
 
 const DashboardContainer = styled.div`
@@ -24,8 +25,31 @@ const Content = styled.div`
   background-color: #f5f5f5;
 `;
 
+const MenuOption = styled.p`
+  padding: 10px;
+  cursor: pointer;
+  background-color: ${props => props.active ? '#444' : 'transparent'};
+  margin-bottom: 5px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background-color: ${props => props.active ? '#444' : '#3a3a3a'};
+  }
+`;
+
+const LogoutOption = styled(MenuOption)`
+  margin-top: 50px;
+  color: #ff6666;
+  
+  &:hover {
+    background-color: #5a2a2a;
+  }
+`;
+
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('bikes');
+  const [selectedBike, setSelectedBike] = useState(null);
   const navigate = useNavigate();
 
   // Check authentication
@@ -47,49 +71,59 @@ const Dashboard = () => {
       console.error("Logout error", error);
     }
   };
+  
+  const handleEditBike = (bike) => {
+    setSelectedBike(bike);
+    setActiveTab('edit');
+  };
+  
+  const handleEditSuccess = () => {
+    setSelectedBike(null);
+    setActiveTab('bikes');
+  };
+  
+  const handleCancelEdit = () => {
+    setSelectedBike(null);
+    setActiveTab('bikes');
+  };
 
   return (
     <DashboardContainer>
       <Sidebar>
         <h2>Bike Rental Admin</h2>
         <div style={{ marginTop: '30px' }}>
-          <p 
-            style={{ 
-              padding: '10px', 
-              cursor: 'pointer',
-              backgroundColor: activeTab === 'bikes' ? '#444' : 'transparent'
-            }}
+          <MenuOption 
+            active={activeTab === 'bikes'}
             onClick={() => setActiveTab('bikes')}
           >
             Manage Bikes
-          </p>
-          <p 
-            style={{ 
-              padding: '10px', 
-              cursor: 'pointer',
-              backgroundColor: activeTab === 'add' ? '#444' : 'transparent'
-            }}
+          </MenuOption>
+          <MenuOption 
+            active={activeTab === 'add'}
             onClick={() => setActiveTab('add')}
           >
             Add New Bike
-          </p>
-          <p 
-            style={{ 
-              padding: '10px', 
-              cursor: 'pointer',
-              marginTop: '50px',
-              color: '#ff6666'
-            }}
-            onClick={handleLogout}
-          >
+          </MenuOption>
+          <LogoutOption onClick={handleLogout}>
             Logout
-          </p>
+          </LogoutOption>
         </div>
       </Sidebar>
       
       <Content>
-        {activeTab === 'bikes' && <BikesList />}
-        {activeTab === 'add' && <AddBike onSuccess={() => setActiveTab('bikes')} />}
+        {activeTab === 'bikes' && (
+          <BikesList onEditBike={handleEditBike} />
+        )}
+        {activeTab === 'add' && (
+          <AddBike onSuccess={() => setActiveTab('bikes')} />
+        )}
+        {activeTab === 'edit' && selectedBike && (
+          <EditBike 
+            bike={selectedBike} 
+            onSuccess={handleEditSuccess} 
+            onCancel={handleCancelEdit} 
+          />
+        )}
       </Content>
     </DashboardContainer>
   );
