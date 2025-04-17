@@ -207,7 +207,24 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
     setError('');
     
     try {
-      await updateBike(bike.id, formData, imageFile);
+      // If the bike is being marked as available, we need to ensure it's locked
+      if (formData.isAvailable && !bike.isLocked) {
+        const confirmLock = window.confirm(
+          "This bike is currently unlocked. To mark it as available, it must be locked. Do you want to lock this bike now?"
+        );
+        
+        if (!confirmLock) {
+          setError("A bike must be locked to be available. Please try again.");
+          setLoading(false);
+          return;
+        }
+        
+        // We'll add isLocked: true to the update data
+        await updateBike(bike.id, {...formData, isLocked: true}, imageFile);
+      } else {
+        await updateBike(bike.id, formData, imageFile);
+      }
+      
       setSuccess('Bike updated successfully!');
       setTimeout(() => {
         if (onSuccess) onSuccess();

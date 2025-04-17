@@ -15,10 +15,28 @@ const firebaseConfig = {
   measurementId: "G-WTS4L56WBP"
 };
 
-
+// Initialize Firebase first
 const app = initializeApp(firebaseConfig);
+
+// Initialize Firestore, Storage, and Auth
 const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
+
+// Only initialize App Check in production environment
+// This allows local development to work without reCAPTCHA verification
+if (process.env.NODE_ENV === 'production') {
+  import('firebase/app-check').then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
+    const appCheck = initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider('6LfqjBsrAAAAAMs93cei_7rFTn2hXKLPvL-sEKFr'),
+      isTokenAutoRefreshEnabled: true
+    });
+    console.log('Firebase App Check initialized for production');
+  }).catch(error => {
+    console.error('Error initializing App Check:', error);
+  });
+} else {
+  console.log('Firebase App Check disabled for development environment');
+}
 
 export { db, storage, auth };
