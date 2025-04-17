@@ -42,13 +42,17 @@ class BikeViewModel : ViewModel() {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
     
+    // Selected bike for detail view
+    private val _selectedBike = MutableStateFlow<Bike?>(null)
+    val selectedBike: StateFlow<Bike?> = _selectedBike
+    
     // State for bikes
     private val _availableBikes = MutableStateFlow<List<TrackableBike>>(emptyList())
     val availableBikes: StateFlow<List<TrackableBike>> = _availableBikes
     
     // State for the selected bike
-    private val _selectedBike = MutableStateFlow<TrackableBike?>(null)
-    val selectedBike: StateFlow<TrackableBike?> = _selectedBike
+    private val _selectedTrackableBike = MutableStateFlow<TrackableBike?>(null)
+    val selectedTrackableBike: StateFlow<TrackableBike?> = _selectedTrackableBike
     
     // State for tracking the user's active ride
     private val _activeRide = MutableStateFlow<BikeRide?>(null)
@@ -62,9 +66,13 @@ class BikeViewModel : ViewModel() {
     private var bikeLocationListener: ValueEventListener? = null
     private var availableBikesListener: ValueEventListener? = null
     
+    // Setup a real-time listener for bike collection changes
+    private var firestoreBikesListener: com.google.firebase.firestore.ListenerRegistration? = null
+    
     init {
         fetchAllBikes()
         fetchBikesFromFirestore()
+        setupBikesRealtimeUpdates()
         checkForActiveRide()
     }
     
@@ -91,6 +99,71 @@ class BikeViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching bikes from Firestore", e)
                 _error.value = "Failed to load bikes: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    // Setup a real-time listener for bike collection changes
+    fun setupBikesRealtimeUpdates() {
+        // Cancel any existing listener to avoid duplicates
+        firestoreBikesListener?.remove()
+        
+        // Create a new listener for real-time updates
+        firestoreBikesListener = firestore.collection("bikes")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error listening for bike updates", error)
+                    _error.value = "Failed to listen for updates: ${error.message}"
+                    return@addSnapshotListener
+                }
+                
+                if (snapshot != null) {
+                    try {
+                        val bikesList = snapshot.documents.mapNotNull { document -> 
+                            try {
+                                document.toObject(Bike::class.java)?.copy(id = document.id)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parsing bike data from Firestore", e)
+                                null
+                            }
+                        }
+                        
+                        _bikes.value = bikesList
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing bike updates", e)
+                    }
+                }
+            }
+    }
+    
+    // Get a specific bike by ID for the detail screen
+    fun getBikeById(bikeId: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            _selectedBike.value = null
+            
+            try {
+                // First check in the existing bikes list to avoid a network call if possible
+                val bikeFromCache = _bikes.value.find { it.id == bikeId }
+                
+                if (bikeFromCache != null) {
+                    _selectedBike.value = bikeFromCache
+                } else {
+                    // If not found in cache, fetch from Firestore
+                    val bikeDoc = firestore.collection("bikes").document(bikeId).get().await()
+                    if (bikeDoc.exists()) {
+                        val bike = bikeDoc.toObject(Bike::class.java)?.copy(id = bikeDoc.id)
+                        _selectedBike.value = bike
+                    } else {
+                        _error.value = "Bike not found"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching bike details", e)
+                _error.value = "Failed to load bike details: ${e.message}"
             } finally {
                 _isLoading.value = false
             }
@@ -203,7 +276,7 @@ class BikeViewModel : ViewModel() {
             try {
                 val bikeSnapshot = bikesRef.child(bikeId).get().await()
                 val bike = bikeSnapshot.getValue(TrackableBike::class.java)
-                _selectedBike.value = bike
+                _selectedTrackableBike.value = bike
             } catch (e: Exception) {
                 Log.e(TAG, "Error selecting bike", e)
             }
@@ -221,7 +294,7 @@ class BikeViewModel : ViewModel() {
                 try {
                     val bike = snapshot.getValue(TrackableBike::class.java)
                     bike?.let {
-                        _selectedBike.value = it
+                        _selectedTrackableBike.value = it
                         _bikeLocation.value = LatLng(it.latitude, it.longitude)
                     }
                 } catch (e: Exception) {
@@ -238,7 +311,7 @@ class BikeViewModel : ViewModel() {
     // Stop tracking the bike's location
     fun stopTrackingBike() {
         bikeLocationListener?.let {
-            _selectedBike.value?.id?.let { bikeId ->
+            _selectedTrackableBike.value?.id?.let { bikeId ->
                 bikesRef.child(bikeId).removeEventListener(it)
             }
             bikeLocationListener = null
@@ -326,7 +399,7 @@ class BikeViewModel : ViewModel() {
             val durationMinutes = (endTime - ride.startTime) / 60000.0
             
             // Extract hourly rate from price string (e.g., "₱12/hr" -> 12.0)
-            val hourlyRate = _selectedBike.value?.price?.let {
+            val hourlyRate = _selectedTrackableBike.value?.price?.let {
                 val priceValue = it.replace(Regex("[^0-9]"), "")
                 priceValue.toDoubleOrNull() ?: 10.0 // Default to 10 if parsing fails
             } ?: 10.0
@@ -427,5 +500,6 @@ class BikeViewModel : ViewModel() {
         availableBikesListener?.let {
             bikesRef.removeEventListener(it)
         }
+        firestoreBikesListener?.remove()
     }
 } 

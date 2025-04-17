@@ -9,11 +9,6 @@ import com.example.bikerental.BikeRentalApplication
 import com.example.bikerental.R
 import com.example.bikerental.models.AuthState
 import com.example.bikerental.models.User
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
-import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -27,12 +22,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class AuthViewModel(application: Application? = null) : ViewModel() {
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
-    private var googleSignInClient: GoogleSignInClient? = null
 
     // Use SupervisorJob for better error handling in the main scope
     private val viewModelJob = SupervisorJob()
@@ -54,252 +50,63 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
     val bypassVerification: StateFlow<Boolean> = _bypassVerification
 
     init {
-        // Check if there's a logged in user already
-        auth.currentUser?.let { firebaseUser ->
-            viewModelScope.launch(viewModelJob) { // Use viewModelJob here
-                try {
-                    val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
+        // Immediately check auth state to prevent loading indefinitely
+        if (auth.currentUser == null) {
+            _authState.value = AuthState.Initial
+            Log.d("AuthViewModel", "Initialized with no logged in user")
+        } else {
+            // Check if there's a logged in user already
+            auth.currentUser?.let { firebaseUser ->
+                viewModelScope.launch(viewModelJob) { // Use viewModelJob here
+                    try {
+                        val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
 
-                    if (userDoc.exists()) {
-                        val user = userDoc.toObject(User::class.java)
-                        if (user != null) { // Check parsing success
-                            _currentUser.value = user
-                            _authState.value = AuthState.Authenticated(user)
-                            Log.d("AuthViewModel", "Initialized with existing logged in user: ${user.id}")
+                        if (userDoc.exists()) {
+                            val user = userDoc.toObject(User::class.java)
+                            if (user != null) { // Check parsing success
+                                _currentUser.value = user
+                                _authState.value = AuthState.Authenticated(user)
+                                Log.d("AuthViewModel", "Initialized with existing logged in user: ${user.id}")
 
-                            // Perform initial verification check
-                            checkEmailVerification()
+                                // Perform initial verification check
+                                checkEmailVerification()
 
-                        } else {
-                            Log.e("AuthViewModel", "Failed to parse existing user document: ${firebaseUser.uid}")
-                            // Handle error, maybe sign out or set error state
-                            _authState.value = AuthState.Error("Failed to load user profile.")
-                        }
-                    } else {
-                        Log.w("AuthViewModel", "User auth exists but no user doc in Firestore. Creating...")
-                        // Create a new user document with data from Firebase Auth
-                        val newUser = User(
-                            id = firebaseUser.uid,
-                            email = firebaseUser.email ?: "",
-                            fullName = firebaseUser.displayName ?: "",
-                            isEmailVerified = firebaseUser.isEmailVerified, // Use Firebase Auth status initially
-                            createdAt = System.currentTimeMillis()
-                        )
-
-                        // Save to Firestore
-                        db.collection("users").document(firebaseUser.uid)
-                            .set(newUser)
-                            .await()
-
-                        _currentUser.value = newUser
-                        _authState.value = AuthState.Authenticated(newUser)
-                        _emailVerified.value = firebaseUser.isEmailVerified
-                        Log.d("AuthViewModel", "Created new user document: ${newUser.id}")
-                    }
-                } catch (e: Exception) {
-                    Log.e("AuthViewModel", "Error during initialization", e)
-                    _authState.value = AuthState.Error("Failed to initialize: ${e.message}")
-                }
-            }
-        }
-    }
-
-    /**
-     * Initialize Google Sign-In
-     */
-    fun initializeGoogleSignIn(context: Context) {
-        try {
-            val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(context.getString(R.string.default_web_client_id))
-                .requestEmail()
-                .build()
-
-            googleSignInClient = GoogleSignIn.getClient(context, gso)
-            Log.d("AuthViewModel", "Google Sign-In initialized")
-        } catch (e: Exception) {
-            Log.e("AuthViewModel", "Failed to initialize Google Sign-In", e)
-        }
-    }
-
-    /**
-     * Get the Google Sign-In client for starting the sign-in flow
-     */
-    fun getGoogleSignInClient(context: Context): GoogleSignInClient {
-        return googleSignInClient ?: run {
-            initializeGoogleSignIn(context)
-            googleSignInClient ?: throw IllegalStateException("Google Sign-In client is not initialized")
-        }
-    }
-
-    /**
-     * Handle Google Sign-In result with improved error handling and debugging
-     */
-    fun handleGoogleSignInResult(
-        idToken: String,
-        displayName: String?,
-        email: String?,
-        context: Context // Context might not be needed here anymore if GSO init is separate
-    ) {
-        activeSignInJob?.cancel()
-        activeSignInJob = viewModelScope.launch(viewModelJob) { // Use viewModelJob
-            try { // Outer try (L158)
-                Log.d("AuthViewModel", "Processing Google sign-in result...")
-                _authState.value = AuthState.Loading
-
-                if (email.isNullOrEmpty()) {
-                    _authState.value = AuthState.Error("Google sign-in failed: No email provided.")
-                    // Consider calling signOut() here or let the UI handle it
-                    // signOut() // Call to class member function
-                    Log.w("AuthViewModel", "Google sign-in failed: Email is null or empty.")
-                    return@launch
-                }
-
-                val credential = GoogleAuthProvider.getCredential(idToken, null)
-                Log.d("AuthViewModel", "Signing in with Google credential...")
-
-                try { // Inner try for Firebase sign-in (L171)
-                    val authResult = auth.signInWithCredential(credential).await()
-                    Log.d("AuthViewModel", "Firebase credential sign-in successful")
-                    val user = authResult.user
-
-                    if (user != null) { // Start L176 if
-                        Log.d("AuthViewModel", "Firebase user obtained: ${user.uid}")
-
-                        // Use email from Google result primarily
-                        val emailToUse = email ?: user.email ?: ""
-
-                        // Ensure Firebase Auth has the email address
-                        if (user.email.isNullOrEmpty() && emailToUse.isNotEmpty()) {
-                            try {
-                                user.updateEmail(emailToUse).await()
-                                Log.d("AuthViewModel", "Updated user email in Firebase Auth to: $emailToUse")
-                            } catch (e: Exception) {
-                                Log.e("AuthViewModel", "Failed to update user email in Firebase Auth: ${e.message}")
+                            } else {
+                                Log.e("AuthViewModel", "Failed to parse existing user document: ${firebaseUser.uid}")
+                                // Handle error, maybe sign out or set error state
+                                _authState.value = AuthState.Error("Failed to load user profile.")
                             }
-                        }
-                         // Always consider Google users as email verified
-                        _emailVerified.value = true
-
-                        // Check/Update Firestore document
-                        try { // Innermost try for Firestore access (L217)
-                            val userDocRef = db.collection("users").document(user.uid)
-                            val userDoc = userDocRef.get().await()
-
-                            if (userDoc.exists()) { // Start L219 if
-                                Log.d("AuthViewModel", "User exists in Firestore, updating info")
-                                var existingUser = userDoc.toObject(User::class.java)
-
-                                if (existingUser != null) {
-                                    // Create map for updates
-                                    val updates = mutableMapOf<String, Any>(
-                                        "lastSignInTime" to System.currentTimeMillis(),
-                                        "isEmailVerified" to true,
-                                        "hasCompletedAppVerification" to true,
-                                        "provider" to "google"
-                                    )
-                                    // Update email if different
-                                    if (emailToUse.isNotEmpty() && emailToUse != existingUser.email) {
-                                        updates["email"] = emailToUse
-                                    }
-                                    // Update displayName if different
-                                    if (!displayName.isNullOrEmpty() && displayName != existingUser.displayName) {
-                                        updates["displayName"] = displayName
-                                        updates["fullName"] = displayName // Assuming fullName should match
-                                    }
-
-                                    // Apply Firestore updates
-                                    userDocRef.update(updates).await()
-
-                                    // Create updated user object for local state
-                                    val updatedUser = existingUser.copy(
-                                        email = updates["email"] as? String ?: existingUser.email,
-                                        displayName = updates["displayName"] as? String ?: existingUser.displayName,
-                                        fullName = updates["fullName"] as? String ?: existingUser.fullName,
-                                        lastSignInTime = updates["lastSignInTime"] as Long,
-                                        isEmailVerified = true,
-                                        hasCompletedAppVerification = true,
-                                        provider = "google"
-                                    )
-
-                                    _currentUser.value = updatedUser
-                                    _authState.value = AuthState.Authenticated(updatedUser)
-                                    Log.d("AuthViewModel", "Updated existing user in Firestore: ${updatedUser.id}")
-
-                                } else { // Else for if (existingUser != null)
-                                    Log.e("AuthViewModel", "User document ${user.uid} exists but couldn't be parsed")
-                                    _authState.value = AuthState.Error("Failed to parse user data")
-                                }
-                            } else { // Else for if (userDoc.exists()) L219
-                                Log.d("AuthViewModel", "User doesn't exist in Firestore, creating new user")
-                                val newUser = User(
-                                    id = user.uid,
-                                    email = emailToUse,
-                                    fullName = displayName ?: "",
-                                    displayName = displayName,
-                                    createdAt = System.currentTimeMillis(),
-                                    lastSignInTime = System.currentTimeMillis(),
-                                    provider = "google",
-                                    hasCompletedAppVerification = true,
-                                    isEmailVerified = true,
-                                    verificationToken = null
-                                )
-                                userDocRef.set(newUser).await()
-                                _currentUser.value = newUser
-                                _authState.value = AuthState.Authenticated(newUser)
-                                Log.d("AuthViewModel", "New Google user created and authenticated: ${newUser.id}")
-                            } // End else L219
-                        } catch (e: Exception) { // Catch for L217 try (Firestore access)
-                            Log.e("AuthViewModel", "Error accessing/updating Firestore for user ${user.uid}: ${e.message}", e)
-                            // Even if Firestore fails, user is authenticated in Firebase Auth. Proceed with a fallback state.
-                             val fallbackUser = User(
-                                id = user.uid,
-                                email = emailToUse,
-                                fullName = displayName ?: user.displayName ?: "",
-                                provider = "google",
-                                isEmailVerified = true,
-                                hasCompletedAppVerification = true
+                        } else {
+                            Log.w("AuthViewModel", "User auth exists but no user doc in Firestore. Creating...")
+                            // Create a new user document with data from Firebase Auth
+                            val newUser = User(
+                                id = firebaseUser.uid,
+                                email = firebaseUser.email ?: "",
+                                fullName = firebaseUser.displayName ?: "",
+                                isEmailVerified = firebaseUser.isEmailVerified, // Use Firebase Auth status initially
+                                createdAt = System.currentTimeMillis()
                             )
-                            _currentUser.value = fallbackUser
-                            _authState.value = AuthState.Authenticated(fallbackUser)
-                            Log.w("AuthViewModel", "Authenticated user with fallback data due to Firestore error.")
-                        } // End catch L217
-                    } else { // Else for L176 if (user != null)
-                        Log.e("AuthViewModel", "Firebase user is null after signInWithCredential")
-                        _authState.value = AuthState.Error("Google sign-in failed: User data unavailable")
-                    } // End else L176
-                } catch (e: Exception) { // Catch for L171 try (Firebase sign-in)
-                    Log.e("AuthViewModel", "Firebase credential sign-in failed: ${e.message}", e)
-                    _authState.value = AuthState.Error("Sign-in with Google failed: ${e.message}")
-                } // End catch L171
 
-            } catch (e: Exception) { // Catch for L158 Outer try
-                 when (e) {
-                    is CancellationException -> Log.d("AuthViewModel", "Google sign-in cancelled") // Expected on scope cancellation
-                    is ApiException -> {
-                        Log.e("AuthViewModel", "Google sign-in ApiException: ${e.statusCode}", e)
-                        val errorMessage = when (e.statusCode) {
-                            GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Google Sign-In was cancelled"
-                            GoogleSignInStatusCodes.NETWORK_ERROR -> "Network error during Google Sign-In"
-                            GoogleSignInStatusCodes.SIGN_IN_CURRENTLY_IN_PROGRESS -> "Sign-in already in progress"
-                            // Add other specific codes if needed
-                            else -> "Google Sign-In failed (${e.statusCode})"
+                            // Save to Firestore
+                            db.collection("users").document(firebaseUser.uid)
+                                .set(newUser)
+                                .await()
+
+                            _currentUser.value = newUser
+                            _authState.value = AuthState.Authenticated(newUser)
+                            _emailVerified.value = firebaseUser.isEmailVerified
+                            Log.d("AuthViewModel", "Created new user document: ${newUser.id}")
                         }
-                        _authState.value = AuthState.Error(errorMessage)
-                    }
-                    else -> {
-                        Log.e("AuthViewModel", "Unexpected Google sign-in error: ${e.message}", e)
-                        _authState.value = AuthState.Error("Google Sign-In failed: ${e.message}")
+                    } catch (e: Exception) {
+                        Log.e("AuthViewModel", "Error during initialization", e)
+                        _authState.value = AuthState.Error("Failed to initialize: ${e.message}")
+                        // Ensure we don't stay in Loading state on error
+                        signOut()
                     }
                 }
-            } finally { // Finally for L158 Outer try
-                if (activeSignInJob?.isCancelled == true) {
-                    Log.d("AuthViewModel", "Sign-in job was cancelled")
-                }
-                activeSignInJob = null // Ensure job reference is cleared
-                Log.d("AuthViewModel", "Google sign-in process finished.")
             }
-        } // End viewModelScope.launch
-    } // End handleGoogleSignInResult function
+        }
+    }
 
     // --- All subsequent functions are now Class Members ---
 
@@ -453,7 +260,11 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
                 val effectiveVerificationStatus = isGoogleUser || isVerified
 
                  Log.d("AuthViewModel", "Effective verification status (isGoogle: $isGoogleUser): $effectiveVerificationStatus")
-                _emailVerified.value = effectiveVerificationStatus
+                
+                // Update UI state on the main thread
+                withContext(Dispatchers.Main) {
+                    _emailVerified.value = effectiveVerificationStatus
+                }
 
                 // Update Firestore if its state doesn't match the effective status
                 try {
@@ -475,12 +286,31 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
                                     isEmailVerified = effectiveVerificationStatus,
                                     hasCompletedAppVerification = effectiveVerificationStatus
                                 )
-                                _currentUser.value = updatedUser
-                                // Update AuthState if user is currently authenticated
-                                if (_authState.value is AuthState.Authenticated) {
-                                     _authState.value = AuthState.Authenticated(updatedUser)
-                                } else if (_authState.value is AuthState.NeedsEmailVerification && effectiveVerificationStatus) {
-                                     _authState.value = AuthState.Authenticated(updatedUser) // Move to authenticated
+                                
+                                // Update all state on the main thread to ensure consistency
+                                withContext(Dispatchers.Main) {
+                                    _currentUser.value = updatedUser
+                                    
+                                    // Force transition to Authenticated state if email is verified
+                                    if (effectiveVerificationStatus) {
+                                        Log.d("AuthViewModel", "Email verified, transitioning to Authenticated state")
+                                        _authState.value = AuthState.Authenticated(updatedUser)
+                                    } else if (_authState.value is AuthState.Authenticated) {
+                                        _authState.value = AuthState.Authenticated(updatedUser)
+                                    } else if (_authState.value is AuthState.NeedsEmailVerification && !effectiveVerificationStatus) {
+                                        // Ensure we stay in NeedsEmailVerification if not verified
+                                        _authState.value = AuthState.NeedsEmailVerification(updatedUser)
+                                    }
+                                }
+                            }
+                        } else {
+                            // Even if Firestore is up to date, still update the AuthState if needed
+                            if (effectiveVerificationStatus && _authState.value is AuthState.NeedsEmailVerification) {
+                                _currentUser.value?.let { currentUser ->
+                                    withContext(Dispatchers.Main) {
+                                        Log.d("AuthViewModel", "Email already verified in Firestore, transitioning to Authenticated state")
+                                        _authState.value = AuthState.Authenticated(currentUser)
+                                    }
                                 }
                             }
                         }
@@ -793,10 +623,6 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
                 // Sign out from Firebase Auth
                 auth.signOut()
 
-                // Sign out from Google Sign-In if initialized
-                googleSignInClient?.signOut()?.await()
-                 Log.d("AuthViewModel", "Google Sign-In client signed out.")
-
             } catch (e: Exception) {
                  Log.e("AuthViewModel", "Error during sign out: ${e.message}", e)
                  // Even if Google sign out fails, Firebase sign out likely succeeded.
@@ -1074,99 +900,91 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
         }
     }
 
-    /**
-     * Firebase authentication using a Google ID token (e.g., from one-tap sign-in).
-     * This is similar to handleGoogleSignInResult but takes only the token.
-     */
-    fun firebaseAuthWithGoogle(idToken: String) {
-        activeSignInJob?.cancel()
-        activeSignInJob = viewModelScope.launch(viewModelJob) {
-            _authState.value = AuthState.Loading
-            try {
-                 Log.d("AuthViewModel", "Attempting Firebase authentication with Google ID token.")
-                val credential = GoogleAuthProvider.getCredential(idToken, null)
-                val authResult = auth.signInWithCredential(credential).await()
-                val user = authResult.user
-
-                if (user != null) {
-                     Log.d("AuthViewModel", "Firebase Auth with Google token successful for ${user.uid}. Fetching/updating profile.")
-                    _emailVerified.value = true // Google users are verified
-
-                    // Fetch/Update Firestore Document
-                    try {
-                        val userDocRef = db.collection("users").document(user.uid)
-                        val userDoc = userDocRef.get().await()
-                        val appUser: User
-
-                        if (userDoc.exists()) {
-                             Log.d("AuthViewModel", "Existing user found in Firestore for direct Google auth.")
-                            val existingUser = userDoc.toObject(User::class.java)
-                            if (existingUser != null) {
-                                // Update last sign-in, provider, verification status
-                                val updates = mapOf(
-                                    "lastSignInTime" to System.currentTimeMillis(),
-                                    "provider" to "google",
-                                    "isEmailVerified" to true,
-                                    "hasCompletedAppVerification" to true
-                                )
-                                userDocRef.update(updates).await()
-                                appUser = existingUser.copy(
-                                    lastSignInTime = System.currentTimeMillis(),
-                                    provider = "google",
-                                    isEmailVerified = true,
-                                    hasCompletedAppVerification = true
-                                )
-                            } else {
-                                 Log.e("AuthViewModel", "Failed to parse existing user document during direct Google auth.")
-                                // Fallback: create a basic user object from Auth info
-                                appUser = User(
-                                    id = user.uid, email = user.email ?: "", fullName = user.displayName ?: "",
-                                    provider = "google", isEmailVerified = true, hasCompletedAppVerification = true
-                                )
-                            }
-                        } else {
-                             Log.w("AuthViewModel", "User document not found during direct Google auth for ${user.uid}. Creating.")
-                             // Create new user document
-                            appUser = User(
-                                id = user.uid, email = user.email ?: "", fullName = user.displayName ?: "",
-                                provider = "google", isEmailVerified = true, hasCompletedAppVerification = true,
-                                createdAt = System.currentTimeMillis(), lastSignInTime = System.currentTimeMillis()
-                            )
-                            userDocRef.set(appUser).await()
-                        }
-                         _currentUser.value = appUser
-                         _authState.value = AuthState.Authenticated(appUser)
-                         Log.d("AuthViewModel", "Direct Google authentication successful.")
-
-                    } catch (e: Exception) {
-                         Log.e("AuthViewModel", "Error accessing/updating Firestore during direct Google auth: ${e.message}", e)
-                         // Fallback: Authenticate with Auth data only
-                         val fallbackUser = User(
-                            id = user.uid, email = user.email ?: "", fullName = user.displayName ?: "",
-                            provider = "google", isEmailVerified = true, hasCompletedAppVerification = true
-                         )
-                         _currentUser.value = fallbackUser
-                         _authState.value = AuthState.Authenticated(fallbackUser)
-                         Log.w("AuthViewModel", "Authenticated direct Google user with fallback data due to Firestore error.")
-                    }
-                } else {
-                    Log.e("AuthViewModel", "Firebase user is null after direct Google authentication.")
-                    _authState.value = AuthState.Error("Google Authentication failed: User data unavailable.")
-                }
-            } catch (e: Exception) {
-                 Log.e("AuthViewModel", "Direct Google authentication failed", e)
-                _authState.value = AuthState.Error("Google Authentication failed: ${e.message}")
-            } finally {
-                activeSignInJob = null
-            }
-        }
-    }
-
     // onCleared is now a direct member of the class
     override fun onCleared() {
         super.onCleared()
          Log.d("AuthViewModel", "onCleared called, cancelling viewModelJob.")
         viewModelJob.cancel() // Cancel coroutines started with this job
+    }
+
+    fun signUpWithEmailAndPassword(email: String, password: String, fullName: String) {
+        if (email.isBlank() || password.isBlank() || fullName.isBlank()) {
+            _authState.value = AuthState.Error("Email, password, and name are required")
+            return
+        }
+
+        _authState.value = AuthState.Loading
+        
+        viewModelScope.launch(viewModelJob) {
+            try {
+                // Check if email already exists before attempting to create
+                try {
+                    val methods = auth.fetchSignInMethodsForEmail(email).await()
+                    val hasSignInMethods = methods != null && methods.toString() != "[]"
+                    if (hasSignInMethods) {
+                        _authState.value = AuthState.Error("This email address is already in use. Please sign in instead.")
+                        Log.w("AuthViewModel", "Email already in use - prevented registration attempt")
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    // Continue with registration if we can't check (API limit or other issues)
+                    Log.w("AuthViewModel", "Could not check existing email status: ${e.message}")
+                }
+                
+                // Proceed with registration
+                val authResult = auth.createUserWithEmailAndPassword(email, password).await()
+                val firebaseUser = authResult.user
+                
+                if (firebaseUser != null) {
+                    // Update display name
+                    val profileUpdates = UserProfileChangeRequest.Builder()
+                        .setDisplayName(fullName)
+                        .build()
+                    
+                    firebaseUser.updateProfile(profileUpdates).await()
+                    
+                    // Create user in Firestore
+                    val newUser = User(
+                        id = firebaseUser.uid,
+                        email = email,
+                        fullName = fullName,
+                        isEmailVerified = false,
+                        createdAt = System.currentTimeMillis()
+                    )
+                    
+                    db.collection("users").document(firebaseUser.uid)
+                        .set(newUser)
+                        .await()
+                    
+                    // Send email verification
+                    firebaseUser.sendEmailVerification().await()
+                    
+                    // Update state
+                    _currentUser.value = newUser
+                    _authState.value = AuthState.NeedsEmailVerification(newUser)
+                    _emailVerified.value = false
+                    
+                    Log.d("AuthViewModel", "Successfully created user with email")
+                } else {
+                    _authState.value = AuthState.Error("User creation failed")
+                    Log.e("AuthViewModel", "Failed to create user with email - null user")
+                }
+            } catch (e: Exception) {
+                // Handle specific auth errors
+                val errorMessage = when {
+                    e.message?.contains("email address is already in use", ignoreCase = true) == true -> 
+                        "This email address is already in use. Please sign in instead."
+                    e.message?.contains("password is invalid", ignoreCase = true) == true -> 
+                        "Password must be at least 6 characters long."
+                    e.message?.contains("network error", ignoreCase = true) == true -> 
+                        "Network error. Please check your connection and try again."
+                    else -> "Registration failed: ${e.message}"
+                }
+                
+                _authState.value = AuthState.Error(errorMessage)
+                Log.e("AuthViewModel", "Create user with email/password failed", e)
+            }
+        }
     }
 
 } // End of AuthViewModel class

@@ -19,9 +19,28 @@ import androidx.navigation.compose.rememberNavController
 import com.example.bikerental.R
 import androidx.compose.foundation.BorderStroke
 import com.example.bikerental.navigation.Screen
+import android.util.Log
+import androidx.compose.runtime.remember
+import com.example.bikerental.navigation.NavigationUtils
 
 @Composable
 fun GearTickLoginScreen(navController: NavHostController) {
+    // Create safe navigation functions
+    val safeNavigate = remember(navController) {
+        { route: String ->
+            try {
+                // Check if the NavController is ready
+                if (navController.graph.route != null) {
+                    navController.navigate(route)
+                } else {
+                    Log.w("GearTickLoginScreen", "Navigation attempted before graph was ready")
+                }
+            } catch (e: Exception) {
+                Log.e("GearTickLoginScreen", "Navigation error: ${e.message}")
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -64,7 +83,13 @@ fun GearTickLoginScreen(navController: NavHostController) {
 
             // Log In Button - Changed text to black, background to gray
             Button(
-                onClick = { navController.navigate(Screen.SignIn.route) },
+                onClick = { 
+                    try {
+                        NavigationUtils.navigateToSignIn(navController)
+                    } catch (e: Exception) {
+                        Log.e("GearTickLoginScreen", "Error navigating to sign in: ${e.message}")
+                    }
+                },
                 modifier = Modifier
                     .width(280.dp)
                     .height(50.dp),
@@ -84,7 +109,13 @@ fun GearTickLoginScreen(navController: NavHostController) {
 
             // Sign Up Button - Changed text to black, border to black
             OutlinedButton(
-                onClick = { navController.navigate(Screen.SignUp.route) },
+                onClick = { 
+                    try {
+                        NavigationUtils.navigateToSignUp(navController) 
+                    } catch (e: Exception) {
+                        Log.e("GearTickLoginScreen", "Error navigating to sign up: ${e.message}")
+                    }
+                },
                 modifier = Modifier
                     .width(280.dp)
                     .height(50.dp),

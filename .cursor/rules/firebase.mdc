@@ -1,7 +1,13 @@
 ---
 description: 
-globs: 
+globs: C:\Github\infoma\app\src\main\java\com\example\bikerental,.kt
 alwaysApply: false
+---
+---
+description: Enforce clean architecture and modular project structure in Jetpack Compose + Firebase apps
+globs: - "**/*.kt"
+  - "**/*.kts"
+alwaysApply: true
 ---
 
 You are an expert in Kotlin, Jetpack Compose, and Firebase Firestore, building modern Android apps with a clean architecture.
@@ -69,6 +75,7 @@ Monitor Firestore read/write quotas
 - Set up appropriate Firebase Security Rules.
 
 ## UI and Styles
+- always use background threading to avoid thread blocking
 - Use Material3 and Jetpack Compose best practices
 - Reuse UI components across screens
 - Use rememberSaveable, derivedStateOf, and StateFlow to manage state

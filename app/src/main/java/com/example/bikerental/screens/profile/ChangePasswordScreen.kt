@@ -24,7 +24,6 @@ import androidx.activity.compose.BackHandler
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.viewmodels.AuthViewModel
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.GoogleAuthProvider
 import kotlinx.coroutines.launch
 import com.example.bikerental.navigation.ProfileBackHandler
 import com.example.bikerental.navigation.popBackToProfileTab
@@ -47,17 +46,6 @@ fun ChangePasswordScreen(
     var isLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var success by remember { mutableStateOf<String?>(null) }
-    
-    // Determine authentication provider
-    var isGoogleUser by remember { mutableStateOf(false) }
-    
-    // Check if user is signed in with Google
-    LaunchedEffect(Unit) {
-        val user = FirebaseAuth.getInstance().currentUser
-        isGoogleUser = user?.providerData?.any { 
-            it.providerId == GoogleAuthProvider.PROVIDER_ID 
-        } ?: false
-    }
     
     // Replace custom BackHandler with ProfileBackHandler
     ProfileBackHandler(navController)
@@ -97,127 +85,45 @@ fun ChangePasswordScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Different UI for Google users vs. Email/Password users
-                    if (isGoogleUser) {
-                        GoogleUserPasswordSection(navController)
-                    } else {
-                        EmailPasswordUserSection(
-                            currentPassword = currentPassword,
-                            newPassword = newPassword,
-                            confirmNewPassword = confirmNewPassword,
-                            isPasswordVisible = isPasswordVisible,
-                            onCurrentPasswordChange = { currentPassword = it },
-                            onNewPasswordChange = { newPassword = it },
-                            onConfirmPasswordChange = { confirmNewPassword = it },
-                            onPasswordVisibilityChange = { isPasswordVisible = it },
-                            error = error,
-                            success = success,
-                            onChangePassword = {
-                                coroutineScope.launch {
-                                    changePassword(
-                                        currentPassword = currentPassword,
-                                        newPassword = newPassword,
-                                        confirmNewPassword = confirmNewPassword,
-                                        onLoading = { isLoading = it },
-                                        onError = { error = it; success = null },
-                                        onSuccess = { 
-                                            success = "Password changed successfully!" 
-                                            error = null
-                                            // Clear form fields after successful change
-                                            currentPassword = ""
-                                            newPassword = ""
-                                            confirmNewPassword = ""
-                                            
-                                            // Wait a moment then navigate back
-                                            coroutineScope.launch {
-                                                kotlinx.coroutines.delay(1500)
-                                                navController.popBackStack()
-                                            }
+                    EmailPasswordUserSection(
+                        currentPassword = currentPassword,
+                        newPassword = newPassword,
+                        confirmNewPassword = confirmNewPassword,
+                        isPasswordVisible = isPasswordVisible,
+                        onCurrentPasswordChange = { currentPassword = it },
+                        onNewPasswordChange = { newPassword = it },
+                        onConfirmPasswordChange = { confirmNewPassword = it },
+                        onPasswordVisibilityChange = { isPasswordVisible = it },
+                        error = error,
+                        success = success,
+                        onChangePassword = {
+                            coroutineScope.launch {
+                                changePassword(
+                                    currentPassword = currentPassword,
+                                    newPassword = newPassword,
+                                    confirmNewPassword = confirmNewPassword,
+                                    onLoading = { isLoading = it },
+                                    onError = { error = it; success = null },
+                                    onSuccess = { 
+                                        success = "Password changed successfully!" 
+                                        error = null
+                                        // Clear form fields after successful change
+                                        currentPassword = ""
+                                        newPassword = ""
+                                        confirmNewPassword = ""
+                                        
+                                        // Wait a moment then navigate back
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(1500)
+                                            navController.popBackStack()
                                         }
-                                    )
-                                }
+                                    }
+                                )
                             }
-                        )
-                    }
+                        }
+                    )
                 }
             }
-        }
-    }
-}
-
-/**
- * Section for Google-authenticated users explaining they need to change password via Google
- */
-@Composable
-private fun GoogleUserPasswordSection(navController: NavController) {
-    val context = LocalContext.current
-    
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.AccountCircle,
-            contentDescription = "Google Account",
-            modifier = Modifier.size(72.dp),
-            tint = MaterialTheme.colorScheme.primary
-        )
-        
-        Text(
-            text = "Google Account Sign-In",
-            style = MaterialTheme.typography.headlineSmall
-        )
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "You're signed in with Google",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                
-                Text(
-                    text = "Your password is managed by your Google account. To change your password, you'll need to visit your Google Account settings.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        Button(
-            onClick = {
-                val googleAccountUrl = "https://myaccount.google.com/signinoptions/password"
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(googleAccountUrl))
-                context.startActivity(intent)
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.Default.ExitToApp,
-                contentDescription = "Go to Google",
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Manage Google Password")
-        }
-        
-        OutlinedButton(
-            onClick = { navController.popBackStack() },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Back to Profile")
         }
     }
 }

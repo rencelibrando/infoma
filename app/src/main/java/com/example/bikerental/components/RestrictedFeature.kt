@@ -245,7 +245,8 @@ fun RestrictedButton(
     onClick: () -> Unit,
     onCompleteProfile: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    containerColor: Color = MaterialTheme.colorScheme.primary
 ) {
     var userData by remember { mutableStateOf<Map<String, Any>?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -282,7 +283,8 @@ fun RestrictedButton(
     Button(
         onClick = if (isRestricted) onCompleteProfile else onClick,
         enabled = !isLoading && enabled && !isRestricted,
-        modifier = modifier
+        modifier = modifier,
+        colors = ButtonDefaults.buttonColors(containerColor = containerColor)
     ) {
         Text(text)
     }

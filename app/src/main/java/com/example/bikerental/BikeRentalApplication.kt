@@ -38,11 +38,17 @@ class BikeRentalApplication : Application() {
         try {
             val appCheck = FirebaseAppCheck.getInstance()
             
+            // Configure caching to reduce token requests
+            appCheck.setTokenAutoRefreshEnabled(true)
+            
+            // Configure limited debug token if needed
+            // appCheck.installAppCheckDebugProvider("YOUR-DEBUG-TOKEN")
+            
             // Use Play Integrity
             appCheck.installAppCheckProviderFactory(
                 PlayIntegrityAppCheckProviderFactory.getInstance()
             )
-            Log.d(TAG, "Play Integrity App Check initialized")
+            Log.d(TAG, "Play Integrity App Check initialized with token caching")
             
             // Mark as initialized
             _appCheckInitialized.value = true

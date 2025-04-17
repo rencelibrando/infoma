@@ -62,10 +62,15 @@ object NavigationUtils {
      * Navigate to sign up screen with options
      */
     fun navigateToSignUp(navController: NavController, popUpRoute: String? = null) {
-        navController.navigate(Screen.SignUp.route) {
-            if (popUpRoute != null) {
-                popUpTo(popUpRoute) { inclusive = true }
+        try {
+            Log.d("NavigationUtils", "Navigating to sign up screen")
+            navController.navigate(Screen.SignUp.route) {
+                if (popUpRoute != null) {
+                    popUpTo(popUpRoute) { inclusive = true }
+                }
             }
+        } catch (e: Exception) {
+            Log.e("NavigationUtils", "Error navigating to sign up: ${e.message}")
         }
     }
     
@@ -116,17 +121,6 @@ object NavigationUtils {
      */
     fun navigateToBookingDetails(navController: NavController, bookingId: String) {
         navController.navigate(Screen.BookingDetails.createRoute(bookingId))
-    }
-
-    /**
-     * Navigate to Google verification screen
-     */
-    fun navigateToGoogleVerification(navController: NavController, popUpRoute: String? = null) {
-        navController.navigate(Screen.GoogleVerification.route) {
-            if (popUpRoute != null) {
-                popUpTo(popUpRoute) { inclusive = true }
-            }
-        }
     }
 
     /**

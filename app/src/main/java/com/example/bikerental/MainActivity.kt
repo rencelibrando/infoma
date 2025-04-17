@@ -40,7 +40,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.example.bikerental.models.AuthState
-import com.example.bikerental.screens.login.GoogleVerificationScreen
 import java.util.logging.Level
 import java.util.logging.Logger
 import com.example.bikerental.screens.verification.EmailVerificationScreen
@@ -61,8 +60,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material3.Surface
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.auth.GoogleAuthProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import androidx.navigation.navArgument
+import androidx.navigation.NavType
+import com.example.bikerental.screens.BikeDetailScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -99,25 +104,26 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Configure Google API logging early
-        try {
-            // GoogleApiAvailability has compatibility issues - use alternative approach
-            /*
-            val googleApiAvailability = GoogleApiAvailability.getInstance()
-            googleApiAvailability.isGooglePlayServicesAvailable(this)
-            */
-            Log.d(TAG, "Skipping GoogleApiAvailability configuration")
-        } catch (e: Exception) {
-            Log.w(TAG, "Error configuring Google API: ${e.message}")
-        }
-
-        // Initialize location services
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        
-        // Create location callback
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                // Handle location updates
+        // Initialize services on a background thread
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Configure Google API logging early
+                Log.d(TAG, "Initializing Google API services on background thread")
+                
+                // Initialize on background thread then switch to main thread when needed
+                withContext(Dispatchers.Main) {
+                    // Initialize location services (must be on main thread)
+                    fusedLocationClient = LocationServices.getFusedLocationProviderClient(this@MainActivity)
+                    
+                    // Create location callback
+                    locationCallback = object : LocationCallback() {
+                        override fun onLocationResult(locationResult: LocationResult) {
+                            // Handle location updates
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during background initialization: ${e.message}")
             }
         }
         
@@ -134,23 +140,25 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BikerentalTheme {
-                // State to track if splash screen has been shown
+                // Fixed splash screen logic - use a timer instead of depending on login state
                 var splashScreenComplete by remember { mutableStateOf(false) }
-                // State to track if user is logged in
-                val isLoggedIn = remember { mutableStateOf(FirebaseAuth.getInstance().currentUser != null) }
+                
+                // Show splash screen for a fixed time
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(1500) // 1.5 seconds splash screen
+                    splashScreenComplete = true
+                    isLoading = false
+                }
 
-                // Show splash screen first if user is already logged in
-                if (!splashScreenComplete && isLoggedIn.value) {
+                if (!splashScreenComplete) {
+                    // Show splash screen
                     SplashScreen(onSplashComplete = { splashScreenComplete = true })
                 } else {
-                    // Normal app content after splash screen or if not logged in
+                    // Normal app content after splash screen
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        // Set flag for login screen state tracking
-                        var isLoginScreenActive by remember { mutableStateOf(false) }
-                        
                         // Set callback to update parent's state from child navigation route
                         MainNavigation(
                             onLoginScreenChange = { isActive -> isLoginScreenActive = isActive },
@@ -201,7 +209,6 @@ fun MainNavigation(
             is AuthState.Initial,
             is AuthState.Loading,
             is AuthState.NeedsEmailVerification,
-            is AuthState.NeedsAppVerification,
             is AuthState.Error -> true
             is AuthState.Authenticated -> false
             else -> !navController.currentDestination?.route.equals(Screen.Home.route, ignoreCase = true)
@@ -213,22 +220,63 @@ fun MainNavigation(
     // Track current back stack entry changes
     val currentBackStackEntry by rememberUpdatedState(navController.currentBackStackEntry)
     
-    // Handle tab navigation and returnToProfileTab flag
+    // Handle tab navigation and returnToProfileTab flag - with safety checks
     LaunchedEffect(currentBackStackEntry) {
-        val returnToProfileTab = currentBackStackEntry?.savedStateHandle?.get<Boolean>("returnToProfileTab") ?: false
-        if (returnToProfileTab && !handlingInternalNav) {
-            handlingInternalNav = true
-            // Record we're handling profile navigation
-            lastNavigationEvent = "profile"
-            // Clear flag after handling
-            currentBackStackEntry?.savedStateHandle?.remove<Boolean>("returnToProfileTab")
-            handlingInternalNav = false
+        try {
+            // Only proceed if we have a valid entry that's not destroyed
+            val entry = currentBackStackEntry ?: return@LaunchedEffect
+            val lifecycle = entry.lifecycle
+            
+            // Only access savedStateHandle if entry is active
+            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.CREATED)) {
+                val returnToProfileTab = entry.savedStateHandle.get<Boolean>("returnToProfileTab") ?: false
+                if (returnToProfileTab && !handlingInternalNav) {
+                    handlingInternalNav = true
+                    // Record we're handling profile navigation
+                    lastNavigationEvent = "profile"
+                    // Clear flag after handling
+                    entry.savedStateHandle.remove<Boolean>("returnToProfileTab")
+                    handlingInternalNav = false
+                }
+            }
+        } catch (e: Exception) {
+            // Log error but don't crash the app
+            Log.e("MainNavigation", "Error handling navigation state: ${e.message}")
+        }
+    }
+
+    // Fix force navigation to initial screen
+    LaunchedEffect(authState, navController.currentDestination) {
+        // Only attempt navigation when we have a valid destination (graph is set)
+        if (navController.currentDestination != null) {
+            if (authState is AuthState.Initial || authState is AuthState.Loading) {
+                if (navController.currentDestination?.route != Screen.Initial.route && 
+                    navController.currentDestination?.route != Screen.SignIn.route) {
+                    navController.navigate(Screen.Initial.route) {
+                        // Use a safer approach to clear the back stack
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
+            }
         }
     }
 
     when (authState) {
-        is AuthState.Loading, AuthState.Initial -> {
+        is AuthState.Loading -> {
             LoadingScreen()
+        }
+        is AuthState.Initial -> {
+            // Wrap login screen in a NavHost to properly set up navigation graph
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Initial.route,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+                composable(Screen.SignUp.route) { SignUpScreen(navController) }
+                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+            }
         }
         is AuthState.Authenticated -> {
             Log.d("MainNavigation", "Rendering NavHost for Authenticated state, starting at Home")
@@ -244,10 +292,29 @@ fun MainNavigation(
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
                 composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                
+                // Add BikeDetailScreen route
+                composable(
+                    route = Screen.BikeDetails.route,
+                    arguments = listOf(navArgument("bikeId") { type = NavType.StringType })
+                ) { backStackEntry ->
+                    val bikeId = backStackEntry.arguments?.getString("bikeId") ?: ""
+                    BikeDetailScreen(bikeId = bikeId, navController = navController)
+                }
             }
         }
         is AuthState.NeedsEmailVerification -> {
             Log.d("MainNavigation", "Rendering NavHost for NeedsEmailVerification state")
+            // Force navigation to email verification screen if we're not already there
+            LaunchedEffect(Unit) {
+                if (navController.currentDestination?.route != Screen.EmailVerification.route) {
+                    Log.d("MainNavigation", "Forcing navigation to EmailVerification from ${navController.currentDestination?.route}")
+                    navController.navigate(Screen.EmailVerification.route) {
+                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                    }
+                }
+            }
+            
             NavHost(
                 navController = navController,
                 startDestination = Screen.EmailVerification.route,
@@ -261,13 +328,14 @@ fun MainNavigation(
             }
         }
         is AuthState.NeedsAppVerification -> {
-            Log.d("MainNavigation", "Rendering NavHost for NeedsAppVerification state (e.g., Google Verification)")
+            // Redirect to email verification instead
+            Log.d("MainNavigation", "Redirecting app verification to email verification")
             NavHost(
                 navController = navController,
-                startDestination = Screen.GoogleVerification.route,
+                startDestination = Screen.EmailVerification.route,
                 modifier = Modifier.fillMaxSize()
             ) {
-                composable(Screen.GoogleVerification.route) { GoogleVerificationScreen(navController) }
+                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
                 composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
@@ -283,7 +351,6 @@ fun MainNavigation(
                 composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
-                composable(Screen.GoogleVerification.route) { GoogleVerificationScreen(navController) }
                 composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
                 composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
             }

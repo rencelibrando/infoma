@@ -42,6 +42,8 @@ import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +70,7 @@ fun EmailVerificationScreen(
     var showEmailDialog by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     
-    // Track if the user verified their email during this session
+    // Track if the user verified their email during this session (properly scoped to this composable)
     var verifiedDuringSession by remember { mutableStateOf(false) }
     
     // Email dialog
@@ -162,11 +164,9 @@ fun EmailVerificationScreen(
             verifiedDuringSession = true
             errorState = null
             
-            // REMOVED: Explicit navigation. MainActivity handles this based on state.
-            // Log that verification was successful
-            /*
+            // Resume navigation to home when verification is detected
             Log.d("EmailVerificationScreen", 
-                "Email verification successful, attempting navigation to home")
+                "Email verification successful, navigating to home")
             try {
                 // Use NavigationUtils for consistent navigation
                 NavigationUtils.navigateToHome(navController)
@@ -183,8 +183,7 @@ fun EmailVerificationScreen(
                      Toast.makeText(context, "Navigation error. Please try again.", Toast.LENGTH_SHORT).show()
                 }
             }
-            */
-            Log.d("EmailVerificationScreen", "Email verified. Navigation handled by MainActivity.")
+            Log.d("EmailVerificationScreen", "Navigation initiated after email verification")
         }
     }
     
@@ -193,35 +192,58 @@ fun EmailVerificationScreen(
         if (firebaseUser?.isEmailVerified == true) {
             Log.d("EmailVerificationScreen", "Direct Firebase check: Email is verified, navigating to home")
             verifiedDuringSession = true
-            delay(1000) // Small delay to let UI update
-            NavigationUtils.navigateToHome(navController)
+            // Update app state
+            viewModel.checkEmailVerification()
+            // Small delay to let state updates propagate
+            delay(500)
+            // Ensure we're on the main thread
+            withContext(Dispatchers.Main) {
+                try {
+                    NavigationUtils.navigateToHome(navController)
+                } catch (e: Exception) {
+                    Log.e("EmailVerificationScreen", "Error in direct Firebase navigation: ${e.message}")
+                    // Fallback navigation
+                    try {
+                        navController.navigate(Screen.Home.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    } catch (e2: Exception) {
+                        Log.e("EmailVerificationScreen", "All direct navigation attempts failed: ${e2.message}")
+                    }
+                }
+            }
         }
     }
     
     // Add a periodic check for verification status
     LaunchedEffect(Unit) {
-        while (true) {
-            delay(5000) // Check every 5 seconds
-            if (!verifiedDuringSession) {
-                try {
-                    // Force refresh the Firebase user to check for updated verification status
+        var checkInterval = 5000L
+        verificationLoop@ while (!verifiedDuringSession) {
+            delay(checkInterval)
+            try {
+                withContext(Dispatchers.IO) {
                     FirebaseAuth.getInstance().currentUser?.reload()?.await()
-                    val currentUser = FirebaseAuth.getInstance().currentUser
-                    
-                    if (currentUser?.isEmailVerified == true) {
-                        Log.d("EmailVerificationScreen", "Periodic check detected verified email, navigating to home")
-                        verifiedDuringSession = true
-                        // Update viewModel state to ensure consistency
-                        viewModel.checkEmailVerification() 
-                        delay(1000) // Small delay
-                        NavigationUtils.navigateToHome(navController)
-                        break
-                    }
-                } catch (e: Exception) {
-                    Log.e("EmailVerificationScreen", "Error in periodic verification check: ${e.message}")
                 }
-            } else {
-                break // Exit the loop if already verified
+                val currentUser = FirebaseAuth.getInstance().currentUser
+                
+                if (currentUser?.isEmailVerified == true) {
+                    Log.d("EmailVerificationScreen", "Email verified detected")
+                    verifiedDuringSession = true
+                    viewModel.checkEmailVerification()
+                    delay(500)
+                    withContext(Dispatchers.Main) {
+                        NavigationUtils.navigateToHome(navController)
+                    }
+                    break@verificationLoop
+                }
+            } catch (e: Exception) {
+                if (e !is CancellationException) {
+                    Log.e("EmailVerificationScreen", "Error: ${e.message}")
+                }
+            }
+            
+            if (checkInterval < 30000L) {
+                checkInterval = (checkInterval * 1.2).toLong().coerceAtMost(30000L)
             }
         }
     }
@@ -503,7 +525,8 @@ fun EmailVerificationScreen(
                             viewModel.resendEmailVerification()
                         }
                     },
-                    emailVerified = emailVerified
+                    emailVerified = emailVerified,
+                    viewModel = viewModel
                 )
                 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -545,6 +568,7 @@ private fun EmailVerificationControls(
     onCheckVerification: () -> Unit,
     onResendEmail: () -> Unit,
     emailVerified: Boolean?,
+    viewModel: AuthViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -565,25 +589,31 @@ private fun EmailVerificationControls(
                 text = "I've Verified My Email",
                 onClick = {
                     onCheckVerification()
-                    // Add more aggressive verification check
                     coroutineScope.launch {
                         try {
-                            Log.d("EmailVerificationScreen", "Performing aggressive verification check")
-                            // Force reload the user
-                            FirebaseAuth.getInstance().currentUser?.reload()?.await()
+                            Log.d("EmailVerificationScreen", "Performing verification check")
+                            withContext(Dispatchers.IO) {
+                                FirebaseAuth.getInstance().currentUser?.reload()?.await()
+                            }
                             val user = FirebaseAuth.getInstance().currentUser
                             
                             if (user?.isEmailVerified == true) {
-                                Log.d("EmailVerificationScreen", "Manual verification check successful, navigating to home")
-                                // Navigate directly if verified
-                                NavigationUtils.navigateToHome(navController)
+                                Log.d("EmailVerificationScreen", "Verification check successful")
+                                viewModel.checkEmailVerification()
+                                delay(500)
+                                withContext(Dispatchers.Main) {
+                                    NavigationUtils.navigateToHome(navController)
+                                }
                             } else {
-                                Log.d("EmailVerificationScreen", "Manual verification check: Not verified yet")
-                                Toast.makeText(context, "Email not verified yet. Please check your inbox and click the verification link.", Toast.LENGTH_LONG).show()
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Email not verified yet. Please check your inbox.", Toast.LENGTH_LONG).show()
+                                }
                             }
                         } catch (e: Exception) {
-                            Log.e("EmailVerificationScreen", "Error checking verification: ${e.message}")
-                            Toast.makeText(context, "Error checking verification status", Toast.LENGTH_SHORT).show()
+                            Log.e("EmailVerificationScreen", "Error: ${e.message}")
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Error checking verification", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     }
                 },
@@ -662,21 +692,11 @@ private fun VerifiedSuccessCard(navController: NavController) {
             
             Button(
                 onClick = {
-                    try {
-                        Log.d("EmailVerificationScreen", "Success card button clicked, navigating to home")
-                        
-                        // Check if still authenticated before navigation
-                        if (firebaseUser != null) {
-                            // REMOVED: Explicit Navigation
-                            // NavigationUtils.navigateToHome(navController)
-                            Log.d("EmailVerificationScreen", "User still authenticated. Navigation handled by MainActivity.")
-                        } else {
-                            Log.d("EmailVerificationScreen", "User is no longer authenticated, navigating to login")
-                            // Let MainActivity handle the navigation based on the now-unauthenticated state
-                            // NavigationUtils.navigateToLogin(navController)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("EmailVerificationScreen", "Error in success card button action: ${e.message}")
+                    Log.d("EmailVerificationScreen", "Navigating to home")
+                    if (firebaseUser != null) {
+                        NavigationUtils.navigateToHome(navController)
+                    } else {
+                        NavigationUtils.navigateToLogin(navController)
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),

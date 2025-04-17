@@ -18,19 +18,15 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.example.bikerental.components.GoogleSignInButton
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
 import com.example.bikerental.models.AuthState
 import com.example.bikerental.navigation.Screen
 import com.example.bikerental.viewmodels.AuthViewModel
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.common.api.ApiException
 import android.util.Log
 import android.util.Log.e
 import android.util.Patterns
 import android.widget.Toast
-import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.example.bikerental.navigation.NavigationUtils
 import kotlinx.coroutines.delay
 import com.google.firebase.FirebaseException
@@ -61,56 +57,6 @@ fun AccessAccountScreen(
     // Add a flag to prevent multiple navigations
     var hasNavigatedToHome by remember { mutableStateOf(false) }
 
-    // Initialize Google Sign-In when the screen is first displayed
-    LaunchedEffect(Unit) {
-        viewModel.initializeGoogleSignIn(context)
-    }
-
-    // Google Sign In Launcher
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                Log.d("AccessAccountScreen", "Google Sign In successful, id: ${account.id}")
-                
-                // Update a flag immediately to prevent redirect back to login
-                // hasNavigatedToHome = true // Flag removed, navigation handled by observing state
-                
-                // Process the Google sign in with Firebase
-                viewModel.firebaseAuthWithGoogle(account.idToken!!)
-                
-                // REMOVED: Explicit navigation to Home after successful Google sign-in
-                /*
-                CoroutineScope(Dispatchers.Main).launch {
-                    delay(500) // Brief delay to let Firebase Auth complete
-                    NavigationUtils.navigateToHome(navController)
-                }
-                */
-            } catch (e: ApiException) {
-                val errorMsg = when(e.statusCode) {
-                    GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Sign in cancelled"
-                    GoogleSignInStatusCodes.SIGN_IN_CURRENTLY_IN_PROGRESS -> "Sign in already in progress"
-                    GoogleSignInStatusCodes.SIGN_IN_FAILED -> "Sign in failed"
-                    else -> "Unknown error: ${e.statusCode}"
-                }
-                Log.e("AccessAccountScreen", "Google sign in failed: $errorMsg", e)
-                Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
-                
-                // Reset navigation flags
-                hasNavigatedToHome = false
-                authStateProcessed = false
-            }
-        } else {
-            Log.d("AccessAccountScreen", "Google Sign In cancelled or failed, result code: ${result.resultCode}")
-            // Reset navigation flags
-            hasNavigatedToHome = false
-            authStateProcessed = false
-        }
-    }
-
     // Handle auth state changes - make this more robust to prevent unintended redirects
     LaunchedEffect(authState) {
         Log.d("AccessAccountScreen", "Auth state changed: $authState, processed: $authStateProcessed")
@@ -129,60 +75,6 @@ fun AccessAccountScreen(
         
         when (val currentState = authState) {
             is AuthState.Authenticated -> {
-                // REMOVED: Explicit navigation check and call from here
-                // The main navigation observer in MainActivity will handle this.
-                /*
-                if (!hasNavigatedToHome) {
-                    Log.d("AccessAccountScreen", "Auth state is Authenticated, user: ${currentState.user}")
-                    
-                    if (currentState.user.id.isNotBlank()) {
-                        // Mark as processed before navigating
-                        authStateProcessed = true
-                        hasNavigatedToHome = true
-                        
-                        Log.d("AccessAccountScreen", "User login successful - navigating to Home")
-                        
-                        // Verify the user is still authenticated in Firebase
-                        val firebaseUser = FirebaseAuth.getInstance().currentUser
-                        if (firebaseUser != null) {
-                            Log.d("AccessAccountScreen", "Firebase user confirmed before navigation: ${firebaseUser.uid}")
-                            
-                            // Add a slight delay to ensure the auth state has propagated
-                            delay(300)
-                            
-                            // Use NavigationUtils for consistent navigation
-                            try {
-                                NavigationUtils.navigateToHome(navController)
-                                Log.d("AccessAccountScreen", "Navigation to home initiated")
-                            } catch (e: Exception) {
-                                Log.e("AccessAccountScreen", "Error navigating to home: ${e.message}", e)
-                                
-                                // Fallback navigation
-                                try {
-                                    navController.navigate(Screen.Home.route) {
-                                        popUpTo(0) { inclusive = true }
-                                    }
-                                    Log.d("AccessAccountScreen", "Fallback navigation used")
-                                } catch (e2: Exception) {
-                                    Log.e("AccessAccountScreen", "All navigation attempts failed: ${e2.message}", e2)
-                                    Toast.makeText(context, "Navigation error. Please try again.", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        } else {
-                            Log.e("AccessAccountScreen", "Firebase user is null after authentication")
-                            // This is a race condition - reset processed state and try again
-                            authStateProcessed = false
-                            hasNavigatedToHome = false
-                            
-                            // Show error to user
-                            Toast.makeText(context, "Authentication error. Please try again.", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Log.e("AccessAccountScreen", "Authenticated but user ID is blank, state: $currentState")
-                        authStateProcessed = false
-                    }
-                }
-                */
                 Log.d("AccessAccountScreen", "Auth state is Authenticated. Navigation handled by MainActivity.")
                 // Ensure flags are potentially reset if needed, although MainActivity now drives navigation
                 authStateProcessed = true // Mark as processed to avoid loops if state reappears
@@ -201,28 +93,10 @@ fun AccessAccountScreen(
             is AuthState.NeedsAppVerification -> {
                 Log.d("AccessAccountScreen", "Auth state: NeedsAppVerification")
                 authStateProcessed = true
-                NavigationUtils.navigateToGoogleVerification(navController)
+                NavigationUtils.navigateToEmailVerification(navController)
             }
             is AuthState.NeedsEmailVerification -> {
                 Log.d("AccessAccountScreen", "Auth state: NeedsEmailVerification")
-                // REMOVED: Explicit navigation from here.
-                /*
-                // Check if user signed in with Google
-                val currentUser = FirebaseAuth.getInstance().currentUser
-                val isGoogleUser = currentUser?.providerData?.any { it.providerId == "google.com" } == true
-                
-                authStateProcessed = true
-                
-                if (isGoogleUser) {
-                    // Google users bypass email verification
-                    Log.d("AccessAccountScreen", "Google user detected, bypassing email verification")
-                    NavigationUtils.navigateToHome(navController)
-                } else {
-                    // Regular users need email verification
-                    Log.d("AccessAccountScreen", "Regular user detected, navigating to email verification")
-                    NavigationUtils.navigateToEmailVerification(navController)
-                }
-                */
                 authStateProcessed = true // Mark as processed
             }
             is AuthState.PasswordResetSent -> {
@@ -339,71 +213,6 @@ fun AccessAccountScreen(
             },
             text = "Sign In",
             isLoading = authState is AuthState.Loading
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // OR Separator
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = "—————  Or  —————",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Google Sign In
-        GoogleSignInButton(
-            onClick = {
-                try {
-                    Log.d("AccessAccountScreen", "Starting Google sign-in process")
-                    val googleSignInClient = viewModel.getGoogleSignInClient(context)
-                    
-                    // First, clear any existing Google sign-in
-                    googleSignInClient.signOut().addOnCompleteListener {
-                        Log.d("AccessAccountScreen", "Google sign-out completed before new sign-in")
-                        
-                        // Then launch the Google sign-in intent
-                        try {
-                            googleSignInLauncher.launch(googleSignInClient.signInIntent)
-                        } catch (e: Exception) {
-                            Log.e("AccessAccountScreen", "Error launching Google sign-in: ${e.message}", e)
-                            Toast.makeText(
-                                context,
-                                "Failed to start Google Sign-In: ${e.message}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }.addOnFailureListener { e ->
-                        Log.e("AccessAccountScreen", "Google sign-out failed: ${e.message}", e)
-                        
-                        // If sign-out fails, try sign-in anyway
-                        try {
-                            googleSignInLauncher.launch(googleSignInClient.signInIntent)
-                        } catch (e2: Exception) {
-                            Log.e("AccessAccountScreen", "Error launching Google sign-in after sign-out failure: ${e2.message}", e2)
-                            Toast.makeText(
-                                context,
-                                "Failed to start Google Sign-In: ${e2.message}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("AccessAccountScreen", "Google sign-in setup failed: ${e.message}", e)
-                    Toast.makeText(
-                        context,
-                        "Google Sign-In setup failed: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
         )
 
         Spacer(modifier = Modifier.height(24.dp))

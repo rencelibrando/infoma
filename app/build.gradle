@@ -78,8 +78,8 @@ dependencies {
     implementation libs.play.services.location.v2130
     implementation libs.material.icons.extended
     implementation libs.androidx.material.v154
-    // Google Sign-In
-    implementation libs.gms.play.services.auth
+    // Remove Google Sign-In
+    // implementation libs.gms.play.services.auth
     implementation libs.integrity
     // Add App Check
     implementation libs.firebase.appcheck.playintegrity
@@ -92,7 +92,8 @@ dependencies {
     implementation libs.google.firebase.auth
     implementation libs.google.firebase.firestore
     implementation libs.google.firebase.storage
-    implementation libs.gms.play.services.auth
+    // Remove duplicate Google Sign-In dependency
+    // implementation libs.gms.play.services.auth
     implementation libs.firebase.auth.ktx
     implementation libs.firebase.firestore.ktx
     implementation libs.firebase.database
@@ -113,6 +114,12 @@ dependencies {
     androidTestImplementation libs.ui.test.junit4
     debugImplementation libs.ui.tooling
     debugImplementation libs.ui.test.manifest
+
+    // Add Google Accompanist for SwipeRefresh
+    implementation "com.google.accompanist:accompanist-swiperefresh:0.32.0"
+
+    // Required for pull-to-refresh
+    implementation 'androidx.compose.material:material:1.5.4'
 }
 kapt {
     correctErrorTypes true

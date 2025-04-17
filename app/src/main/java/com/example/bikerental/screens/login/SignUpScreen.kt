@@ -1,9 +1,14 @@
 package com.example.bikerental.screens.login
 import android.app.Activity
+import android.util.Patterns
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,6 +20,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -23,17 +29,6 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
-import com.example.bikerental.components.GoogleSignInButton
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.common.api.ApiException
-import android.util.Patterns
-import androidx.compose.ui.text.font.FontWeight
-import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import android.util.Log
-import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bikerental.models.AuthState
 import com.example.bikerental.viewmodels.AuthViewModel
@@ -96,6 +91,7 @@ fun SignUpScreen(
     var formattedPhoneNumber by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmPasswordVisible by remember { mutableStateOf(false) }
+    var isPasswordFocused by remember { mutableStateOf(false) }
 
     // Password validation states
     var hasMinLength by remember { mutableStateOf(false) }
@@ -103,6 +99,9 @@ fun SignUpScreen(
     var hasLowercase by remember { mutableStateOf(false) }
     var hasDigit by remember { mutableStateOf(false) }
     var hasSpecialChar by remember { mutableStateOf(false) }
+
+    // Add an error state to show UI error messages
+    var emailError by remember { mutableStateOf<String?>(null) }
 
     // Update password validation whenever password changes
     LaunchedEffect(password) {
@@ -125,81 +124,42 @@ fun SignUpScreen(
     // Collect auth state
     val authState by viewModel.authState.collectAsState()
 
-    // Initialize Google Sign-In
-    LaunchedEffect(Unit) {
-        viewModel.initializeGoogleSignIn(context)
-    }
-    
-    // Add a direct Firebase Auth listener as backup
-    val currentFirebaseUser = remember { mutableStateOf<FirebaseUser?>(null) }
-    
-    DisposableEffect(Unit) {
-        val authStateListener = FirebaseAuth.AuthStateListener { auth ->
-            val user = auth.currentUser
-            if (user != null && user != currentFirebaseUser.value) {
-                Log.d("SignUpScreen", "Firebase Auth state changed - user is now logged in: ${user.uid}")
-                currentFirebaseUser.value = user
+    // Effect to show appropriate error messages
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Error) {
+            val errorMessage = (authState as AuthState.Error).message
+            if (errorMessage.contains("email address is already in use", ignoreCase = true)) {
+                emailError = "This email is already registered. Please use a different email or sign in."
+            } else {
+                Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
             }
-        }
-        
-        // Register the listener
-        FirebaseAuth.getInstance().addAuthStateListener(authStateListener)
-        
-        // Clean up on dispose
-        onDispose {
-            FirebaseAuth.getInstance().removeAuthStateListener(authStateListener)
-        }
-    }
-
-    // Google Sign-In Launcher
-    val googleLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        Log.d("SignUpScreen", "Google Sign-In result received: ${result.resultCode}")
-        if (result.resultCode == Activity.RESULT_OK) {
-                try {
-                    val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-                    val account = task.getResult(ApiException::class.java)
-                Log.d("SignUpScreen", "Google Sign-In successful, account: ${account?.email}")
-                account?.idToken?.let { token ->
-                    Log.d("SignUpScreen", "Handling Google Sign-In result")
-                    viewModel.handleGoogleSignInResult(
-                        idToken = token,
-                        displayName = account.displayName,
-                        email = account.email,
-                        context = context
-                    )
-                } ?: run {
-                    Log.e("SignUpScreen", "Failed to get ID token")
-                    Toast.makeText(context, "Failed to get ID token", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: ApiException) {
-                val errorMessage = when (e.statusCode) {
-                    GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Google Sign-In was cancelled by user"
-                    GoogleSignInStatusCodes.NETWORK_ERROR -> "Network error occurred. Please check your internet connection"
-                    GoogleSignInStatusCodes.INVALID_ACCOUNT -> "Invalid Google account selected"
-                    GoogleSignInStatusCodes.SIGN_IN_REQUIRED -> "Sign-In is required"
-                    else -> "Google Sign-In failed: ${e.message}"
-                }
-                Log.e("SignUpScreen", "Google sign in failed: $errorMessage", e)
-                Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
-                                    }
-                            } else {
-            Log.d("SignUpScreen", "Google Sign-In cancelled by user")
-            Toast.makeText(context, "Sign in cancelled", Toast.LENGTH_SHORT).show()
+        } else if (authState is AuthState.Authenticated) {
+            // Clear any errors when authenticated
+            emailError = null
+        } else if (authState is AuthState.NeedsEmailVerification) {
+            // Navigate to email verification screen
+            navController.navigate(Screen.EmailVerification.route) {
+                popUpTo(Screen.SignUp.route) { inclusive = true }
+            }
         }
     }
 
     fun validateInputs(): Boolean {
+        // Ensure all inputs are trimmed before validation
+        val trimmedFullName = fullName.trim()
+        val trimmedEmail = email.trim()
+        val trimmedPassword = password.trim()
+        val trimmedConfirmPassword = confirmPassword.trim()
+        
         // Format phone number before validation
         formattedPhoneNumber = formatPhilippinePhoneNumber(phone.trim())
         
         return when {
-            fullName.trim().isBlank() -> {
+            trimmedFullName.isBlank() -> {
                 Toast.makeText(context, "Please enter your full name", Toast.LENGTH_SHORT).show()
                 false
             }
-            email.trim().isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches() -> {
+            trimmedEmail.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(trimmedEmail).matches() -> {
                 Toast.makeText(context, "Please enter a valid email", Toast.LENGTH_SHORT).show()
                 false
             }
@@ -207,7 +167,7 @@ fun SignUpScreen(
                 Toast.makeText(context, "Password does not meet all requirements", Toast.LENGTH_SHORT).show()
                 false
             }
-            password != confirmPassword -> {
+            trimmedPassword != trimmedConfirmPassword -> {
                 Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
                 false
             }
@@ -275,16 +235,22 @@ fun SignUpScreen(
 
             ResponsiveTextField(
                 value = email,
-                onValueChange = { email = it.trim() },
+                onValueChange = { 
+                    email = it.trim()
+                    // Clear error when user starts typing again
+                    emailError = null
+                },
                 label = "Email",
-                leadingIcon = { Icon(Icons.Default.Email, "Email") }
+                leadingIcon = { Icon(Icons.Default.Email, "Email") },
+                isError = emailError != null,
+                errorMessage = emailError
             )
 
             Spacer(modifier = Modifier.height(16.dp))
 
             ResponsiveTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = { password = it.trim() },
                 label = "Password",
                 leadingIcon = { Icon(Icons.Default.Lock, "Password") },
                 trailingIcon = {
@@ -297,29 +263,34 @@ fun SignUpScreen(
                 },
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 supportingText = {
-                    Column {
-                        Text("Password must contain:")
-                        PasswordRequirementItem(
-                            text = "At least 8 characters",
-                            isValid = hasMinLength
-                        )
-                        PasswordRequirementItem(
-                            text = "At least one uppercase letter",
-                            isValid = hasUppercase
-                        )
-                        PasswordRequirementItem(
-                            text = "At least one lowercase letter",
-                            isValid = hasLowercase
-                        )
-                        PasswordRequirementItem(
-                            text = "At least one number",
-                            isValid = hasDigit
-                        )
-                        PasswordRequirementItem(
-                            text = "At least one special character",
-                            isValid = hasSpecialChar
-                        )
+                    if (isPasswordFocused || password.isNotEmpty()) {
+                        Column {
+                            Text("Password must contain:")
+                            PasswordRequirementItem(
+                                text = "At least 8 characters",
+                                isValid = hasMinLength
+                            )
+                            PasswordRequirementItem(
+                                text = "At least one uppercase letter",
+                                isValid = hasUppercase
+                            )
+                            PasswordRequirementItem(
+                                text = "At least one lowercase letter",
+                                isValid = hasLowercase
+                            )
+                            PasswordRequirementItem(
+                                text = "At least one number",
+                                isValid = hasDigit
+                            )
+                            PasswordRequirementItem(
+                                text = "At least one special character",
+                                isValid = hasSpecialChar
+                            )
+                        }
                     }
+                },
+                onFocusChanged = { focusState ->
+                    isPasswordFocused = focusState.isFocused
                 }
             )
 
@@ -327,7 +298,7 @@ fun SignUpScreen(
 
             ResponsiveTextField(
                 value = confirmPassword,
-                onValueChange = { confirmPassword = it },
+                onValueChange = { confirmPassword = it.trim() },
                 label = "Confirm Password",
                 leadingIcon = { Icon(Icons.Default.Lock, "Confirm password") },
                 trailingIcon = {
@@ -369,10 +340,10 @@ fun SignUpScreen(
         ResponsiveButton(
             onClick = {
                 if (validateInputs()) {
-                    // Use the formatted phone number for registration
+                    // Use trimmed values for registration
                     viewModel.createUserWithEmailPassword(
                         email.trim(), 
-                        password, 
+                        password.trim(), 
                         fullName.trim(), 
                         formattedPhoneNumber
                     )
@@ -383,62 +354,6 @@ fun SignUpScreen(
         )
 
             Spacer(modifier = Modifier.height(16.dp))
-
-        // OR Separator
-        Row(
-                modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = "—————  Or  —————",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colorScheme.onSurfaceVariant
-            )
-        }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Google Sign In Button
-        GoogleSignInButton(
-            onClick = {
-                    try {
-                        Log.d("SignUpScreen", "Starting Google Sign-In process")
-                        val googleSignInClient = viewModel.getGoogleSignInClient(context)
-                        
-                        // Check for existing Google Sign-In
-                        val lastSignedInAccount = GoogleSignIn.getLastSignedInAccount(context)
-                        if (lastSignedInAccount != null) {
-                            Log.d("SignUpScreen", "Found existing Google Sign-In, signing out first")
-                            googleSignInClient.signOut().addOnCompleteListener {
-                                Log.d("SignUpScreen", "Previous sign-in cleared, launching new sign-in")
-                                try {
-                                    googleLauncher.launch(googleSignInClient.signInIntent)
-                                } catch (e: Exception) {
-                                    Log.e("SignUpScreen", "Failed to launch sign-in intent after signout", e)
-                                    Toast.makeText(
-                                        context,
-                                        "Failed to start Google Sign-In: ${e.message}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
-                        } else {
-                            Log.d("SignUpScreen", "No existing sign-in found, launching sign-in directly")
-                            googleLauncher.launch(googleSignInClient.signInIntent)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("SignUpScreen", "Failed to initialize Google Sign-In", e)
-                        Toast.makeText(
-                            context,
-                            "Failed to initialize Google Sign-In: ${e.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                },
-                isLoading = authState is AuthState.Loading
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
 
             // Login Link
             Row(
