@@ -27,7 +27,7 @@ const auth = getAuth(app);
 // This allows local development to work without reCAPTCHA verification
 if (process.env.NODE_ENV === 'production') {
   import('firebase/app-check').then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
-    const appCheck = initializeAppCheck(app, {
+    initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider('6LfqjBsrAAAAAMs93cei_7rFTn2hXKLPvL-sEKFr'),
       isTokenAutoRefreshEnabled: true
     });
