@@ -86,6 +86,10 @@ dependencies {
     // HTTP Client
     implementation libs.okhttp
     
+    // Kotlin Coroutines
+    implementation libs.kotlinx.coroutines.android
+    implementation libs.kotlinx.coroutines.play.services
+    
     // Firebase
     implementation platform(libs.firebase.bom)
     implementation libs.firebase.analytics
@@ -117,7 +121,8 @@ dependencies {
 
     // Add Google Accompanist for SwipeRefresh
     implementation "com.google.accompanist:accompanist-swiperefresh:0.32.0"
-
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.datastore:datastore-preferences-core:1.0.0")
     // Required for pull-to-refresh
     implementation 'androidx.compose.material:material:1.5.4'
 }

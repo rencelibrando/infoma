@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import com.example.bikerental.utils.MapPreferencesManager
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 @Composable
 fun BikeMap(
@@ -124,6 +125,33 @@ fun BikeMap(
 
     // Route tracking
     var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
+    
+    // Function to move camera to user's location
+    fun moveToUserLocation() {
+        if (fusedLocationProviderClient != null &&
+            ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            fusedLocationProviderClient.lastLocation.addOnSuccessListener { location ->
+                location?.let {
+                    val newUserLocation = LatLng(it.latitude, it.longitude)
+                    userLocation = newUserLocation
+
+                    coroutineScope.launch {
+                        cameraPositionState.animate(
+                            update = CameraUpdateFactory.newLatLngZoom(
+                                newUserLocation,
+                                16f
+                            ),
+                            durationMs = 1000
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     // If there's an active ride, collect location updates
     LaunchedEffect(activeRide) {
@@ -176,33 +204,6 @@ fun BikeMap(
     LaunchedEffect(bikeLocation) {
         bikeLocation?.let { location ->
             routePoints = routePoints + location
-        }
-    }
-
-    // Function to move camera to user's location
-    fun moveToUserLocation() {
-        if (fusedLocationProviderClient != null &&
-            ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            fusedLocationProviderClient.lastLocation.addOnSuccessListener { location ->
-                location?.let {
-                    val newUserLocation = LatLng(it.latitude, it.longitude)
-                    userLocation = newUserLocation
-
-                    coroutineScope.launch {
-                        cameraPositionState.animate(
-                            update = CameraUpdateFactory.newLatLngZoom(
-                                newUserLocation,
-                                16f
-                            ),
-                            durationMs = 1000
-                        )
-                    }
-                }
-            }
         }
     }
     
