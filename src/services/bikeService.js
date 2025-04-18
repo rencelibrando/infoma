@@ -127,6 +127,12 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     const isInUse = currentBike.isInUse || false;
     let isAvailable = bikeData.isAvailable;
     
+    // Rule: All bikes in use must be unlocked
+    if (isInUse && isLocked) {
+      console.warn(`Bike ${bikeId} is in use but was being set to locked. Forcing unlock.`);
+      bikeData.isLocked = false;
+    }
+    
     // If trying to make a bike available but it's not locked, force lock it
     if (isAvailable && !isLocked) {
       console.warn(`Bike ${bikeId} is being marked as available but wasn't locked. Forcing lock state.`);
