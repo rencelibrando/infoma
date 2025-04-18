@@ -1,13 +1,14 @@
 // src/components/Dashboard.js
 import React, { useState, useEffect } from 'react';
 import { auth } from '../firebase';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import BikesList from './BikesList';
 import AddBike from './AddBike';
 import EditBike from './EditBike';
 import UsersList from './UsersList';
 import Analytics from './Analytics';
 import BikesMap from './BikesMap';
+import BikeReviews from './BikeReviews';
 import { initializeBikesData } from '../services/bikeService';
 import styled from 'styled-components';
 
@@ -25,28 +26,85 @@ const colors = {
 const DashboardContainer = styled.div`
   display: flex;
   min-height: 100vh;
+  position: relative;
+  overflow: hidden;
 `;
 
 const Sidebar = styled.div`
   width: 250px;
   background-color: ${colors.pineGreen};
   color: ${colors.white};
-  padding: 20px;
+  padding: 25px 20px;
   box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  z-index: 1000;
+  
+  @media (max-width: 768px) {
+    width: 200px;
+  }
+  
+  @media (max-width: 576px) {
+    width: ${props => props.isOpen ? '250px' : '0'};
+    transform: ${props => props.isOpen ? 'translateX(0)' : 'translateX(-100%)'};
+    transition: all 0.3s ease;
+    padding-top: 60px;
+  }
 `;
 
 const Content = styled.div`
   flex: 1;
-  padding: 20px;
+  padding: 30px;
   background-color: ${colors.lightGray};
+  margin-left: 250px;
+  overflow-y: auto;
+  height: 100vh;
+  
+  @media (max-width: 768px) {
+    margin-left: 200px;
+    padding: 25px;
+  }
+  
+  @media (max-width: 576px) {
+    margin-left: ${props => props.sidebarOpen ? '250px' : '0'};
+    transition: margin-left 0.3s ease;
+    padding: 20px 15px;
+  }
+`;
+
+const MenuToggle = styled.div`
+  display: none; /* Hide by default */
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 1001;
+  cursor: pointer;
+  background-color: ${colors.pineGreen};
+  color: white;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  
+  /* Only show on mobile */
+  @media (max-width: 576px) {
+    display: flex;
+    left: ${props => props.sidebarOpen ? '210px' : '20px'};
+    transition: left 0.3s ease;
+  }
 `;
 
 const MenuOption = styled.p`
-  padding: 12px;
+  padding: 14px 16px;
   cursor: pointer;
   background-color: ${props => props.active ? colors.lightPineGreen : 'transparent'};
-  margin-bottom: 8px;
-  border-radius: 4px;
+  margin-bottom: 12px;
+  border-radius: 6px;
   transition: all 0.2s ease;
   font-weight: ${props => props.active ? 'bold' : 'normal'};
   
@@ -56,35 +114,66 @@ const MenuOption = styled.p`
 `;
 
 const LogoutOption = styled(MenuOption)`
-  margin-top: 50px;
+  margin-top: 60px;
   color: ${colors.white};
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 20px;
+  padding-top: 25px;
   
   &:hover {
     background-color: rgba(211, 47, 47, 0.2);
   }
 `;
 
+/* Add a custom fixed header for the sidebar to ensure clean display */
+const SidebarHeader = styled.div`
+  width: 100%;
+  padding: 0;
+  margin-bottom: 30px;
+`;
+
 const Logo = styled.div`
-  font-size: 1.5rem;
+  font-size: 1.6rem;
   font-weight: bold;
-  margin-bottom: 10px;
-  padding-bottom: 20px;
+  padding-bottom: 25px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  letter-spacing: 0.5px;
+`;
+
+const ContentSection = styled.div`
+  background-color: ${colors.white};
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 25px;
+  margin-bottom: 25px;
 `;
 
 const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedBike, setSelectedBike] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const navigate = useNavigate();
+  const location = useLocation();
 
-  // Check authentication
+  // Check authentication and secure browser history
   useEffect(() => {
+    // Function to prevent back navigation
+    const blockBackNavigation = () => {
+      window.history.pushState(null, document.title, window.location.href);
+    };
+
+    // Check authentication
     const unsubscribe = auth.onAuthStateChanged(user => {
       if (!user) {
-        navigate('/login');
+        navigate('/login', { replace: true });
       } else {
+        // User is authenticated - block back navigation to login
+        blockBackNavigation();
+        
         // Initialize bike data when dashboard loads
         initializeBikesData().catch(error => {
           console.error("Error initializing bikes data:", error);
@@ -92,13 +181,29 @@ const Dashboard = () => {
       }
     });
     
-    return () => unsubscribe();
-  }, [navigate]);
+    // Listen for page navigation attempts
+    window.addEventListener('popstate', blockBackNavigation);
+    
+    // Store the current path in session storage
+    sessionStorage.setItem('lastAuthRoute', location.pathname);
+    
+    // Clean up
+    return () => {
+      unsubscribe();
+      window.removeEventListener('popstate', blockBackNavigation);
+    };
+  }, [navigate, location.pathname]);
 
   const handleLogout = async () => {
     try {
+      // Clear any stored routes before logout
+      sessionStorage.removeItem('lastAuthRoute');
+      
+      // Sign out the user
       await auth.signOut();
-      navigate('/login');
+      
+      // Force navigation to login with replacement
+      navigate('/login', { replace: true });
     } catch (error) {
       console.error("Logout error", error);
     }
@@ -119,40 +224,67 @@ const Dashboard = () => {
     setActiveTab('bikes');
   };
 
+  // Toggle sidebar for mobile
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  // Close sidebar when clicking on menu item (mobile only)
+  const handleMenuClick = (tab) => {
+    setActiveTab(tab);
+    if (window.innerWidth <= 576) {
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <DashboardContainer>
-      <Sidebar>
-        <Logo>Bambike Admin</Logo>
+      {/* Mobile menu toggle - completely separate from the sidebar */}
+      <MenuToggle onClick={toggleSidebar} sidebarOpen={sidebarOpen}>
+        {sidebarOpen ? '✕' : '☰'}
+      </MenuToggle>
+      
+      {/* Sidebar with clean logo, no X button */}
+      <Sidebar isOpen={sidebarOpen}>
+        <SidebarHeader>
+          <Logo>Bambike Admin</Logo>
+        </SidebarHeader>
         <div>
           <MenuOption 
             active={activeTab === 'overview'}
-            onClick={() => setActiveTab('overview')}
+            onClick={() => handleMenuClick('overview')}
           >
             Overview
           </MenuOption>
           <MenuOption 
             active={activeTab === 'bikes'}
-            onClick={() => setActiveTab('bikes')}
+            onClick={() => handleMenuClick('bikes')}
           >
             Manage Bikes
           </MenuOption>
           <MenuOption 
             active={activeTab === 'map'}
-            onClick={() => setActiveTab('map')}
+            onClick={() => handleMenuClick('map')}
           >
             Bikes Map
           </MenuOption>
           <MenuOption 
             active={activeTab === 'add'}
-            onClick={() => setActiveTab('add')}
+            onClick={() => handleMenuClick('add')}
           >
             Add New Bike
           </MenuOption>
           <MenuOption 
             active={activeTab === 'users'}
-            onClick={() => setActiveTab('users')}
+            onClick={() => handleMenuClick('users')}
           >
             Manage Users
+          </MenuOption>
+          <MenuOption 
+            active={activeTab === 'reviews'}
+            onClick={() => handleMenuClick('reviews')}
+          >
+            Bike Reviews
           </MenuOption>
           <LogoutOption onClick={handleLogout}>
             Logout
@@ -160,29 +292,34 @@ const Dashboard = () => {
         </div>
       </Sidebar>
       
-      <Content>
-        {activeTab === 'overview' && (
-          <Analytics />
-        )}
-        {activeTab === 'bikes' && (
-          <BikesList onEditBike={handleEditBike} />
-        )}
-        {activeTab === 'map' && (
-          <BikesMap />
-        )}
-        {activeTab === 'add' && (
-          <AddBike onSuccess={() => setActiveTab('bikes')} />
-        )}
-        {activeTab === 'edit' && selectedBike && (
-          <EditBike 
-            bike={selectedBike} 
-            onSuccess={handleEditSuccess} 
-            onCancel={handleCancelEdit} 
-          />
-        )}
-        {activeTab === 'users' && (
-          <UsersList />
-        )}
+      <Content sidebarOpen={sidebarOpen}>
+        <ContentSection>
+          {activeTab === 'overview' && (
+            <Analytics />
+          )}
+          {activeTab === 'bikes' && (
+            <BikesList onEditBike={handleEditBike} />
+          )}
+          {activeTab === 'map' && (
+            <BikesMap />
+          )}
+          {activeTab === 'add' && (
+            <AddBike onSuccess={() => setActiveTab('bikes')} />
+          )}
+          {activeTab === 'edit' && selectedBike && (
+            <EditBike 
+              bike={selectedBike} 
+              onSuccess={handleEditSuccess} 
+              onCancel={handleCancelEdit} 
+            />
+          )}
+          {activeTab === 'users' && (
+            <UsersList />
+          )}
+          {activeTab === 'reviews' && (
+            <BikeReviews />
+          )}
+        </ContentSection>
       </Content>
     </DashboardContainer>
   );

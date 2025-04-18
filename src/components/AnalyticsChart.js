@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 // Pine green and gray theme colors
 const colors = {
@@ -28,68 +28,6 @@ const ChartTitle = styled.h3`
   font-size: 18px;
 `;
 
-const ChartCanvas = styled.div`
-  height: 300px;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding-top: 20px;
-  position: relative;
-  margin-top: 10px;
-`;
-
-const ChartBar = styled.div`
-  flex: 1;
-  background-color: ${colors.pineGreen};
-  opacity: 0.85;
-  border-radius: 4px 4px 0 0;
-  position: relative;
-  min-width: 30px;
-  max-width: 60px;
-  transition: height 0.5s ease;
-  cursor: pointer;
-
-  &:hover {
-    opacity: 1;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  }
-
-  &::after {
-    content: '${props => props.value}';
-    position: absolute;
-    top: -25px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 12px;
-    color: ${colors.darkGray};
-  }
-`;
-
-const XAxis = styled.div`
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  padding: 0 2px;
-`;
-
-const XLabel = styled.div`
-  flex: 1;
-  text-align: center;
-  font-size: 12px;
-  color: ${colors.mediumGray};
-  min-width: 30px;
-  max-width: 60px;
-`;
-
-const NoDataMessage = styled.div`
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 200px;
-  color: ${colors.mediumGray};
-  font-style: italic;
-`;
-
 const ChartToggle = styled.div`
   display: flex;
   margin-bottom: 15px;
@@ -110,10 +48,29 @@ const ToggleButton = styled.button`
   }
 `;
 
+const NoDataMessage = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  color: ${colors.mediumGray};
+  font-style: italic;
+`;
+
+const ErrorMessage = styled.div`
+  color: #d32f2f;
+  background-color: #ffebee;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  text-align: center;
+`;
+
 const AnalyticsChart = () => {
   const [rentalData, setRentalData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [chartType, setChartType] = useState('weekly'); // weekly or monthly
+  const [error, setError] = useState(null);
   
   useEffect(() => {
     const fetchRentalData = async () => {
@@ -135,6 +92,7 @@ const AnalyticsChart = () => {
         setRentalData(rentals);
       } catch (error) {
         console.error('Error fetching rental data:', error);
+        setError('Failed to load rental data: ' + error.message);
       } finally {
         setLoading(false);
       }
@@ -175,7 +133,7 @@ const AnalyticsChart = () => {
       
       // Convert map to array and sort by date
       return Array.from(dataMap.entries())
-        .map(([label, { count, date }]) => ({ label, value: count, date }))
+        .map(([label, { count, date }]) => ({ name: label, value: count, date }))
         .sort((a, b) => a.date - b.date);
     } else {
       // Last 6 months
@@ -201,13 +159,30 @@ const AnalyticsChart = () => {
       
       // Convert map to array and sort by date
       return Array.from(dataMap.entries())
-        .map(([label, { count, date }]) => ({ label, value: count, date }))
+        .map(([label, { count, date }]) => ({ name: label, value: count, date }))
         .sort((a, b) => a.date - b.date);
     }
   };
   
   const chartData = processChartData();
-  const maxValue = Math.max(...chartData.map(item => item.value), 1);
+  
+  if (loading) {
+    return (
+      <ChartContainer>
+        <ChartTitle>Rental {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
+        <NoDataMessage>Loading chart data...</NoDataMessage>
+      </ChartContainer>
+    );
+  }
+  
+  if (error) {
+    return (
+      <ChartContainer>
+        <ChartTitle>Rental {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
+        <ErrorMessage>{error}</ErrorMessage>
+      </ChartContainer>
+    );
+  }
   
   return (
     <ChartContainer>
@@ -230,28 +205,17 @@ const AnalyticsChart = () => {
         </ToggleButton>
       </ChartToggle>
       
-      {loading ? (
-        <NoDataMessage>Loading chart data...</NoDataMessage>
-      ) : chartData.length === 0 ? (
+      {chartData.length === 0 ? (
         <NoDataMessage>No rental data available</NoDataMessage>
       ) : (
-        <>
-          <ChartCanvas>
-            {chartData.map((item, index) => (
-              <ChartBar 
-                key={index} 
-                style={{ height: `${(item.value / maxValue) * 100}%` }}
-                value={item.value}
-              />
-            ))}
-          </ChartCanvas>
-          
-          <XAxis>
-            {chartData.map((item, index) => (
-              <XLabel key={index}>{item.label}</XLabel>
-            ))}
-          </XAxis>
-        </>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+            <XAxis dataKey="name" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="value" name="Rentals" fill={colors.pineGreen} />
+          </BarChart>
+        </ResponsiveContainer>
       )}
     </ChartContainer>
   );

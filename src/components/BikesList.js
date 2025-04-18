@@ -270,6 +270,46 @@ const RefreshButton = styled.button`
   }
 `;
 
+const DebugInfo = styled.pre`
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 10px;
+  white-space: pre-wrap;
+`;
+
+const RefreshIndicator = styled.div`
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background-color: ${colors.pineGreen};
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 1000;
+  animation: fadeOut 2s forwards;
+  animation-delay: 1s;
+  
+  @keyframes fadeOut {
+    to {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+`;
+
+const LastUpdateTime = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  text-align: right;
+  margin-bottom: 5px;
+`;
+
 const BikesList = ({ onEditBike }) => {
   const [bikes, setBikes] = useState([]);
   const [filteredBikes, setFilteredBikes] = useState([]);

@@ -1,5 +1,5 @@
 // src/components/Login.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
@@ -287,16 +287,59 @@ const Login = () => {
   const [formHovered, setFormHovered] = useState(false);
   const navigate = useNavigate();
 
+  // Check if user is already authenticated
+  useEffect(() => {
+    const checkAuth = () => {
+      // If user is already authenticated, redirect to dashboard
+      if (auth.currentUser) {
+        // Get the last authenticated route or default to dashboard
+        const lastRoute = sessionStorage.getItem('lastAuthRoute') || '/dashboard';
+        navigate(lastRoute, { replace: true });
+      }
+    };
+    
+    // Check immediately
+    checkAuth();
+    
+    // Also set up a listener for auth state changes
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      if (user) {
+        const lastRoute = sessionStorage.getItem('lastAuthRoute') || '/dashboard';
+        navigate(lastRoute, { replace: true });
+        
+        // Clear browser history to prevent back navigation to login
+        if (window.history && window.history.pushState) {
+          // Add a dummy state to replace the login page in history
+          window.history.pushState(null, document.title, window.location.href);
+          
+          // Replace login with dashboard in browser history
+          window.history.replaceState({ path: lastRoute }, document.title, lastRoute);
+        }
+      }
+    });
+    
+    // Clean up listener
+    return () => unsubscribe();
+  }, [navigate]);
+
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
     setError('');
+    setLoading(true);
     
     try {
+      // Sign in the user
       await signInWithEmailAndPassword(auth, email, password);
-      navigate('/dashboard');
+      
+      // Add a state entry to history to prevent accidental navigation back
+      if (window.history && window.history.pushState) {
+        window.history.pushState({ secure: true }, document.title, window.location.href);
+      }
+      
+      // No need to manually navigate - the auth state listener will handle redirection
     } catch (error) {
-      setError(error.message);
+      console.error("Login error:", error);
+      setError(error.message || 'Failed to sign in');
     } finally {
       setLoading(false);
     }

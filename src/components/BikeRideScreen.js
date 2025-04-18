@@ -160,6 +160,7 @@ const BikeRideScreen = () => {
   const [locationWatchId, setLocationWatchId] = useState(null);
   const [duration, setDuration] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [mapKey, setMapKey] = useState('ride-map-' + Date.now());
 
   // Fetch bike data
   useEffect(() => {
@@ -373,7 +374,7 @@ const BikeRideScreen = () => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('Tab is visible again - refreshing ride map');
-        setMapKey('ride-map-script-' + Date.now());
+        setMapKey('ride-map-' + Date.now());
         
         // If ride is active, make sure to update location
         if (rideActive && currentLocation) {

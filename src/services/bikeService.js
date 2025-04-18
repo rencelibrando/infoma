@@ -22,17 +22,41 @@ export const getBikes = async () => {
   try {
     const bikesCollection = collection(db, "bikes");
     const snapshot = await getDocs(bikesCollection);
-    const bikes = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    const bikes = snapshot.docs.map(doc => {
+      const data = doc.data();
+      
+      // Ensure coordinates are proper numbers
+      let latitude = data.latitude;
+      let longitude = data.longitude;
+      
+      // Convert string coordinates to numbers
+      if (typeof latitude === 'string') {
+        latitude = parseFloat(latitude);
+      }
+      
+      if (typeof longitude === 'string') {
+        longitude = parseFloat(longitude);
+      }
+      
+      // Ensure they're valid numbers
+      if (isNaN(latitude)) latitude = null;
+      if (isNaN(longitude)) longitude = null;
+      
+      return {
+        id: doc.id,
+        ...data,
+        latitude,
+        longitude
+      };
+    });
     
     // Log each bike's status to help with debugging
     bikes.forEach(bike => {
       console.log(`Bike ${bike.id} (${bike.name}) status:`, {
         isLocked: bike.isLocked,
         isAvailable: bike.isAvailable,
-        isInUse: bike.isInUse
+        isInUse: bike.isInUse,
+        coordinates: `${bike.latitude}, ${bike.longitude}`
       });
     });
     
@@ -359,10 +383,33 @@ export const subscribeToBikes = (callback) => {
     
     // Create a real-time listener for the bikes collection
     const unsubscribe = onSnapshot(bikesQuery, (snapshot) => {
-      const bikes = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const bikes = snapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // Process coordinates like in getBikes
+        let latitude = data.latitude;
+        let longitude = data.longitude;
+        
+        // Convert string coordinates to numbers
+        if (typeof latitude === 'string') {
+          latitude = parseFloat(latitude);
+        }
+        
+        if (typeof longitude === 'string') {
+          longitude = parseFloat(longitude);
+        }
+        
+        // Ensure they're valid numbers
+        if (isNaN(latitude)) latitude = null;
+        if (isNaN(longitude)) longitude = null;
+        
+        return {
+          id: doc.id,
+          ...data,
+          latitude,
+          longitude
+        };
+      });
       
       console.log(`Real-time update received: ${bikes.length} bikes`);
       callback(bikes);
@@ -377,3 +424,37 @@ export const subscribeToBikes = (callback) => {
     throw error;
   }
 };
+
+// Function to fix bikes with missing coordinates
+export const fixBikeCoordinates = async () => {
+  try {
+    const bikes = await getBikes();
+    const defaultCoords = { latitude: 14.554729, longitude: 121.0244 }; // Default Manila coords
+    let fixedCount = 0;
+    
+    for (const bike of bikes) {
+      if (!bike.latitude || !bike.longitude) {
+        console.log(`Fixing coordinates for bike ${bike.id} (${bike.name || 'Unnamed'})`);
+        
+        // Spread bikes around the default location if needed
+        const randomOffset = () => (Math.random() - 0.5) * 0.01; // Small offset
+        
+        const bikeRef = doc(db, "bikes", bike.id);
+        await updateDoc(bikeRef, {
+          latitude: defaultCoords.latitude + randomOffset(),
+          longitude: defaultCoords.longitude + randomOffset()
+        });
+        
+        fixedCount++;
+      }
+    }
+    
+    console.log(`Fixed coordinates for ${fixedCount} bikes`);
+    return fixedCount;
+  } catch (error) {
+    console.error('Error fixing bike coordinates:', error);
+    throw error;
+  }
+};
+
+// Update the subscribeToBikes function to normalize coordinates
