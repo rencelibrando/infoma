@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getBikes, toggleBikeLock, subscribeToBikes } from '../services/bikeService';
-import { getActiveRides, updateBikeLocation } from '../services/bikeLocationService';
-import { doc, getDoc, onSnapshot, collection, query, where } from 'firebase/firestore';
+import { getActiveRides } from '../services/bikeLocationService';
+import { doc, getDoc, collection, query } from 'firebase/firestore';
 import { db } from '../firebase';
 import styled from 'styled-components';
 import { Marker, InfoWindow } from '@react-google-maps/api';

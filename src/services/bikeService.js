@@ -3,8 +3,6 @@ import { db, storage } from '../firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { v4 as uuidv4 } from 'uuid';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 
 // Install uuid first: npm install uuid
 
@@ -113,8 +111,6 @@ export const deleteBike = async (bikeId) => {
 // Function to update an existing bike
 export const updateBike = async (bikeId, bikeData, imageFile) => {
   try {
-    const db = getFirestore();
-    const storage = getStorage();
     const bikesRef = collection(db, 'bikes');
     const bikeRef = doc(bikesRef, bikeId);
     
