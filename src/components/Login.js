@@ -5,12 +5,6 @@ import { signInWithEmailAndPassword } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
 
-const floatAnimation = keyframes`
-  0% { transform: perspective(1000px) translateZ(0) translateY(0); }
-  50% { transform: perspective(1000px) translateZ(8px) translateY(-5px); }
-  100% { transform: perspective(1000px) translateZ(0) translateY(0); }
-`;
-
 const fadeIn = keyframes`
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }

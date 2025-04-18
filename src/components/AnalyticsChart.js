@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { db } from '../firebase';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
+import { BarChart, Bar, XAxis, ResponsiveContainer, Tooltip } from 'recharts';
 
 // Pine green and gray theme colors
 const colors = {
@@ -78,21 +79,6 @@ const XLabel = styled.div`
   color: ${colors.mediumGray};
   min-width: 30px;
   max-width: 60px;
-`;
-
-const YAxis = styled.div`
-  position: absolute;
-  left: -30px;
-  top: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-`;
-
-const YLabel = styled.div`
-  font-size: 12px;
-  color: ${colors.mediumGray};
 `;
 
 const NoDataMessage = styled.div`

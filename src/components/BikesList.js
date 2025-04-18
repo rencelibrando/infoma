@@ -270,63 +270,6 @@ const RefreshButton = styled.button`
   }
 `;
 
-const ActionButton = styled(Button)`
-  background-color: ${props => props.locked ? colors.warning : props.edit ? colors.lightPineGreen : props.danger ? colors.danger : colors.pineGreen};
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 8px 12px;
-`;
-
-const RideButton = styled(Button)`
-  background-color: ${colors.success};
-  margin-right: 5px;
-  padding: 6px 10px;
-  font-size: 12px;
-`;
-
-// Add a debug component to show bike state values
-const DebugInfo = styled.div`
-  margin-top: 5px;
-  font-size: 10px;
-  font-family: monospace;
-  color: #666;
-  background: #f5f5f5;
-  padding: 3px;
-  border-radius: 3px;
-`;
-
-const RefreshIndicator = styled.div`
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  background-color: ${colors.pineGreen};
-  color: white;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  z-index: 1000;
-  animation: fadeOut 2s forwards;
-  animation-delay: 1s;
-  
-  @keyframes fadeOut {
-    to {
-      opacity: 0;
-      visibility: hidden;
-    }
-  }
-`;
-
-const LastUpdateTime = styled.div`
-  font-size: 12px;
-  color: ${colors.mediumGray};
-  text-align: right;
-  margin-bottom: 5px;
-`;
-
 const BikesList = ({ onEditBike }) => {
   const [bikes, setBikes] = useState([]);
   const [filteredBikes, setFilteredBikes] = useState([]);

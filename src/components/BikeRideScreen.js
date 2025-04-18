@@ -156,12 +156,10 @@ const BikeRideScreen = () => {
   const [error, setError] = useState(null);
   const [rideActive, setRideActive] = useState(false);
   const [rideId, setRideId] = useState(null);
-  const [rideStartTime, setRideStartTime] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [locationWatchId, setLocationWatchId] = useState(null);
   const [duration, setDuration] = useState(0);
   const [processing, setProcessing] = useState(false);
-  const [mapKey, setMapKey] = useState('ride-map-script-' + Date.now());
 
   // Fetch bike data
   useEffect(() => {
@@ -246,53 +244,39 @@ const BikeRideScreen = () => {
   }, [stopLocationTracking]);
   
   // Start the ride
-  const handleStartRide = async () => {
+  const initializeRide = async () => {
     try {
-      setProcessing(true);
+      setLoading(true);
       
-      // Check if user is logged in
-      if (!auth.currentUser) {
-        navigate('/login', { state: { redirectTo: `/ride/${bikeId}` } });
+      // Get the current user
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        setError("You must be logged in to start a ride");
         return;
       }
       
-      // Verify bike can be used
-      if (!bike.isAvailable) {
-        setError("This bike is not available for use");
-        return;
-      }
-      
-      // Check bike is locked before starting
-      if (!bike.isLocked) {
-        setError("This bike should be locked before starting a ride. Please contact support.");
-        return;
-      }
-      
-      const userId = auth.currentUser.uid;
-      
-      // Start the ride in Firestore - this will unlock the bike
-      const rideResult = await startBikeRide(bikeId, userId);
-      setRideId(rideResult.rideId);
-      setRideStartTime(new Date());
+      // Start the ride
+      const rideData = await startBikeRide(bikeId, currentUser.uid);
+      setRideId(rideData.rideId);
       setRideActive(true);
       
-      // Update bike data right after starting the ride
-      const updatedBike = await getBikeById(bikeId);
-      setBike(updatedBike);
+      // Get current position
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+            setCurrentLocation({ lat: latitude, lng: longitude });
+          },
+          (error) => {
+            console.error("Error getting location:", error);
+          }
+        );
+      }
       
-      // Start tracking location
-      startLocationTracking();
-      
-      // Start timer for duration
-      const intervalId = setInterval(() => {
-        setDuration(prev => prev + 1);
-      }, 1000);
-      
-      return () => clearInterval(intervalId);
     } catch (error) {
-      setError(`Failed to start ride: ${error.message}`);
+      setError("Failed to start ride: " + error.message);
     } finally {
-      setProcessing(false);
+      setLoading(false);
     }
   };
   
@@ -471,7 +455,7 @@ const BikeRideScreen = () => {
         </ActionButton>
       ) : (
         <ActionButton
-          onClick={handleStartRide}
+          onClick={initializeRide}
           disabled={processing || bike.isInUse || bike.isLocked}
         >
           {processing ? 'Starting Ride...' : 'Start Ride'}

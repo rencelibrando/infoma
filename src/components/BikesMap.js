@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getBikes, toggleBikeLock, subscribeToBikes } from '../services/bikeService';
 import { getActiveRides } from '../services/bikeLocationService';
-import { doc, getDoc, collection, query } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import styled from 'styled-components';
 import { Marker, InfoWindow } from '@react-google-maps/api';
@@ -199,7 +199,6 @@ const BikesMap = () => {
   const [mapCenter, setMapCenter] = useState({ lat: 0, lng: 0 });
   const [processingBikeAction, setProcessingBikeAction] = useState(null);
   const [users, setUsers] = useState({}); // To store user data
-  const [mapKey, setMapKey] = useState('google-maps-script-' + Date.now());
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
   const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
 
@@ -208,7 +207,6 @@ const BikesMap = () => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('Tab is visible again - refreshing map');
-        setMapKey('google-maps-script-' + Date.now());
         fetchActiveRides();
       }
     };
@@ -277,7 +275,7 @@ const BikesMap = () => {
       unsubscribe();
       clearInterval(refreshInterval);
     };
-  }, []);
+  }, [selectedBike]);
   
   // Only fetch active rides - bikes will come from real-time subscription
   const fetchActiveRides = async () => {
