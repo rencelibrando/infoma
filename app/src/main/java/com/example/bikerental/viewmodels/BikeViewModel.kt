@@ -7,17 +7,25 @@ import androidx.lifecycle.viewModelScope
 import com.example.bikerental.models.Bike
 import com.example.bikerental.models.BikeLocation
 import com.example.bikerental.models.BikeRide
+import com.example.bikerental.models.Review
 import com.example.bikerental.models.TrackableBike
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
+import com.google.firebase.firestore.CollectionReference
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 class BikeViewModel : ViewModel() {
     private val TAG = "BikeViewModel"
@@ -62,12 +70,24 @@ class BikeViewModel : ViewModel() {
     private val _bikeLocation = MutableStateFlow<LatLng?>(null)
     val bikeLocation: StateFlow<LatLng?> = _bikeLocation
     
+    // New state for bike reviews
+    private val _bikeReviews = MutableStateFlow<List<Review>>(emptyList())
+    val bikeReviews: StateFlow<List<Review>> = _bikeReviews
+    
+    // New state for average rating
+    private val _averageRating = MutableStateFlow<Float>(0f)
+    val averageRating: StateFlow<Float> = _averageRating
+    
     // Track location listeners to clean up
     private var bikeLocationListener: ValueEventListener? = null
     private var availableBikesListener: ValueEventListener? = null
     
     // Setup a real-time listener for bike collection changes
-    private var firestoreBikesListener: com.google.firebase.firestore.ListenerRegistration? = null
+    private var firestoreBikesListener: ListenerRegistration? = null
+    private var reviewsListener: ListenerRegistration? = null
+    
+    // Synchronization lock for review operations
+    private val reviewsLock = Any()
     
     init {
         fetchAllBikes()
@@ -76,29 +96,53 @@ class BikeViewModel : ViewModel() {
         checkForActiveRide()
     }
     
-    // Fetch bikes from Firestore (new)
+    // Fetch bikes from Firestore
     fun fetchBikesFromFirestore() {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
             
             try {
-                val bikesCollection = firestore.collection("bikes")
-                val bikesSnapshot = bikesCollection.get().await()
+                Log.d(TAG, "Starting to fetch bikes from Firestore")
+                val bikesCollection = firestore.collection("bikes").get().await()
                 
-                val bikesList = bikesSnapshot.documents.mapNotNull { document -> 
+                // Log raw document count
+                Log.d(TAG, "Raw document count from Firestore: ${bikesCollection.documents.size}")
+                
+                // Log each document ID before conversion
+                bikesCollection.documents.forEachIndexed { index, doc ->
+                    Log.d(TAG, "Document $index ID: ${doc.id}")
+                }
+                
+                val fetchedBikes = bikesCollection.documents.mapNotNull { doc ->
                     try {
-                        document.toObject(Bike::class.java)?.copy(id = document.id)
+                        val bike = doc.toObject(Bike::class.java)?.copy(id = doc.id)
+                        
+                        // Log each conversion result
+                        if (bike == null) {
+                            Log.w(TAG, "Document ${doc.id} converted to null bike object")
+                            // Log the document data for debugging
+                            Log.w(TAG, "Document data: ${doc.data}")
+                        }
+                        
+                        bike
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing bike data from Firestore", e)
+                        Log.e(TAG, "Error converting document ${doc.id}", e)
+                        // Log the document data that caused the error
+                        Log.e(TAG, "Document data: ${doc.data}")
                         null
                     }
                 }
                 
-                _bikes.value = bikesList
+                Log.d(TAG, "Successfully fetched ${fetchedBikes.size} bikes from Firestore")
+                fetchedBikes.forEach { bike ->
+                    Log.d(TAG, "Bike: ${bike.id}, Name: ${bike.name}, Available: ${bike.isAvailable}, InUse: ${bike.isInUse}")
+                }
+                
+                _bikes.value = fetchedBikes
             } catch (e: Exception) {
-                Log.e(TAG, "Error fetching bikes from Firestore", e)
-                _error.value = "Failed to load bikes: ${e.message}"
+                Log.e(TAG, "Error fetching bikes", e)
+                _error.value = e.message
             } finally {
                 _isLoading.value = false
             }
@@ -161,6 +205,10 @@ class BikeViewModel : ViewModel() {
                         _error.value = "Bike not found"
                     }
                 }
+                
+                // Fetch reviews for this bike
+                fetchReviewsForBike(bikeId)
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching bike details", e)
                 _error.value = "Failed to load bike details: ${e.message}"
@@ -449,14 +497,22 @@ class BikeViewModel : ViewModel() {
     // Save completed ride to Firestore for user history
     private fun saveRideToFirestore(ride: BikeRide) {
         auth.currentUser?.let { user ->
-            firestore.collection("users")
-                .document(user.uid)
-                .collection("rideHistory")
-                .document(ride.id)
-                .set(ride)
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Error saving ride to history", e)
-                }
+            try {
+                val rideData = ride.toMap()
+                firestore.collection("users")
+                    .document(user.uid)
+                    .collection("rideHistory")
+                    .document(ride.id)
+                    .set(rideData)
+                    .addOnSuccessListener {
+                        Log.d(TAG, "Ride history saved successfully")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "Error saving ride to history", e)
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error preparing ride data for Firestore", e)
+            }
         }
     }
     
@@ -492,14 +548,351 @@ class BikeViewModel : ViewModel() {
         return results[0] // Distance in meters
     }
     
+    // NEW METHODS FOR REVIEWS
+    
+    /**
+     * Submit a new review for a bike
+     * Thread-safe implementation using Firestore
+     */
+    fun submitReview(bikeId: String, rating: Float, comment: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                Log.d(TAG, "Starting review submission for bike: $bikeId with rating: $rating")
+                
+                val currentUser = auth.currentUser
+                if (currentUser == null) {
+                    _isLoading.value = false
+                    Log.e(TAG, "Review submission failed: User not logged in")
+                    onError("You must be logged in to submit a review")
+                    return@launch
+                }
+                
+                // Get user name if available
+                val userName = try {
+                    val userDoc = firestore.collection("users").document(currentUser.uid).get().await()
+                    userDoc.getString("displayName") ?: currentUser.displayName ?: "Anonymous User"
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error fetching user name", e)
+                    currentUser.displayName ?: "Anonymous User"
+                }
+                
+                Log.d(TAG, "Creating review as user: $userName (${currentUser.uid})")
+                
+                // Create review object with a unique ID
+                val reviewId = UUID.randomUUID().toString()
+                val review = Review(
+                    id = reviewId,
+                    bikeId = bikeId,
+                    userId = currentUser.uid,
+                    userName = userName,
+                    rating = rating,
+                    comment = comment,
+                    timestamp = System.currentTimeMillis()
+                )
+                
+                // 1. Get references
+                val bikeRef = firestore.collection("bikes").document(bikeId)
+                val reviewRef = bikeRef.collection("reviews").document(reviewId)
+                
+                // 2. First save the review
+                reviewRef.set(review).await()
+                
+                // 3. Then fetch all reviews to calculate average
+                val reviewsQuery = bikeRef.collection("reviews").get().await()
+                val allReviews = ArrayList<Review>()
+                
+                // 4. Process all reviews
+                for (doc in reviewsQuery.documents) {
+                    doc.toObject(Review::class.java)?.let { reviewObject ->
+                        allReviews.add(reviewObject)
+                    }
+                }
+                
+                // 5. Calculate average rating
+                val averageRating = if (allReviews.isNotEmpty()) {
+                    allReviews.sumOf { it.rating.toDouble() } / allReviews.size
+                } else {
+                    rating.toDouble()
+                }.toFloat()
+                
+                Log.d(TAG, "Calculated average rating: $averageRating from ${allReviews.size} reviews")
+                
+                // 6. Update the bike's average rating
+                bikeRef.update("rating", averageRating).await()
+                
+                // 7. Now synchronize only the UI state updates
+                synchronized(reviewsLock) {
+                    // Update UI state
+                    _bikeReviews.value = allReviews.sortedByDescending { it.timestamp }
+                    _averageRating.value = averageRating
+                    
+                    // Update the bike in the bikes list
+                    _selectedBike.value = _selectedBike.value?.copy(rating = averageRating)
+                    
+                    // Update bikes list
+                    val updatedBikes = _bikes.value.map { 
+                        if (it.id == bikeId) it.copy(rating = averageRating) else it 
+                    }
+                    _bikes.value = updatedBikes
+                }
+                
+                _isLoading.value = false
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e(TAG, "Top level error submitting review", e)
+                _isLoading.value = false
+                onError("Failed to submit review: ${e.message ?: "Unknown error"}")
+            }
+        }
+    }
+    
+    /**
+     * Fetch all reviews for a specific bike
+     */
+    fun fetchReviewsForBike(bikeId: String) {
+        // First remove any existing listener in a synchronized block
+        synchronized(reviewsLock) {
+            reviewsListener?.remove()
+            reviewsListener = null
+        }
+        
+        Log.d(TAG, "Starting to fetch reviews for bike: $bikeId")
+        
+        viewModelScope.launch {
+            try {
+                // Set up real-time listener for reviews
+                val listener = firestore.collection("bikes").document(bikeId)
+                    .collection("reviews")
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            Log.e(TAG, "Error listening for review updates", error)
+                            return@addSnapshotListener
+                        }
+                        
+                        if (snapshot == null) {
+                            Log.d(TAG, "Null reviews snapshot received")
+                            return@addSnapshotListener
+                        }
+                        
+                        Log.d(TAG, "Reviews snapshot received: ${snapshot.documents.size} reviews")
+                        
+                        val reviewsList = ArrayList<Review>()
+                        
+                        // Process all documents in the snapshot
+                        for (document in snapshot.documents) {
+                            try {
+                                val review = document.toObject(Review::class.java)
+                                if (review != null) {
+                                    reviewsList.add(review)
+                                    Log.d(TAG, "Parsed review: ${review.id} by ${review.userName}")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parsing review data", e)
+                            }
+                        }
+                        
+                        // Sort the reviews by timestamp (newest first)
+                        reviewsList.sortByDescending { it.timestamp }
+                        
+                        // Update state in a synchronized manner
+                        synchronized(reviewsLock) {
+                            _bikeReviews.value = reviewsList
+                            Log.d(TAG, "Updated reviews state with ${reviewsList.size} reviews")
+                            
+                            // Calculate and update average rating
+                            if (reviewsList.isNotEmpty()) {
+                                val avgRating = reviewsList.sumOf { it.rating.toDouble() } / reviewsList.size
+                                _averageRating.value = avgRating.toFloat()
+                                Log.d(TAG, "Updated average rating to ${_averageRating.value}")
+                            } else {
+                                _averageRating.value = 0f
+                                Log.d(TAG, "No reviews found, setting average rating to 0")
+                            }
+                        }
+                    }
+                
+                // Store the listener in a synchronized block
+                synchronized(reviewsLock) {
+                    reviewsListener = listener
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting up reviews listener", e)
+            }
+        }
+    }
+    
+    /**
+     * Update the average rating for a bike
+     * Thread-safe implementation using Firestore
+     */
+    private suspend fun updateBikeAverageRating(bikeId: String) {
+        try {
+            // Get references
+            val bikeRef = firestore.collection("bikes").document(bikeId)
+            val reviewsRef = bikeRef.collection("reviews")
+            
+            // Fetch reviews outside of synchronized block
+            val reviewsSnapshot = reviewsRef.get().await()
+            
+            // Process reviews
+            val reviewsList = ArrayList<Review>()
+            for (doc in reviewsSnapshot.documents) {
+                try {
+                    val review = doc.toObject(Review::class.java)
+                    if (review != null) {
+                        reviewsList.add(review)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing review during rating calculation", e)
+                }
+            }
+            
+            // Calculate average rating
+            val averageRating = if (reviewsList.isNotEmpty()) {
+                reviewsList.sumOf { it.rating.toDouble() } / reviewsList.size
+            } else {
+                0.0
+            }.toFloat()
+            
+            Log.d(TAG, "Calculated average rating: $averageRating from ${reviewsList.size} reviews")
+            
+            // Update bike document with average rating
+            bikeRef.update("rating", averageRating).await()
+            
+            // Synchronize only UI state updates
+            synchronized(reviewsLock) {
+                // Update local state
+                _averageRating.value = averageRating
+                
+                // Update the bike in the bikes list
+                _selectedBike.value = _selectedBike.value?.copy(rating = averageRating)
+                
+                // Update bikes list
+                val updatedBikes = _bikes.value.map { 
+                    if (it.id == bikeId) it.copy(rating = averageRating) else it 
+                }
+                _bikes.value = updatedBikes
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating bike average rating", e)
+        }
+    }
+    
+    /**
+     * Delete a review by ID
+     * Only the review owner can delete their own reviews
+     * This implementation is thread-safe
+     */
+    fun deleteReview(bikeId: String, reviewId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                
+                val currentUser = auth.currentUser
+                if (currentUser == null) {
+                    _isLoading.value = false
+                    onError("You must be logged in to delete a review")
+                    return@launch
+                }
+                
+                // Get references
+                val bikeRef = firestore.collection("bikes").document(bikeId)
+                val reviewDocRef = bikeRef.collection("reviews").document(reviewId)
+                
+                // 1. Get the review to check ownership
+                val reviewSnapshot = reviewDocRef.get().await()
+                
+                if (!reviewSnapshot.exists()) {
+                    throw Exception("Review not found")
+                }
+                
+                val review = reviewSnapshot.toObject(Review::class.java)
+                
+                if (review == null) {
+                    throw Exception("Error reading review data")
+                }
+                
+                // 2. Check if current user is the owner of the review
+                if (review.userId != currentUser.uid) {
+                    throw Exception("You can only delete your own reviews")
+                }
+                
+                // 3. Delete the review document
+                reviewDocRef.delete().await()
+                
+                // 4. Get all remaining reviews for this bike to recalculate rating
+                val remainingReviewsRef = bikeRef.collection("reviews")
+                val remainingReviewsSnapshot = remainingReviewsRef.get().await()
+                
+                // 5. Process remaining reviews
+                val remainingReviews = ArrayList<Review>()
+                for (doc in remainingReviewsSnapshot.documents) {
+                    try {
+                        val reviewObj = doc.toObject(Review::class.java)
+                        if (reviewObj != null) {
+                            remainingReviews.add(reviewObj)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing review during rating recalculation", e)
+                    }
+                }
+                
+                // 6. Calculate new average rating
+                val newAverageRating = if (remainingReviews.isNotEmpty()) {
+                    remainingReviews.sumOf { it.rating.toDouble() } / remainingReviews.size
+                } else {
+                    0.0 // No reviews left
+                }.toFloat()
+                
+                // 7. Update the bike's average rating
+                bikeRef.update("rating", newAverageRating).await()
+                
+                // 8. Update local state in synchronized block
+                synchronized(reviewsLock) {
+                    _bikeReviews.value = remainingReviews.sortedByDescending { it.timestamp }
+                    _averageRating.value = newAverageRating
+                    
+                    // Update the bike in the bikes list
+                    _selectedBike.value = _selectedBike.value?.copy(rating = newAverageRating)
+                    
+                    // Update bikes list
+                    val updatedBikes = _bikes.value.map { 
+                        if (it.id == bikeId) it.copy(rating = newAverageRating) else it 
+                    }
+                    _bikes.value = updatedBikes
+                }
+                
+                _isLoading.value = false
+                onSuccess()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting review", e)
+                _isLoading.value = false
+                onError("Failed to delete review: ${e.message ?: "Unknown error"}")
+            }
+        }
+    }
+    
     override fun onCleared() {
         super.onCleared()
         
-        // Clean up listeners
+        // Clean up listeners with thread safety
         stopTrackingBike()
-        availableBikesListener?.let {
-            bikesRef.removeEventListener(it)
+        
+        // Safely remove database listener
+        availableBikesListener?.let { listener ->
+            bikesRef.removeEventListener(listener)
         }
-        firestoreBikesListener?.remove()
+        
+        // Safely remove Firestore listeners
+        synchronized(Any()) {
+            firestoreBikesListener?.remove()
+        }
+        
+        // Safely remove reviews listener
+        synchronized(reviewsLock) {
+            reviewsListener?.remove()
+        }
     }
 } 

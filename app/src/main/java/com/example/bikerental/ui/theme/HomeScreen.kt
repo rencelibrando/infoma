@@ -59,6 +59,7 @@ import com.example.bikerental.screens.tabs.BikesTab
 import com.example.bikerental.screens.tabs.BookingsTab
 import com.example.bikerental.screens.tabs.MapTab
 import com.example.bikerental.screens.tabs.ProfileScreen
+import com.example.bikerental.screens.tabs.RideHistoryTab
 import com.example.bikerental.components.AppNavigationDrawer
 import com.example.bikerental.components.AppTopBar
 import com.example.bikerental.components.swipeToOpenDrawer
@@ -238,6 +239,7 @@ fun HomeScreen(
                                 1 -> BikesTab(fusedLocationProviderClient)
                                 2 -> BookingsTab()
                                 3 -> ProfileScreen(navController, viewModel)
+                                4 -> RideHistoryTab()
                             }
                         }
                     }

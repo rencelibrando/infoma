@@ -1,5 +1,6 @@
 package com.example.bikerental.screens.tabs
 
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,6 +44,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -69,6 +72,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,8 +83,13 @@ import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.bikerental.models.Bike
+import com.example.bikerental.models.Review
 import com.example.bikerental.navigation.Screen
 import com.example.bikerental.utils.ColorUtils
+import com.example.bikerental.components.ReviewSection
+import com.example.bikerental.components.RatingBar
+import com.example.bikerental.components.ReviewForm
+import com.example.bikerental.components.ReviewItem
 import com.example.bikerental.utils.LocationManager
 import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -90,6 +99,13 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import java.text.SimpleDateFormat
+import java.util.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import com.google.firebase.auth.FirebaseAuth
 
 // Use Dark Green color from ColorUtils
 private val DarkGreen = ColorUtils.DarkGreen
@@ -211,6 +227,15 @@ fun BikesTab(
                     }
                 }
             } else {
+                // Add debug text to show bike count
+                Text(
+                    text = "Found ${bikes.size} bikes",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                // Display all bikes in grid
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -237,7 +262,9 @@ fun BikesTab(
                                 onCompleteProfile = {
                                     navController?.navigate("editProfile")
                                 },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(0.75f)
                             )
                         }
                     }
@@ -409,6 +436,25 @@ fun BikeCard(
                     color = DarkGreen,
                     fontWeight = FontWeight.Bold
                 )
+                
+                // Star rating
+                if (bike.rating > 0) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    ) {
+                        RatingBar(
+                            rating = bike.rating,
+                            modifier = Modifier.height(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = String.format("%.1f", bike.rating),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 // Type and Distance
                 Row(
@@ -465,159 +511,162 @@ fun BikeDetailSheet(
     val scrollState = rememberScrollState()
     val isAvailable = remember(bike) { bike.isAvailable && !bike.isInUse }
     
+    // Get ViewModel for reviews
+    val bikeViewModel: BikeViewModel = viewModel()
+    val reviews by bikeViewModel.bikeReviews.collectAsState()
+    val averageRating by bikeViewModel.averageRating.collectAsState()
+    val isLoading by bikeViewModel.isLoading.collectAsState()
+    
+    // Review form state
+    var showReviewForm by remember { mutableStateOf(false) }
+    var isSubmittingReview by remember { mutableStateOf(false) }
+    
+    // Get current user ID
+    val currentUser = FirebaseAuth.getInstance().currentUser
+    val currentUserId = currentUser?.uid
+    
+    // State for error messages
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    // Load reviews when the sheet is shown
+    LaunchedEffect(bike.id) {
+        bikeViewModel.fetchReviewsForBike(bike.id)
+    }
+    
+    // Use Column instead of scroll to avoid nested scrollable containers
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .verticalScroll(scrollState)
     ) {
-        // Image with parallax effect
-        Box(
+        // This part will be scrollable
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
+                .weight(1f)
+                .verticalScroll(scrollState)
         ) {
-            SubcomposeAsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(bike.imageUrl)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = bike.name,
+            // Image with parallax effect
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp),
-                contentScale = ContentScale.Crop,
-                loading = {
-                    ShimmerLoadingAnimation(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .height(200.dp)
+            ) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(bike.imageUrl)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = bike.name,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentScale = ContentScale.Crop,
+                    loading = {
+                        ShimmerLoadingAnimation(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        )
+                    },
+                    error = {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = bike.name.firstOrNull()?.toString() ?: "B",
+                                style = MaterialTheme.typography.headlineLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                )
+                
+                // Add gradient overlay for better text visibility
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                ),
+                                startY = 0f,
+                                endY = Float.POSITIVE_INFINITY
+                            )
+                        )
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Header section with name and availability status
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Bike name
+                Text(
+                    text = bike.name,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DarkGreen,
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // Availability status chip
+                Surface(
+                    color = if (isAvailable) Color(0xFFEDF7ED) else Color(0xFFFDEDED),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
                     )
-                },
-                error = {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        // Status indicator dot
+                        Surface(
+                            color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935),
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.size(8.dp)
+                        ) {}
+                        
                         Text(
-                            text = bike.name.firstOrNull()?.toString() ?: "B",
-                            style = MaterialTheme.typography.headlineLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = if (isAvailable) "Available" else "Unavailable",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
                         )
                     }
                 }
-            )
+            }
             
-            // Add gradient overlay for better text visibility
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
-                            ),
-                            startY = 0f,
-                            endY = Float.POSITIVE_INFINITY
-                        )
-                    )
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Header section with name and availability status
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Bike name
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            // Price with larger text
             Text(
-                text = bike.name,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = DarkGreen,
-                modifier = Modifier.weight(1f)
+                text = bike.price,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
             )
             
-            // Availability status chip
-            Surface(
-                color = if (isAvailable) Color(0xFFEDF7ED) else Color(0xFFFDEDED),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // Status indicator dot
-                    Surface(
-                        color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935),
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.size(8.dp)
-                    ) {}
-                    
-                    Text(
-                        text = if (isAvailable) "Available" else "Unavailable",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
-                    )
-                }
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(4.dp))
-        
-        // Price with larger text
-        Text(
-            text = bike.price,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        // Type and distance info
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Bike Type with icon
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown, // Replace with appropriate icon
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = bike.type,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            Spacer(modifier = Modifier.height(8.dp))
             
-            // Distance
-            currentLocation?.let { location ->
-                val distance = calculateDistance(
-                    location.latitude,
-                    location.longitude,
-                    bike.latitude,
-                    bike.longitude
-                )
+            // Type and distance info
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Bike Type with icon
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -629,87 +678,305 @@ fun BikeDetailSheet(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "%.1f km away".format(distance),
+                        text = bike.type,
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                
+                // Distance
+                currentLocation?.let { location ->
+                    val distance = calculateDistance(
+                        location.latitude,
+                        location.longitude,
+                        bike.latitude,
+                        bike.longitude
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown, // Replace with appropriate icon
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "%.1f km away".format(distance),
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        Divider()
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Description section
-        Text(
-            text = "Description",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = bike.description ?: "No description available",
-            fontSize = 16.sp,
-            lineHeight = 24.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-        )
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Specifications section
-        Text(
-            text = "Specifications",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        // Specification items
-        SpecificationItem("Type", bike.type)
-        SpecificationItem("Size", "Medium")
-        SpecificationItem("Weight", "12 kg")
-        SpecificationItem("Max Speed", "25 km/h")
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // Action buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            OutlinedButton(
-                onClick = onViewDetails,
-                modifier = Modifier.weight(1f),
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            Divider()
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Description section
+            Text(
+                text = "Description",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = bike.description ?: "No description available",
+                fontSize = 16.sp,
+                lineHeight = 24.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Specifications section
+            Text(
+                text = "Specifications",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Specification items
+            SpecificationItem("Type", bike.type)
+            SpecificationItem("Size", "Medium")
+            SpecificationItem("Weight", "12 kg")
+            SpecificationItem("Max Speed", "25 km/h")
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            Divider()
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Reviews Section header only
+            Text(
+                text = "Reviews",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Display full reviews list instead of just summary
+            if (isLoading && reviews.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = DarkGreen)
+                }
+                Log.d("BikesTab", "Loading reviews for bike ${bike.id}")
+            } else if (reviews.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No reviews yet. Be the first to review!",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        fontStyle = FontStyle.Italic
+                    )
+                }
+                Log.d("BikesTab", "No reviews to display for bike ${bike.id}")
+            } else {
+                // Display average rating first
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = String.format("%.1f", averageRating),
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    RatingBar(
+                        rating = averageRating,
+                        modifier = Modifier.height(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "(${reviews.size} ${if (reviews.size == 1) "review" else "reviews"})",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                Log.d("BikesTab", "Reviews snapshot received with ${reviews.size} reviews")
+                
+                // Display all reviews in a LazyColumn
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp), // Fixed height to prevent layout issues
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(reviews) { review ->
+                        ReviewItem(
+                            review = review,
+                            isCurrentUserReview = currentUserId != null && review.userId == currentUserId,
+                            onDeleteClick = if (currentUserId != null && review.userId == currentUserId) {
+                                {
+                                    bikeViewModel.deleteReview(
+                                        bikeId = bike.id,
+                                        reviewId = review.id,
+                                        onSuccess = {
+                                            // Review deleted successfully
+                                            errorMessage = null
+                                        },
+                                        onError = { error ->
+                                            errorMessage = error
+                                            Log.e("BikesTab", "Error deleting review: $error")
+                                        }
+                                    )
+                                }
+                            } else null
+                        )
+                    }
+                }
+                
+                // Show error message if any
+                AnimatedVisibility(
+                    visible = errorMessage != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    errorMessage?.let { error ->
+                        Text(
+                            text = error,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+                }
+                
+                // Log reviews for debugging
+                Log.d("BikesTab", "Bottom sheet showing ${reviews.size} reviews for bike ${bike.id}")
+                reviews.take(3).forEachIndexed { index, review ->
+                    Log.d("BikesTab", "Review $index: ${review.id} by ${review.userName}, rating: ${review.rating}")
+                }
+            }
+            
+            // Write review button
+            Button(
+                onClick = { showReviewForm = !showReviewForm },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (showReviewForm) MaterialTheme.colorScheme.surfaceVariant else DarkGreen,
+                    contentColor = if (showReviewForm) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
+                ),
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, DarkGreen)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "View Details",
-                    color = DarkGreen
+                Text(if (showReviewForm) "Cancel" else "Write Review")
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Show review form if requested
+            AnimatedVisibility(
+                visible = showReviewForm,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+            ) {
+                ReviewForm(
+                    onSubmit = { rating, comment ->
+                        isSubmittingReview = true
+                        try {
+                            bikeViewModel.submitReview(
+                                bikeId = bike.id,
+                                rating = rating,
+                                comment = comment,
+                                onSuccess = {
+                                    isSubmittingReview = false
+                                    showReviewForm = false
+                                },
+                                onError = { errorMessage ->
+                                    isSubmittingReview = false
+                                    Log.e("BikesTab", "Review submission error: $errorMessage")
+                                    // In a real app, show an error message to the user
+                                }
+                            )
+                        } catch (e: Exception) {
+                            // Catch any unexpected exceptions
+                            Log.e("BikesTab", "Unexpected error submitting review", e)
+                            isSubmittingReview = false
+                        }
+                    },
+                    isSubmitting = isSubmittingReview
                 )
             }
             
-            Button(
-                onClick = { if (isAvailable) onBook(bike) else onCompleteProfile() },
-                modifier = Modifier.weight(1f),
-                enabled = isAvailable,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DarkGreen
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("Book Now")
-            }
+            // Extra spacing at bottom
+            Spacer(modifier = Modifier.height(24.dp))
         }
         
-        // Extra bottom padding for comfortable scrolling
-        Spacer(modifier = Modifier.height(32.dp))
+        // Action buttons - fixed at bottom
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Divider()
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Replace "View Details" with "Review" button
+                OutlinedButton(
+                    onClick = { showReviewForm = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, DarkGreen)
+                ) {
+                    Text(
+                        text = "Review",
+                        color = DarkGreen
+                    )
+                }
+                
+                Button(
+                    onClick = { if (isAvailable) onBook(bike) else onCompleteProfile() },
+                    modifier = Modifier.weight(1f),
+                    enabled = isAvailable,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DarkGreen
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Book Now")
+                }
+            }
+            
+            // View Details button separately (full width)
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            OutlinedButton(
+                onClick = onViewDetails,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("View Full Details")
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+        }
     }
 }
 
@@ -828,4 +1095,11 @@ private fun calculateDistance(
     val c = 2 * atan2(sqrt(a), sqrt(1 - a))
 
     return r * c
+}
+
+// Helper function to format timestamp
+private fun formatDate(timestamp: Long): String {
+    val date = Date(timestamp)
+    val formatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    return formatter.format(date)
 }

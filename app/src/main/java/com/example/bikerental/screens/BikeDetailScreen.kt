@@ -1,5 +1,6 @@
 package com.example.bikerental.screens
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +23,9 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.bikerental.components.RestrictedButton
 import com.example.bikerental.models.Bike
+import com.example.bikerental.models.Review
 import com.example.bikerental.utils.ColorUtils
+import com.example.bikerental.components.ReviewSection
 import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.android.gms.maps.model.LatLng
 
@@ -121,6 +124,21 @@ fun BikeDetails(
     onBookClick: (Bike) -> Unit,
     onCompleteProfile: () -> Unit
 ) {
+    // View model to get reviews
+    val bikeViewModel: BikeViewModel = viewModel()
+    val reviews by bikeViewModel.bikeReviews.collectAsState()
+    val averageRating by bikeViewModel.averageRating.collectAsState()
+    val isLoading by bikeViewModel.isLoading.collectAsState()
+    
+    // Review form state
+    var showReviewForm by remember { mutableStateOf(false) }
+    var isSubmittingReview by remember { mutableStateOf(false) }
+    
+    // Load reviews when the screen is shown
+    LaunchedEffect(bike.id) {
+        bikeViewModel.fetchReviewsForBike(bike.id)
+    }
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -236,6 +254,44 @@ fun BikeDetails(
         DetailItem(
             title = "Status", 
             value = if (bike.isAvailable) "Available" else "Currently Unavailable"
+        )
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        Divider()
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Reviews Section
+        ReviewSection(
+            bikeId = bike.id,
+            showForm = showReviewForm,
+            reviews = reviews,
+            averageRating = averageRating,
+            isLoading = isLoading && reviews.isEmpty(),
+            isSubmitting = isSubmittingReview,
+            onToggleForm = { showReviewForm = !showReviewForm },
+            onSubmitReview = { rating, comment ->
+                isSubmittingReview = true
+                try {
+                    bikeViewModel.submitReview(
+                        bikeId = bike.id,
+                        rating = rating,
+                        comment = comment,
+                        onSuccess = {
+                            isSubmittingReview = false
+                            showReviewForm = false
+                        },
+                        onError = { errorMessage ->
+                            isSubmittingReview = false
+                            // Show error message to user - we should add a proper error display here
+                            Log.e("BikeDetails", "Review submission error: $errorMessage")
+                        }
+                    )
+                } catch (e: Exception) {
+                    // Catch any unexpected exceptions
+                    Log.e("BikeDetails", "Unexpected error submitting review", e)
+                    isSubmittingReview = false
+                }
+            }
         )
         
         Spacer(modifier = Modifier.height(32.dp))

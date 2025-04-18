@@ -204,7 +204,7 @@ fun AppNavigationDrawer(
                 id = 4,
                 icon = Icons.Default.History,
                 title = "Ride History",
-                onClick = { /* Handle ride history */ }
+                onClick = { onItemSelected(4) }
             ),
             MenuItem(
                 id = 5,

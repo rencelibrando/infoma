@@ -1,0 +1,53 @@
+Index: app/src/main/java/com/example/bikerental/models/Review.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/bikerental/models/Review.kt b/app/src/main/java/com/example/bikerental/models/Review.kt
+new file mode 100644
+--- /dev/null	(date 1744955256052)
++++ b/app/src/main/java/com/example/bikerental/models/Review.kt	(date 1744955256052)
+@@ -0,0 +1,26 @@
++package com.example.bikerental.models
++
++import com.google.firebase.firestore.Exclude
++
++data class Review(
++    val id: String = "",
++    val bikeId: String = "",
++    val userId: String = "",
++    val userName: String = "",
++    val rating: Float = 0f,
++    val comment: String = "",
++    val timestamp: Long = 0
++) {
++    @Exclude
++    fun toMap(): Map<String, Any?> {
++        return mapOf(
++            "id" to id,
++            "bikeId" to bikeId,
++            "userId" to userId,
++            "userName" to userName,
++            "rating" to rating,
++            "comment" to comment,
++            "timestamp" to timestamp
++        )
++    }
++} 
+\ No newline at end of file
+Index: app/src/main/java/com/example/bikerental/screens/tabs/BikesTab.kt
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/app/src/main/java/com/example/bikerental/screens/tabs/BikesTab.kt b/app/src/main/java/com/example/bikerental/screens/tabs/BikesTab.kt
+--- a/app/src/main/java/com/example/bikerental/screens/tabs/BikesTab.kt	
++++ b/app/src/main/java/com/example/bikerental/screens/tabs/BikesTab.kt	(date 1744953903283)
+@@ -19,6 +19,7 @@
+ import androidx.compose.foundation.layout.Column
+ import androidx.compose.foundation.layout.Row
+ import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.aspectRatio
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height

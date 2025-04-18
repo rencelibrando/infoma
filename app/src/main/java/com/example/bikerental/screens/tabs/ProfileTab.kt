@@ -790,27 +790,6 @@ fun ProfileScreen(
                 )
             }
 
-            // Ride History Section
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "Ride History",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = ColorUtils.DarkGreen
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    RideHistoryContent(ColorUtils.blackcol())
-                }
-            }
-
             // Account Settings Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1013,87 +992,6 @@ fun ProfileScreen(
                 }
             }
         )
-    }
-}
-
-@Composable
-private fun RideHistoryContent(purple200: Color) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Sample ride history items - replace with actual data from your backend
-        RideHistoryItem(
-            bikeName = "Mountain Bike X1",
-            date = "2024-03-15",
-            duration = "45 minutes",
-            cost = "$12.50",
-            status = "Completed",
-            purple200 = purple200
-        )
-        Divider()
-        RideHistoryItem(
-            bikeName = "City Cruiser C2",
-            date = "2024-03-10",
-            duration = "30 minutes",
-            cost = "$8.00",
-            status = "Completed",
-            purple200 = purple200
-        )
-    }
-}
-
-@Composable
-private fun RideHistoryItem(
-    bikeName: String,
-    date: String,
-    duration: String,
-    cost: String,
-    status: String,
-    purple200: Color
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-    ) {
-        Text(
-            text = bikeName,
-            style = MaterialTheme.typography.titleMedium,
-            color = purple200
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = date,
-                style = MaterialTheme.typography.bodyMedium,
-                color = purple200
-            )
-            Text(
-                text = duration,
-                style = MaterialTheme.typography.bodyMedium,
-                color = purple200
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = cost,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-                color = purple200
-            )
-            Text(
-                text = status,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (status == "Completed") Color.Green else Color.Red
-            )
-        }
     }
 }
 
