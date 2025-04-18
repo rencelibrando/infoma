@@ -79,4 +79,8 @@ dependencies {
     implementation(libs.play.services.maps)
     implementation(libs.play.services.location)
     implementation (libs.accompanist.insets)
+    
+    // DataStore Preferences for map caching
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.datastore:datastore-preferences-core:1.0.0")
 }

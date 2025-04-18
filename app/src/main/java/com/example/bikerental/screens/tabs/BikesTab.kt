@@ -971,8 +971,12 @@ fun BikeDetailSheet(
                 onClick = onViewDetails,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
+
             ) {
-                Text("View Full Details")
+                Text(
+                    text = "View All Bikes",
+                    color = DarkGreen
+                )
             }
             
             Spacer(modifier = Modifier.height(8.dp))

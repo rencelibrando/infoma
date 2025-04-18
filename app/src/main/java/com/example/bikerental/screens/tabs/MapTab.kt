@@ -258,6 +258,43 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
                     }
                 }
             }
+            
+            // Map Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                // My Location Button
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .clickable {
+                            if (hasLocationPermission) {
+                                getCurrentLocation(fusedLocationProviderClient) { location ->
+                                    currentLocation = location
+                                    scope.launch {
+                                        cameraPositionState.animate(
+                                            update = CameraUpdateFactory.newLatLngZoom(location, 16f),
+                                            durationMs = 1000
+                                        )
+                                    }
+                                }
+                            } else {
+                                locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                            }
+                        }
+                        .padding(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MyLocation,
+                        contentDescription = "My Location",
+                        modifier = Modifier.align(Alignment.Center),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
     }
 }

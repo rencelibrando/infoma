@@ -28,6 +28,11 @@ import com.example.bikerental.viewmodels.BikeViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.util.Locale
 import kotlinx.coroutines.isActive
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
+import com.example.bikerental.utils.MapPreferencesManager
+import kotlinx.coroutines.withContext
 
 @Composable
 fun BikeMap(
@@ -38,8 +43,9 @@ fun BikeMap(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-
-    // Intramuros location (center point)
+    val mapPreferencesManager = remember { MapPreferencesManager.getInstance(context) }
+    
+    // Intramuros location (center point) - default fallback position
     val intramurosLocation = remember { LatLng(14.5895, 120.9750) }
 
     // Define map properties
@@ -67,11 +73,14 @@ fun BikeMap(
         )
     }
 
-    // Camera position state - start centered on Intramuros
+    // Track map loading state
+    var isMapLoaded by remember { mutableStateOf(false) }
+
+    // Camera position state - initially with default position
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(intramurosLocation, 15f)
     }
-
+    
     // Current user location handling
     var userLocation by remember { mutableStateOf<LatLng?>(null) }
 
@@ -132,6 +141,37 @@ fun BikeMap(
         }
     }
 
+    // Save camera position when it changes significantly
+    LaunchedEffect(cameraPositionState.position) {
+        // Only save when map is fully loaded and camera position changes are user-initiated
+        if (isMapLoaded && !cameraPositionState.isMoving) {
+            // Add a small delay to avoid excessive writes
+            delay(500)
+            // Save to preferences on IO thread
+            withContext(Dispatchers.IO) {
+                mapPreferencesManager.saveCameraPosition(cameraPositionState.position)
+                Log.d("BikeMap", "Saved camera position: ${cameraPositionState.position}")
+            }
+        }
+    }
+
+    // Load saved camera position
+    LaunchedEffect(Unit) {
+        // Collect from the flow once
+        mapPreferencesManager.getCameraPositionFlow().collect { savedPosition ->
+            if (savedPosition != null) {
+                Log.d("BikeMap", "Restored camera position: $savedPosition")
+                // Use saved position
+                cameraPositionState.position = savedPosition
+            } else {
+                // No saved position, fall back to default behavior
+                moveToUserLocation()
+            }
+            // Only collect once
+            return@collect
+        }
+    }
+
     // Update route points when bike location changes
     LaunchedEffect(bikeLocation) {
         bikeLocation?.let { location ->
@@ -181,14 +221,9 @@ fun BikeMap(
         }
     }
 
-    // Initial location check - this gets called once on composition
-    LaunchedEffect(true) {
-        moveToUserLocation()
-    }
-
-    // Watch for "Locate Me" button press
+    // Watch for "Locate Me" button press but don't override saved position on first load
     LaunchedEffect(requestLocationUpdate) {
-        if (requestLocationUpdate) {
+        if (requestLocationUpdate && isMapLoaded) {
             if (ActivityCompat.checkSelfPermission(
                     context,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -199,107 +234,124 @@ fun BikeMap(
         }
     }
 
-    // Map composable
-    GoogleMap(
-        modifier = Modifier.fillMaxSize(),
-        properties = mapProperties,
-        uiSettings = uiSettings,
-        cameraPositionState = cameraPositionState,
-        onMapLoaded = {
-            Log.d("BikeMap", "Map loaded successfully")
-        }
-    ) {
-        // User's current location marker
-        userLocation?.let { location ->
-            Marker(
-                state = MarkerState(position = location),
-                title = "Your Location",
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
-                zIndex = 2f
-            )
-
-            // Draw a circle around user's location (range indicator)
-            Circle(
-                center = location,
-                radius = 300.0, // 300 meters radius
-                fillColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
-                strokeColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f),
-                strokeWidth = 2f
-            )
-        }
-
-        // Available bikes markers - only show available bikes that aren't in use
-        bikesWithDistance
-            .filter { bike -> 
-                availableBikes.find { it.id == bike.id }?.isAvailable == true &&
-                availableBikes.find { it.id == bike.id }?.isInUse == false
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Map composable
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            properties = mapProperties,
+            uiSettings = uiSettings,
+            cameraPositionState = cameraPositionState,
+            onMapLoaded = {
+                isMapLoaded = true
+                Log.d("BikeMap", "Map loaded successfully")
             }
-            .forEach { bike ->
-                MarkerInfoWindow(
-                    state = MarkerState(position = bike.position),
-                    title = bike.name,
-                    snippet = "${bike.type} • ${bike.price}",
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        if (selectedBike?.id == bike.id) 
-                            BitmapDescriptorFactory.HUE_GREEN 
-                        else 
-                            BitmapDescriptorFactory.HUE_RED
-                    ),
-                    onClick = {
-                        if (activeRide == null) {
-                            bikeViewModel.selectBike(bike.id)
-                            onBikeSelected(bike)
-                        }
-                        true
-                    },
-                    onInfoWindowClick = {
-                        if (activeRide == null) {
-                            onBikeSelected(bike)
-                        }
-                    },
+        ) {
+            // User's current location marker
+            userLocation?.let { location ->
+                Marker(
+                    state = MarkerState(position = location),
+                    title = "Your Location",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE),
+                    zIndex = 2f
+                )
+
+                // Draw a circle around user's location (range indicator)
+                Circle(
+                    center = location,
+                    radius = 300.0, // 300 meters radius
+                    fillColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
+                    strokeColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f),
+                    strokeWidth = 2f
+                )
+            }
+
+            // Available bikes markers - only show available bikes that aren't in use
+            bikesWithDistance
+                .filter { bike -> 
+                    availableBikes.find { it.id == bike.id }?.isAvailable == true &&
+                    availableBikes.find { it.id == bike.id }?.isInUse == false
+                }
+                .forEach { bike ->
+                    MarkerInfoWindow(
+                        state = MarkerState(position = bike.position),
+                        title = bike.name,
+                        snippet = "${bike.type} • ${bike.price}",
+                        icon = BitmapDescriptorFactory.defaultMarker(
+                            if (selectedBike?.id == bike.id) 
+                                BitmapDescriptorFactory.HUE_GREEN 
+                            else 
+                                BitmapDescriptorFactory.HUE_RED
+                        ),
+                        onClick = {
+                            if (activeRide == null) {
+                                bikeViewModel.selectBike(bike.id)
+                                onBikeSelected(bike)
+                            }
+                            true
+                        },
+                        onInfoWindowClick = {
+                            if (activeRide == null) {
+                                onBikeSelected(bike)
+                            }
+                        },
+                        zIndex = 1f
+                    )
+                }
+            
+            // Draw the tracked bike if in use
+            bikeLocation?.let { location ->
+                if (activeRide != null) {
+                    Marker(
+                        state = MarkerState(position = location),
+                        title = selectedBike?.name ?: "Your Bike",
+                        snippet = "In use",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE),
+                        zIndex = 3f
+                    )
+                }
+            }
+
+            // Bike station markers
+            intramurosStations.forEach { station ->
+                Marker(
+                    state = MarkerState(position = station.position),
+                    title = station.name,
+                    snippet = "${station.availableBikes} bikes available",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
                     zIndex = 1f
                 )
             }
             
-        // Draw the tracked bike if in use
-        bikeLocation?.let { location ->
-            if (activeRide != null) {
-                Marker(
-                    state = MarkerState(position = location),
-                    title = selectedBike?.name ?: "Your Bike",
-                    snippet = "In use",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE),
-                    zIndex = 3f
+            // Draw ride path if active
+            if (routePoints.isNotEmpty()) {
+                Polyline(
+                    points = routePoints,
+                    color = MaterialTheme.colorScheme.primary,
+                    width = 5f
                 )
             }
-        }
 
-        // Bike station markers
-        intramurosStations.forEach { station ->
-            Marker(
-                state = MarkerState(position = station.position),
-                title = station.name,
-                snippet = "${station.availableBikes} bikes available",
-                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
-                zIndex = 1f
+            // Add a polygon outline of Intramuros boundaries for reference
+            Polygon(
+                points = intramurosOutlinePoints,
+                fillColor = Color.Transparent,
+                strokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                strokeWidth = 3f
             )
         }
         
-        // Draw ride path if active
-        if (routePoints.isNotEmpty()) {
-            Polyline(
-                points = routePoints,
-                color = MaterialTheme.colorScheme.primary,
-                width = 5f
-            )
+        // Loading indicator overlay
+        if (!isMapLoaded) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background.copy(alpha = 0.7f)
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+            }
         }
-
-        // Add a polygon outline of Intramuros boundaries for reference
-        Polygon(
-            points = intramurosOutlinePoints,
-            fillColor = Color.Transparent,
-            strokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-            strokeWidth = 3f
-        )
     }
 }

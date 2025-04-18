@@ -33,7 +33,8 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
     // Use SupervisorJob for better error handling in the main scope
     private val viewModelJob = SupervisorJob()
 
-    private val _authState = MutableStateFlow<AuthState>(AuthState.Initial)
+    // Initialize as Loading to prevent premature navigation
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Loading)
     val authState: StateFlow<AuthState> = _authState
 
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -50,60 +51,67 @@ class AuthViewModel(application: Application? = null) : ViewModel() {
     val bypassVerification: StateFlow<Boolean> = _bypassVerification
 
     init {
-        // Immediately check auth state to prevent loading indefinitely
-        if (auth.currentUser == null) {
-            _authState.value = AuthState.Initial
-            Log.d("AuthViewModel", "Initialized with no logged in user")
-        } else {
-            // Check if there's a logged in user already
-            auth.currentUser?.let { firebaseUser ->
-                viewModelScope.launch(viewModelJob) { // Use viewModelJob here
-                    try {
-                        val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
+        // Check auth state asynchronously
+        viewModelScope.launch(viewModelJob) {
+            try {
+                if (auth.currentUser == null) {
+                    // After checking, update state to Initial if not authenticated
+                    _authState.value = AuthState.Initial
+                    Log.d("AuthViewModel", "Initialized with no logged in user")
+                } else {
+                    // Check if there's a logged in user already
+                    auth.currentUser?.let { firebaseUser ->
+                        try {
+                            Log.d("AuthViewModel", "Checking user document for: ${firebaseUser.uid}")
+                            val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
 
-                        if (userDoc.exists()) {
-                            val user = userDoc.toObject(User::class.java)
-                            if (user != null) { // Check parsing success
-                                _currentUser.value = user
-                                _authState.value = AuthState.Authenticated(user)
-                                Log.d("AuthViewModel", "Initialized with existing logged in user: ${user.id}")
+                            if (userDoc.exists()) {
+                                val user = userDoc.toObject(User::class.java)
+                                if (user != null) { // Check parsing success
+                                    _currentUser.value = user
+                                    _authState.value = AuthState.Authenticated(user)
+                                    Log.d("AuthViewModel", "Initialized with existing logged in user: ${user.id}")
 
-                                // Perform initial verification check
-                                checkEmailVerification()
+                                    // Perform initial verification check
+                                    checkEmailVerification()
 
+                                } else {
+                                    Log.e("AuthViewModel", "Failed to parse existing user document: ${firebaseUser.uid}")
+                                    // Handle error, maybe sign out or set error state
+                                    _authState.value = AuthState.Error("Failed to load user profile.")
+                                }
                             } else {
-                                Log.e("AuthViewModel", "Failed to parse existing user document: ${firebaseUser.uid}")
-                                // Handle error, maybe sign out or set error state
-                                _authState.value = AuthState.Error("Failed to load user profile.")
+                                Log.w("AuthViewModel", "User auth exists but no user doc in Firestore. Creating...")
+                                // Create a new user document with data from Firebase Auth
+                                val newUser = User(
+                                    id = firebaseUser.uid,
+                                    email = firebaseUser.email ?: "",
+                                    fullName = firebaseUser.displayName ?: "",
+                                    isEmailVerified = firebaseUser.isEmailVerified, // Use Firebase Auth status initially
+                                    createdAt = System.currentTimeMillis()
+                                )
+
+                                // Save to Firestore
+                                db.collection("users").document(firebaseUser.uid)
+                                    .set(newUser)
+                                    .await()
+
+                                _currentUser.value = newUser
+                                _authState.value = AuthState.Authenticated(newUser)
+                                _emailVerified.value = firebaseUser.isEmailVerified
+                                Log.d("AuthViewModel", "Created new user document: ${newUser.id}")
                             }
-                        } else {
-                            Log.w("AuthViewModel", "User auth exists but no user doc in Firestore. Creating...")
-                            // Create a new user document with data from Firebase Auth
-                            val newUser = User(
-                                id = firebaseUser.uid,
-                                email = firebaseUser.email ?: "",
-                                fullName = firebaseUser.displayName ?: "",
-                                isEmailVerified = firebaseUser.isEmailVerified, // Use Firebase Auth status initially
-                                createdAt = System.currentTimeMillis()
-                            )
-
-                            // Save to Firestore
-                            db.collection("users").document(firebaseUser.uid)
-                                .set(newUser)
-                                .await()
-
-                            _currentUser.value = newUser
-                            _authState.value = AuthState.Authenticated(newUser)
-                            _emailVerified.value = firebaseUser.isEmailVerified
-                            Log.d("AuthViewModel", "Created new user document: ${newUser.id}")
+                        } catch (e: Exception) {
+                            Log.e("AuthViewModel", "Error during initialization", e)
+                            _authState.value = AuthState.Error("Failed to initialize: ${e.message}")
+                            // Ensure we don't stay in Loading state on error
+                            signOut()
                         }
-                    } catch (e: Exception) {
-                        Log.e("AuthViewModel", "Error during initialization", e)
-                        _authState.value = AuthState.Error("Failed to initialize: ${e.message}")
-                        // Ensure we don't stay in Loading state on error
-                        signOut()
                     }
                 }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Unhandled error during initialization", e)
+                _authState.value = AuthState.Error("Failed to initialize app: ${e.message}")
             }
         }
     }

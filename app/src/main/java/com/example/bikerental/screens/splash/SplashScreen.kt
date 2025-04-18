@@ -86,11 +86,11 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
         )
     )
     
-    // Startup and completion
+    // Start animations, but don't automatically complete splash
     LaunchedEffect(key1 = true) {
         startAnimation = true
-        delay(2500) // Slightly longer to allow animations to complete
-        onSplashComplete()
+        // No longer call onSplashComplete after a delay
+        // The MainActivity will control when to finish splash screen
     }
 
     Box(

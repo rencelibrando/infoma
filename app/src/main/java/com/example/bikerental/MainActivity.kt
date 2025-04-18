@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
     private var isLoginScreenActive by mutableStateOf(false)
     private var showSplash by mutableStateOf(true)
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
+    private lateinit var authViewModel: AuthViewModel
     
     companion object {
         private const val TAG = "MainActivity"
@@ -103,6 +104,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Initialize AuthViewModel
+        authViewModel = ViewModelProvider(this)[AuthViewModel::class.java]
         
         // Initialize services on a background thread
         lifecycleScope.launch(Dispatchers.IO) {
@@ -132,7 +136,6 @@ class MainActivity : ComponentActivity() {
             val user = auth.currentUser
             isLoggedIn = user != null
             Log.d("MainActivity", "Auth state changed: ${if (isLoggedIn) "logged in" else "logged out"}")
-            isLoading = false
         }
         
         // Register auth state listener
@@ -140,19 +143,25 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BikerentalTheme {
-                // Fixed splash screen logic - use a timer instead of depending on login state
+                // Get the auth state in a composable way
+                val authState by authViewModel.authState.collectAsStateWithLifecycle()
                 var splashScreenComplete by remember { mutableStateOf(false) }
                 
-                // Show splash screen for a fixed time
-                LaunchedEffect(Unit) {
-                    kotlinx.coroutines.delay(1500) // 1.5 seconds splash screen
-                    splashScreenComplete = true
-                    isLoading = false
+                // Show splash screen until auth state is determined (not loading or initial)
+                LaunchedEffect(authState) {
+                    if (authState !is AuthState.Initial && authState !is AuthState.Loading) {
+                        // Only hide splash screen once auth state is determined
+                        kotlinx.coroutines.delay(1000) // Minimum 1 second splash for a good UX
+                        splashScreenComplete = true
+                        isLoading = false
+                    }
                 }
 
                 if (!splashScreenComplete) {
                     // Show splash screen
-                    SplashScreen(onSplashComplete = { splashScreenComplete = true })
+                    SplashScreen(onSplashComplete = {
+                        // Don't complete splash here - we'll wait for auth state to be determined
+                    })
                 } else {
                     // Normal app content after splash screen
                     Surface(
