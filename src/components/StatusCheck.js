@@ -71,7 +71,7 @@ const ErrorDetails = styled.pre`
   border-radius: 4px;
 `;
 
-const StatusCheck = () => {
+const StatusCheck = ({ children }) => {
   const [status, setStatus] = useState({
     firebase: { status: 'checking', message: 'Checking connection...' },
     bikes: { status: 'checking', message: 'Checking bikes collection...' },
@@ -83,6 +83,7 @@ const StatusCheck = () => {
   
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState([]);
+  const [checksComplete, setChecksComplete] = useState(false);
   
   const runChecks = async () => {
     setLoading(true);
@@ -226,11 +227,16 @@ const StatusCheck = () => {
     }
     
     setLoading(false);
+    setChecksComplete(true);
   };
   
   useEffect(() => {
     runChecks();
   }, []);
+  
+  if (checksComplete && !errors.some(e => e.component === 'Firebase')) {
+    return children;
+  }
   
   return (
     <Container>
@@ -249,19 +255,22 @@ const StatusCheck = () => {
         <Button onClick={runChecks} disabled={loading}>
           {loading ? 'Running Checks...' : 'Run Checks Again'}
         </Button>
-        
-        {errors.length > 0 && (
-          <div>
-            <h4>Error Details:</h4>
-            {errors.map((err, index) => (
-              <ErrorDetails key={index}>
-                {err.component}: {err.error.toString()}
-                {err.error.stack && `\n${err.error.stack}`}
-              </ErrorDetails>
-            ))}
-          </div>
-        )}
       </StatusCard>
+      
+      {errors.length > 0 && (
+        <StatusCard>
+          <h3>Errors</h3>
+          {errors.map((error, index) => (
+            <div key={index}>
+              <p><strong>{error.component} Error:</strong></p>
+              <ErrorDetails>
+                {error.error.toString()}
+                {error.error.stack && `\n${error.error.stack}`}
+              </ErrorDetails>
+            </div>
+          ))}
+        </StatusCard>
+      )}
     </Container>
   );
 };

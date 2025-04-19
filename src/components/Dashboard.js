@@ -10,6 +10,8 @@ import Analytics from './Analytics';
 import BikesMap from './BikesMap';
 import BikeReviews from './BikeReviews';
 import { initializeBikesData } from '../services/bikeService';
+import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
+import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
 
 // Pine green and gray theme colors
@@ -156,6 +158,7 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedBike, setSelectedBike] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -174,10 +177,30 @@ const Dashboard = () => {
         // User is authenticated - block back navigation to login
         blockBackNavigation();
         
-        // Initialize bike data when dashboard loads
-        initializeBikesData().catch(error => {
-          console.error("Error initializing bikes data:", error);
-        });
+        // Initialize data when dashboard loads
+        const initializeData = async () => {
+          try {
+            console.log('Initializing dashboard data...');
+            
+            // Start preloading dashboard data in parallel with options data
+            const preloadPromises = [
+              preloadOptionsData(),
+              preloadDashboardData()
+            ];
+            
+            // Wait for all preloads to complete
+            await Promise.all(preloadPromises);
+            
+            setIsInitialized(true);
+            console.log('Dashboard data initialized successfully');
+          } catch (error) {
+            console.error("Error initializing dashboard data:", error);
+            // Still mark as initialized to prevent blocking UI
+            setIsInitialized(true);
+          }
+        };
+        
+        initializeData();
       }
     });
     
@@ -237,91 +260,114 @@ const Dashboard = () => {
     }
   };
 
-  return (
-    <DashboardContainer>
-      {/* Mobile menu toggle - completely separate from the sidebar */}
-      <MenuToggle onClick={toggleSidebar} sidebarOpen={sidebarOpen}>
-        {sidebarOpen ? '✕' : '☰'}
-      </MenuToggle>
-      
-      {/* Sidebar with clean logo, no X button */}
-      <Sidebar isOpen={sidebarOpen}>
-        <SidebarHeader>
-          <Logo>Bambike Admin</Logo>
-        </SidebarHeader>
+  // Loading state for dashboard
+  if (!isInitialized) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        fontSize: '18px',
+        color: '#666' 
+      }}>
         <div>
-          <MenuOption 
-            active={activeTab === 'overview'}
-            onClick={() => handleMenuClick('overview')}
-          >
-            Overview
-          </MenuOption>
-          <MenuOption 
-            active={activeTab === 'bikes'}
-            onClick={() => handleMenuClick('bikes')}
-          >
-            Manage Bikes
-          </MenuOption>
-          <MenuOption 
-            active={activeTab === 'map'}
-            onClick={() => handleMenuClick('map')}
-          >
-            Bikes Map
-          </MenuOption>
-          <MenuOption 
-            active={activeTab === 'add'}
-            onClick={() => handleMenuClick('add')}
-          >
-            Add New Bike
-          </MenuOption>
-          <MenuOption 
-            active={activeTab === 'users'}
-            onClick={() => handleMenuClick('users')}
-          >
-            Manage Users
-          </MenuOption>
-          <MenuOption 
-            active={activeTab === 'reviews'}
-            onClick={() => handleMenuClick('reviews')}
-          >
-            Bike Reviews
-          </MenuOption>
-          <LogoutOption onClick={handleLogout}>
-            Logout
-          </LogoutOption>
+          <div>Initializing dashboard...</div>
+          <div style={{ textAlign: 'center', marginTop: '10px', fontSize: '14px' }}>
+            Loading shared data for faster performance
+          </div>
         </div>
-      </Sidebar>
-      
-      <Content sidebarOpen={sidebarOpen}>
-        <ContentSection>
-          {activeTab === 'overview' && (
-            <Analytics />
-          )}
-          {activeTab === 'bikes' && (
-            <BikesList onEditBike={handleEditBike} />
-          )}
-          {activeTab === 'map' && (
-            <BikesMap />
-          )}
-          {activeTab === 'add' && (
-            <AddBike onSuccess={() => setActiveTab('bikes')} />
-          )}
-          {activeTab === 'edit' && selectedBike && (
-            <EditBike 
-              bike={selectedBike} 
-              onSuccess={handleEditSuccess} 
-              onCancel={handleCancelEdit} 
-            />
-          )}
-          {activeTab === 'users' && (
-            <UsersList />
-          )}
-          {activeTab === 'reviews' && (
-            <BikeReviews />
-          )}
-        </ContentSection>
-      </Content>
-    </DashboardContainer>
+      </div>
+    );
+  }
+
+  return (
+    <DataProvider>
+      <DashboardContainer>
+        {/* Mobile menu toggle - completely separate from the sidebar */}
+        <MenuToggle onClick={toggleSidebar} sidebarOpen={sidebarOpen}>
+          {sidebarOpen ? '✕' : '☰'}
+        </MenuToggle>
+        
+        {/* Sidebar with clean logo, no X button */}
+        <Sidebar isOpen={sidebarOpen}>
+          <SidebarHeader>
+            <Logo>Bambike Admin</Logo>
+          </SidebarHeader>
+          <div>
+            <MenuOption 
+              active={activeTab === 'overview'}
+              onClick={() => handleMenuClick('overview')}
+            >
+              Overview
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'bikes'}
+              onClick={() => handleMenuClick('bikes')}
+            >
+              Manage Bikes
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'map'}
+              onClick={() => handleMenuClick('map')}
+            >
+              Bikes Map
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'add'}
+              onClick={() => handleMenuClick('add')}
+            >
+              Add New Bike
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'users'}
+              onClick={() => handleMenuClick('users')}
+            >
+              Manage Users
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'reviews'}
+              onClick={() => handleMenuClick('reviews')}
+            >
+              Bike Reviews
+            </MenuOption>
+            <LogoutOption onClick={handleLogout}>
+              Logout
+            </LogoutOption>
+          </div>
+        </Sidebar>
+        
+        <Content sidebarOpen={sidebarOpen}>
+          <ContentSection>
+            {activeTab === 'overview' && (
+              <Analytics />
+            )}
+            {activeTab === 'bikes' && (
+              <BikesList onEditBike={handleEditBike} />
+            )}
+            {activeTab === 'map' && (
+              <BikesMap />
+            )}
+            {activeTab === 'add' && (
+              <AddBike onSuccess={() => setActiveTab('bikes')} />
+            )}
+            {activeTab === 'edit' && selectedBike && (
+              <EditBike 
+                bike={selectedBike} 
+                onSuccess={handleEditSuccess} 
+                onCancel={handleCancelEdit} 
+              />
+            )}
+            {activeTab === 'users' && (
+              <UsersList />
+            )}
+            {activeTab === 'reviews' && (
+              <BikeReviews />
+            )}
+          </ContentSection>
+        </Content>
+      </DashboardContainer>
+    </DataProvider>
   );
 };
 

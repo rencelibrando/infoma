@@ -1,10 +1,12 @@
 // src/components/BikesList.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { getBikes, deleteBike, updateBikesWithHardwareIds, toggleBikeLock, subscribeToBikes } from '../services/bikeService';
 import BikeQRCode from './BikeQRCode';
+import BikeDetailsDialog from './BikeDetailsDialog';
 import styled from 'styled-components';
 import { QRCodeSVG } from 'qrcode.react';
 import { useNavigate } from 'react-router-dom';
+import { useDataContext } from '../context/DataContext';
 
 // Pine green and gray theme colors
 const colors = {
@@ -56,6 +58,7 @@ const TableRow = styled.tr`
   }
   &:hover {
     background-color: rgba(29, 60, 52, 0.05);
+    cursor: pointer;
   }
 `;
 
@@ -311,63 +314,46 @@ const LastUpdateTime = styled.div`
 `;
 
 const BikesList = ({ onEditBike }) => {
-  const [bikes, setBikes] = useState([]);
+  // Get data from context instead of component state
+  const { 
+    bikes, 
+    loading: contextLoading, 
+    lastUpdateTime, 
+    showUpdateIndicator,
+    bikeTypes 
+  } = useDataContext();
+  
+  // Keep local component state for UI elements
   const [filteredBikes, setFilteredBikes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [availabilityFilter, setAvailabilityFilter] = useState('all');
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [bikeToDelete, setBikeToDelete] = useState(null);
   const [selectedBike, setSelectedBike] = useState(null);
+  const [showBikeDetails, setShowBikeDetails] = useState(false);
+  const [availableTypes, setAvailableTypes] = useState([]);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showBikeDetailsDialog, setShowBikeDetailsDialog] = useState(false);
   const [generatingIds, setGeneratingIds] = useState(false);
   const [processingBikeAction, setProcessingBikeAction] = useState(null);
-  const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
-  const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
   const navigate = useNavigate();
 
-  // Set up real-time listener for bikes
+  // Update available types from context
   useEffect(() => {
-    setLoading(true);
-    
-    // Initial data fetch
-    const initialFetch = async () => {
-      try {
-        const bikeData = await getBikes();
-        setBikes(bikeData);
-        setFilteredBikes(bikeData);
-        setLastUpdateTime(new Date());
-      } catch (err) {
-        setError('Failed to fetch bikes: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    initialFetch();
-    
-    // Set up real-time listener
-    const unsubscribe = subscribeToBikes((updatedBikes) => {
-      setBikes(updatedBikes);
-      setLastUpdateTime(new Date());
-      setShowUpdateIndicator(true);
-      
-      // Hide update indicator after 3 seconds
-      setTimeout(() => {
-        setShowUpdateIndicator(false);
-      }, 3000);
-    });
-    
-    // Cleanup listener on component unmount
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    if (bikeTypes && bikeTypes.length > 0) {
+      setAvailableTypes(bikeTypes);
+    }
+  }, [bikeTypes]);
 
   // Apply filters whenever bikes, searchTerm, or filters change
   useEffect(() => {
+    setLoading(true);
+    
     // Apply filters
-    const filtered = bikes.filter(bike => {
+    const filtered = (bikes || []).filter(bike => {
       const matchesSearch = 
         searchTerm === '' || 
         bike.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -387,16 +373,15 @@ const BikesList = ({ onEditBike }) => {
     });
     
     setFilteredBikes(filtered);
+    setLoading(false);
   }, [searchTerm, typeFilter, availabilityFilter, bikes]);
 
   const handleDelete = async (bikeId) => {
-    if (window.confirm('Are you sure you want to delete this bike?')) {
-      try {
-        await deleteBike(bikeId);
-        // The real-time listener will update the list automatically
-      } catch (err) {
-        alert('Error deleting bike: ' + err.message);
-      }
+    try {
+      await deleteBike(bikeId);
+      // The real-time listener will update the list automatically
+    } catch (err) {
+      alert('Error deleting bike: ' + err.message);
     }
   };
   
@@ -404,9 +389,11 @@ const BikesList = ({ onEditBike }) => {
     if (onEditBike) {
       onEditBike(bike);
     }
+    setShowBikeDetailsDialog(false);
   };
 
-  const handleShowQR = (bike) => {
+  const handleShowQR = (bike, e) => {
+    if (e) e.stopPropagation(); // Prevent row click event
     setSelectedBike(bike);
     setShowQRModal(true);
   };
@@ -416,11 +403,21 @@ const BikesList = ({ onEditBike }) => {
     setSelectedBike(null);
   };
 
+  const handleRowClick = (bike) => {
+    setSelectedBike(bike);
+    setShowBikeDetailsDialog(true);
+  };
+
+  const handleCloseDetailsDialog = () => {
+    setShowBikeDetailsDialog(false);
+    setSelectedBike(null);
+  };
+
   const handleGenerateHardwareIds = async () => {
     try {
       setGeneratingIds(true);
       const updatedBikes = await updateBikesWithHardwareIds();
-      setBikes(updatedBikes);
+      // No need to call setBikes since data context will update automatically
       alert("Hardware IDs have been generated for all bikes!");
     } catch (error) {
       alert("Error generating hardware IDs: " + error.message);
@@ -458,21 +455,12 @@ const BikesList = ({ onEditBike }) => {
       
       await toggleBikeLock(bike.id, newLockState);
       
-      // Immediately refresh the bike data
-      const updatedBikes = await getBikes();
-      setBikes(updatedBikes);
-      
-      // Show confirmation message
+      // No need to fetch bikes manually - context will update
+      // Only show confirmation message
       alert(`Bike ${bike.name} has been ${newLockState ? 'locked' : 'unlocked'}.${!newLockState && !bike.isInUse ? ' The bike is now unavailable.' : ''}`);
       
-      // Get the updated bike
-      const updatedBike = updatedBikes.find(b => b.id === bike.id);
-      
-      console.log(`After toggle - Bike ${bike.id}:`, {
-        isLocked: updatedBike.isLocked,
-        isAvailable: updatedBike.isAvailable,
-        isInUse: updatedBike.isInUse
-      });
+      // Log the change for debugging
+      console.log(`After toggle - Requested lock state: ${newLockState}`);
       
     } catch (error) {
       console.error('Error toggling bike lock:', error);
@@ -486,11 +474,10 @@ const BikesList = ({ onEditBike }) => {
     navigate(`/ride/${bike.id}`);
   };
 
-  // Identify unique bike types for filter dropdown
-  const bikeTypes = [...new Set(bikes.map(bike => bike.type))];
-
-  if (loading) return <LoadingMessage>Loading bikes...</LoadingMessage>;
-  if (error) return <ErrorMessage>{error}</ErrorMessage>;
+  // Show loading state from context
+  if (contextLoading && !bikes) {
+    return <LoadingMessage>Loading bikes...</LoadingMessage>;
+  }
 
   return (
     <Container>
@@ -498,7 +485,7 @@ const BikesList = ({ onEditBike }) => {
       
       {showUpdateIndicator && (
         <RefreshIndicator>
-          <span>🔄</span> Bike data updated
+          <span>🔄</span> Data updated
         </RefreshIndicator>
       )}
       
@@ -520,7 +507,7 @@ const BikesList = ({ onEditBike }) => {
             onChange={e => setTypeFilter(e.target.value)}
           >
             <option value="all">All Types</option>
-            {bikeTypes.map(type => (
+            {availableTypes.map(type => (
               <option key={type} value={type.toLowerCase()}>
                 {type}
               </option>
@@ -553,15 +540,12 @@ const BikesList = ({ onEditBike }) => {
                 <TableHeader>Name</TableHeader>
                 <TableHeader>Type</TableHeader>
                 <TableHeader>Price</TableHeader>
-                <TableHeader>Hardware ID</TableHeader>
                 <TableHeader>Status</TableHeader>
-                <TableHeader>QR Code</TableHeader>
-                <TableHeader>Actions</TableHeader>
               </tr>
             </thead>
             <tbody>
               {filteredBikes.map((bike) => (
-                <TableRow key={bike.id}>
+                <TableRow key={bike.id} onClick={() => handleRowClick(bike)}>
                   <TableCell>
                     <img 
                       src={bike.imageUrl} 
@@ -572,25 +556,6 @@ const BikesList = ({ onEditBike }) => {
                   <TableCell>{bike.name}</TableCell>
                   <TableCell>{bike.type}</TableCell>
                   <TableCell>${parseFloat(bike.priceValue || 0).toFixed(2)}</TableCell>
-                  <TableCell>
-                    <HardwareIdCell>
-                      {bike.hardwareId ? (
-                        <>
-                          <span>{bike.hardwareId}</span>
-                          <SmallQRCode onClick={() => handleShowQR(bike)}>
-                            <QRCodeSVG 
-                              value={JSON.stringify({bikeId: bike.id, hardwareId: bike.hardwareId})}
-                              size={32}
-                              bgColor={colors.white}
-                              fgColor={colors.pineGreen}
-                            />
-                          </SmallQRCode>
-                        </>
-                      ) : (
-                        "Not assigned"
-                      )}
-                    </HardwareIdCell>
-                  </TableCell>
                   <TableCell>
                     <StatusContainer>
                       <StatusBadge 
@@ -611,40 +576,6 @@ const BikesList = ({ onEditBike }) => {
                       )}
                     </StatusContainer>
                   </TableCell>
-                  <TableCell>
-                    <QRCodeIcon onClick={() => handleShowQR(bike)}>
-                      <span role="img" aria-label="QR Code">📱</span>
-                    </QRCodeIcon>
-                  </TableCell>
-                  <TableCell>
-                    <ButtonGroup>
-                      {!bike.isInUse && (
-                        <Button 
-                          locked={bike.isLocked}
-                          onClick={() => handleToggleLock(bike)}
-                          disabled={processingBikeAction === bike.id}
-                        >
-                          {processingBikeAction === bike.id
-                            ? 'Processing...'
-                            : bike.isLocked
-                              ? 'Unlock'
-                              : 'Lock'}
-                        </Button>
-                      )}
-                      
-                      {bike.isAvailable && bike.isLocked && (
-                        <Button 
-                          success 
-                          onClick={() => handleStartRide(bike)}
-                        >
-                          Start Ride
-                        </Button>
-                      )}
-                      
-                      <Button edit onClick={() => handleEdit(bike)}>Edit</Button>
-                      <Button danger onClick={() => handleDelete(bike.id)}>Delete</Button>
-                    </ButtonGroup>
-                  </TableCell>
                 </TableRow>
               ))}
             </tbody>
@@ -659,6 +590,18 @@ const BikesList = ({ onEditBike }) => {
             <BikeQRCode bike={selectedBike} />
           </ModalContent>
         </Modal>
+      )}
+
+      {showBikeDetailsDialog && selectedBike && (
+        <BikeDetailsDialog
+          bike={selectedBike}
+          onClose={handleCloseDetailsDialog}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onToggleLock={handleToggleLock}
+          onStartRide={handleStartRide}
+          processingBikeAction={processingBikeAction}
+        />
       )}
     </Container>
   );

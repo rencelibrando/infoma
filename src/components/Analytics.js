@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { db } from '../firebase';
-import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import AnalyticsChart from './AnalyticsChart';
+import { getAnalyticsData, subscribeToAnalytics } from '../services/dashboardService';
 
 // Pine green and gray theme colors
 const colors = {
@@ -122,63 +121,123 @@ const LoadingMessage = styled.div`
   color: ${colors.mediumGray};
 `;
 
+const RefreshIndicator = styled.div`
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background-color: ${colors.pineGreen};
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 1000;
+  animation: fadeOut 2s forwards;
+  animation-delay: 1s;
+  
+  @keyframes fadeOut {
+    to {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+`;
+
+const LastUpdateTime = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  text-align: right;
+  margin-bottom: 5px;
+`;
+
 const Analytics = () => {
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    totalBikes: 0,
-    availableBikes: 0,
-    rentalCount: 0
+  const [analyticsData, setAnalyticsData] = useState({
+    bikes: [],
+    users: [],
+    rides: [],
+    reviews: [],
+    stats: {
+      totalBikes: 0,
+      activeBikes: 0,
+      inUseBikes: 0,
+      maintenanceBikes: 0,
+      totalUsers: 0,
+      verifiedUsers: 0,
+      activeRides: 0,
+      totalRides: 0,
+      totalReviews: 0,
+      averageRating: 0
+    }
   });
   const [recentRentals, setRecentRentals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
+  const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
+    setLoading(true);
+    
+    // Initial data fetch
+    const initialFetch = async () => {
       try {
-        setLoading(true);
+        const data = await getAnalyticsData();
+        setAnalyticsData(data);
         
-        // Fetch Users Count
-        const usersSnapshot = await getDocs(collection(db, 'users'));
-        const usersCount = usersSnapshot.size;
+        // Set recent rentals
+        const recentRides = data.rides
+          .sort((a, b) => (b.startTime?.seconds || 0) - (a.startTime?.seconds || 0))
+          .slice(0, 5)
+          .map(ride => ({
+            id: ride.id,
+            bikeId: ride.bikeId,
+            userId: ride.userId,
+            status: ride.isActive ? 'active' : 'completed',
+            createdAt: ride.startTime?.toDate() || new Date()
+          }));
         
-        // Fetch Bikes Data
-        const bikesSnapshot = await getDocs(collection(db, 'bikes'));
-        const bikesCount = bikesSnapshot.size;
-        const availableBikes = bikesSnapshot.docs.filter(doc => doc.data().isAvailable).length;
-        
-        // Fetch Rentals Count
-        const rentalsSnapshot = await getDocs(collection(db, 'rentals'));
-        const rentalsCount = rentalsSnapshot.size;
-        
-        // Fetch Recent Rentals
-        const recentRentalsQuery = query(
-          collection(db, 'rentals'),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        );
-        const recentRentalsSnapshot = await getDocs(recentRentalsQuery);
-        const recentRentalsData = recentRentalsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate() || new Date()
-        }));
-        
-        setStats({
-          totalUsers: usersCount,
-          totalBikes: bikesCount,
-          availableBikes,
-          rentalCount: rentalsCount
-        });
-        
-        setRecentRentals(recentRentalsData);
+        setRecentRentals(recentRides);
+        setLastUpdateTime(new Date());
+        setLoading(false);
       } catch (error) {
         console.error('Error fetching analytics data:', error);
-      } finally {
         setLoading(false);
       }
     };
     
-    fetchData();
+    initialFetch();
+    
+    // Set up real-time listener
+    const unsubscribe = subscribeToAnalytics((data) => {
+      setAnalyticsData(data);
+      
+      // Set recent rentals
+      const recentRides = data.rides
+        .sort((a, b) => (b.startTime?.seconds || 0) - (a.startTime?.seconds || 0))
+        .slice(0, 5)
+        .map(ride => ({
+          id: ride.id,
+          bikeId: ride.bikeId,
+          userId: ride.userId,
+          status: ride.isActive ? 'active' : 'completed',
+          createdAt: ride.startTime?.toDate() || new Date()
+        }));
+      
+      setRecentRentals(recentRides);
+      setLastUpdateTime(new Date());
+      setShowUpdateIndicator(true);
+      
+      // Hide update indicator after 3 seconds
+      setTimeout(() => {
+        setShowUpdateIndicator(false);
+      }, 3000);
+    });
+    
+    // Cleanup listener on component unmount
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const formatDate = (date) => {
@@ -195,9 +254,21 @@ const Analytics = () => {
     return <LoadingMessage>Loading analytics data...</LoadingMessage>;
   }
 
+  const { stats } = analyticsData;
+
   return (
     <Container>
       <Title>Dashboard Overview</Title>
+      
+      {showUpdateIndicator && (
+        <RefreshIndicator>
+          <span>🔄</span> Dashboard data updated
+        </RefreshIndicator>
+      )}
+      
+      <LastUpdateTime>
+        Last updated: {lastUpdateTime.toLocaleTimeString()}
+      </LastUpdateTime>
       
       <StatsGrid>
         <StatCard>
@@ -212,19 +283,39 @@ const Analytics = () => {
         
         <StatCard>
           <StatTitle>Available Bikes</StatTitle>
-          <StatValue color={colors.success}>{stats.availableBikes}</StatValue>
+          <StatValue color={colors.success}>{stats.activeBikes}</StatValue>
         </StatCard>
         
         <StatCard>
-          <StatTitle>Total Rentals</StatTitle>
-          <StatValue color={colors.accent}>{stats.rentalCount}</StatValue>
+          <StatTitle>In-Use Bikes</StatTitle>
+          <StatValue color={colors.accent}>{stats.inUseBikes}</StatValue>
+        </StatCard>
+        
+        <StatCard>
+          <StatTitle>Bikes in Maintenance</StatTitle>
+          <StatValue color={colors.warning}>{stats.maintenanceBikes}</StatValue>
+        </StatCard>
+        
+        <StatCard>
+          <StatTitle>Active Rides</StatTitle>
+          <StatValue color={colors.success}>{stats.activeRides}</StatValue>
+        </StatCard>
+        
+        <StatCard>
+          <StatTitle>Total Rides</StatTitle>
+          <StatValue color={colors.accent}>{stats.totalRides}</StatValue>
+        </StatCard>
+        
+        <StatCard>
+          <StatTitle>Avg. Rating</StatTitle>
+          <StatValue color={colors.pineGreen}>{stats.averageRating} ★</StatValue>
         </StatCard>
       </StatsGrid>
       
-      <AnalyticsChart />
+      <AnalyticsChart data={analyticsData} />
       
       <RecentActivitiesCard>
-        <SectionTitle>Recent Rentals</SectionTitle>
+        <SectionTitle>Recent Rides</SectionTitle>
         {recentRentals.length === 0 ? (
           <p>No recent rental activities found.</p>
         ) : (
@@ -236,7 +327,7 @@ const Analytics = () => {
                 </ActivityIcon>
                 <ActivityContent>
                   <ActivityTitle>
-                    {rental.bikeId} rented by {rental.userId || 'Unknown User'}
+                    Bike {rental.bikeId} rented by {rental.userId || 'Unknown User'}
                   </ActivityTitle>
                   <ActivityTime>
                     {formatDate(rental.createdAt)}

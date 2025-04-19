@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 // Pine green and gray theme colors
@@ -66,51 +64,41 @@ const ErrorMessage = styled.div`
   text-align: center;
 `;
 
-const AnalyticsChart = () => {
-  const [rentalData, setRentalData] = useState([]);
+const AnalyticsChart = ({ data = { rides: [] } }) => {
+  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [chartType, setChartType] = useState('weekly'); // weekly or monthly
   const [error, setError] = useState(null);
   
   useEffect(() => {
-    const fetchRentalData = async () => {
-      try {
-        setLoading(true);
-        const rentalsCollection = collection(db, 'rentals');
-        const rentalsSnapshot = await getDocs(rentalsCollection);
-        
-        // Convert to array and ensure each has createdAt as a Date
-        const rentals = rentalsSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            createdAt: data.createdAt?.toDate() || new Date()
-          };
-        });
-        
-        setRentalData(rentals);
-      } catch (error) {
-        console.error('Error fetching rental data:', error);
-        setError('Failed to load rental data: ' + error.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    fetchRentalData();
-  }, []);
+    try {
+      setLoading(true);
+      
+      // Use the rides data from props
+      const rides = data.rides || [];
+      
+      // Process chart data based on the selected chart type
+      const processedData = processChartData(rides, chartType);
+      setChartData(processedData);
+      setError(null);
+    } catch (error) {
+      console.error('Error processing ride data:', error);
+      setError('Failed to process ride data: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [data, chartType]);
   
   // Process chart data based on the selected chart type
-  const processChartData = () => {
-    if (rentalData.length === 0) {
+  const processChartData = (rides, type) => {
+    if (!rides || rides.length === 0) {
       return [];
     }
     
     const today = new Date();
     const dataMap = new Map();
     
-    if (chartType === 'weekly') {
+    if (type === 'weekly') {
       // Last 7 days
       for (let i = 6; i >= 0; i--) {
         const date = new Date(today);
@@ -119,12 +107,14 @@ const AnalyticsChart = () => {
         dataMap.set(dayStr, { count: 0, date });
       }
       
-      // Count rentals per day
-      rentalData.forEach(rental => {
-        const rentalDate = rental.createdAt;
+      // Count rides per day
+      rides.forEach(ride => {
+        if (!ride.startTime) return;
+        
+        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
         // Only count if within the last 7 days
-        if ((today - rentalDate) / (1000 * 60 * 60 * 24) <= 7) {
-          const dayStr = rentalDate.toLocaleDateString('en-US', { weekday: 'short' });
+        if ((today - rideDate) / (1000 * 60 * 60 * 24) <= 7) {
+          const dayStr = rideDate.toLocaleDateString('en-US', { weekday: 'short' });
           if (dataMap.has(dayStr)) {
             dataMap.get(dayStr).count += 1;
           }
@@ -143,14 +133,16 @@ const AnalyticsChart = () => {
         dataMap.set(monthStr, { count: 0, date });
       }
       
-      // Count rentals per month
-      rentalData.forEach(rental => {
-        const rentalDate = rental.createdAt;
-        const monthsAgo = (today.getFullYear() - rentalDate.getFullYear()) * 12 + 
-                          today.getMonth() - rentalDate.getMonth();
+      // Count rides per month
+      rides.forEach(ride => {
+        if (!ride.startTime) return;
+        
+        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
+        const monthsAgo = (today.getFullYear() - rideDate.getFullYear()) * 12 + 
+                          today.getMonth() - rideDate.getMonth();
         
         if (monthsAgo <= 5 && monthsAgo >= 0) {
-          const monthStr = rentalDate.toLocaleDateString('en-US', { month: 'short' });
+          const monthStr = rideDate.toLocaleDateString('en-US', { month: 'short' });
           if (dataMap.has(monthStr)) {
             dataMap.get(monthStr).count += 1;
           }
@@ -164,12 +156,10 @@ const AnalyticsChart = () => {
     }
   };
   
-  const chartData = processChartData();
-  
   if (loading) {
     return (
       <ChartContainer>
-        <ChartTitle>Rental {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
+        <ChartTitle>Ride {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
         <NoDataMessage>Loading chart data...</NoDataMessage>
       </ChartContainer>
     );
@@ -178,7 +168,7 @@ const AnalyticsChart = () => {
   if (error) {
     return (
       <ChartContainer>
-        <ChartTitle>Rental {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
+        <ChartTitle>Ride {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
         <ErrorMessage>{error}</ErrorMessage>
       </ChartContainer>
     );
@@ -186,7 +176,7 @@ const AnalyticsChart = () => {
   
   return (
     <ChartContainer>
-      <ChartTitle>Rental {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
+      <ChartTitle>Ride {chartType === 'weekly' ? 'Activity (Last 7 Days)' : 'Trends (Last 6 Months)'}</ChartTitle>
       
       <ChartToggle>
         <ToggleButton 
@@ -206,14 +196,14 @@ const AnalyticsChart = () => {
       </ChartToggle>
       
       {chartData.length === 0 ? (
-        <NoDataMessage>No rental data available</NoDataMessage>
+        <NoDataMessage>No ride data available</NoDataMessage>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
             <XAxis dataKey="name" />
             <YAxis />
             <Tooltip />
-            <Bar dataKey="value" name="Rentals" fill={colors.pineGreen} />
+            <Bar dataKey="value" name="Rides" fill={colors.pineGreen} />
           </BarChart>
         </ResponsiveContainer>
       )}

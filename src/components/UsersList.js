@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import styled from 'styled-components';
+import UserIdVerification from './UserIdVerification';
+import UserDetailsDialog from './UserDetailsDialog';
+import { getUsers, updateUserRole, updateUserVerificationStatus, subscribeToUsers } from '../services/userService';
+import { getUserRoles } from '../services/dashboardService';
 
 // Pine green and gray theme colors
 const colors = {
@@ -11,7 +14,10 @@ const colors = {
   mediumGray: '#666666',
   lightGray: '#f2f2f2',
   white: '#ffffff',
-  accent: '#FF8C00'
+  accent: '#FF8C00',
+  success: '#4CAF50',
+  warning: '#FFA000',
+  error: '#F44336'
 };
 
 const Container = styled.div`
@@ -48,6 +54,7 @@ const TableRow = styled.tr`
   
   &:hover {
     background-color: rgba(29, 60, 52, 0.05);
+    cursor: pointer;
   }
 `;
 
@@ -145,6 +152,71 @@ const RoleSelect = styled.select`
   }
 `;
 
+const StatusBadge = styled.span`
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  background-color: ${props => {
+    if (props.status === 'approved') return 'rgba(76, 175, 80, 0.1)';
+    if (props.status === 'pending') return 'rgba(255, 160, 0, 0.1)';
+    if (props.status === 'declined') return 'rgba(244, 67, 54, 0.1)';
+    return 'rgba(0, 0, 0, 0.05)';
+  }};
+  color: ${props => {
+    if (props.status === 'approved') return colors.success;
+    if (props.status === 'pending') return colors.warning;
+    if (props.status === 'declined') return colors.error;
+    return colors.mediumGray;
+  }};
+`;
+
+const Modal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+`;
+
+const RefreshIndicator = styled.div`
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  background-color: ${colors.pineGreen};
+  color: white;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  z-index: 1000;
+  animation: fadeOut 2s forwards;
+  animation-delay: 1s;
+  
+  @keyframes fadeOut {
+    to {
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+`;
+
+const LastUpdateTime = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  text-align: right;
+  margin-bottom: 5px;
+`;
+
 const UsersList = () => {
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
@@ -153,19 +225,44 @@ const UsersList = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [editingUser, setEditingUser] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [verificationFilter, setVerificationFilter] = useState('all');
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
+  const [detailsUser, setDetailsUser] = useState(null);
+  const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
+  const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
+  const [availableRoles, setAvailableRoles] = useState(['User', 'Admin', 'Manager']);
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
+
+  // Preload options data
+  useEffect(() => {
+    const preloadOptions = async () => {
+      try {
+        const roles = await getUserRoles();
+        if (roles && roles.length > 0) {
+          setAvailableRoles(roles);
+        }
+        setOptionsLoaded(true);
+      } catch (error) {
+        console.error('Error loading role options:', error);
+        // Still mark as loaded even on error to prevent blocking
+        setOptionsLoaded(true);
+      }
+    };
+    
+    preloadOptions();
+  }, []);
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    setLoading(true);
+    
+    // Initial data fetch
+    const initialFetch = async () => {
       try {
-        setLoading(true);
-        const querySnapshot = await getDocs(collection(db, 'users'));
-        const usersList = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          role: doc.data().role || (doc.data().isAdmin ? 'Admin' : 'User')
-        }));
-        setUsers(usersList);
-        setFilteredUsers(usersList);
+        const userData = await getUsers();
+        setUsers(userData);
+        setFilteredUsers(userData);
+        setLastUpdateTime(new Date());
         setError(null);
       } catch (err) {
         console.error('Error fetching users:', err);
@@ -174,13 +271,31 @@ const UsersList = () => {
         setLoading(false);
       }
     };
-
-    fetchUsers();
+    
+    initialFetch();
+    
+    // Set up real-time listener
+    const unsubscribe = subscribeToUsers((updatedUsers) => {
+      setUsers(updatedUsers);
+      setLastUpdateTime(new Date());
+      setShowUpdateIndicator(true);
+      
+      // Hide update indicator after 3 seconds
+      setTimeout(() => {
+        setShowUpdateIndicator(false);
+      }, 3000);
+    });
+    
+    // Cleanup listener on component unmount
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    // Filter users based on search term and role filter
-    const filtered = users.filter(user => {
+  // Memoize the filtered users to avoid recomputation on every render
+  const memoizedFilteredUsers = useMemo(() => {
+    // Filter users based on search term, role filter, and verification status
+    return users.filter(user => {
       const matchesSearch = 
         searchTerm === '' || 
         (user.fullName && user.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -189,24 +304,26 @@ const UsersList = () => {
         
       const matchesRole = 
         roleFilter === 'all' || 
-        user.role.toLowerCase() === roleFilter.toLowerCase();
+        user.role?.toLowerCase() === roleFilter.toLowerCase();
+      
+      const matchesVerification = 
+        verificationFilter === 'all' || 
+        user.idVerificationStatus === verificationFilter;
         
-      return matchesSearch && matchesRole;
+      return matchesSearch && matchesRole && matchesVerification;
     });
-    
-    setFilteredUsers(filtered);
-  }, [searchTerm, roleFilter, users]);
+  }, [searchTerm, roleFilter, verificationFilter, users]);
+
+  // Update filtered users when memoized result changes
+  useEffect(() => {
+    setFilteredUsers(memoizedFilteredUsers);
+  }, [memoizedFilteredUsers]);
 
   const handleRoleChange = async (userId, newRole) => {
     try {
-      // Update in Firestore
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, { 
-        role: newRole,
-        isAdmin: newRole === 'Admin'
-      });
+      await updateUserRole(userId, newRole);
       
-      // Update local state
+      // Update local state (this will be redundant with real-time updates)
       setUsers(users.map(user => 
         user.id === userId ? { ...user, role: newRole } : user
       ));
@@ -218,17 +335,49 @@ const UsersList = () => {
     }
   };
 
-  if (loading) {
-    return <LoadingMessage>Loading users...</LoadingMessage>;
-  }
+  const handleVerificationStatusChange = async (userId, newStatus) => {
+    try {
+      await updateUserVerificationStatus(userId, newStatus);
+      
+      // Update local state (this will be redundant with real-time updates)
+      setUsers(users.map(user => 
+        user.id === userId ? { ...user, idVerificationStatus: newStatus } : user
+      ));
+      
+      setSelectedUser(null);
+    } catch (err) {
+      console.error('Error updating verification status:', err);
+      alert('Failed to update verification status');
+    }
+  };
 
-  if (error) {
-    return <ErrorMessage>{error}</ErrorMessage>;
+  const handleRowClick = (user) => {
+    setDetailsUser(user);
+    setShowDetailsDialog(true);
+  };
+
+  const handleCloseDetailsDialog = () => {
+    setShowDetailsDialog(false);
+    setDetailsUser(null);
+  };
+
+  if (loading && !optionsLoaded) {
+    return <LoadingMessage>Loading users...</LoadingMessage>;
   }
 
   return (
     <Container>
       <Title>User Management</Title>
+      
+      {showUpdateIndicator && (
+        <RefreshIndicator>
+          <span>🔄</span> User data updated
+        </RefreshIndicator>
+      )}
+      
+      <LastUpdateTime>
+        Last updated: {lastUpdateTime.toLocaleTimeString()}
+      </LastUpdateTime>
       
       <SearchContainer>
         <SearchInput
@@ -243,76 +392,91 @@ const UsersList = () => {
           onChange={e => setRoleFilter(e.target.value)}
         >
           <option value="all">All Roles</option>
-          <option value="admin">Admin</option>
-          <option value="user">User</option>
-          <option value="manager">Manager</option>
+          {availableRoles.map(role => (
+            <option key={role} value={role.toLowerCase()}>
+              {role}
+            </option>
+          ))}
+        </Select>
+        
+        <Select 
+          value={verificationFilter} 
+          onChange={e => setVerificationFilter(e.target.value)}
+        >
+          <option value="all">All Verification</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="declined">Declined</option>
+          <option value="unverified">Unverified</option>
         </Select>
       </SearchContainer>
-      
-      <TableContainer>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableHeader>Name</TableHeader>
-              <TableHeader>Email</TableHeader>
-              <TableHeader>Phone</TableHeader>
-              <TableHeader>User ID</TableHeader>
-              <TableHeader>Role</TableHeader>
-              <TableHeader>Actions</TableHeader>
-            </TableRow>
-          </TableHead>
-          <tbody>
-            {filteredUsers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan="6" style={{ textAlign: 'center' }}>No users found</TableCell>
-              </TableRow>
-            ) : (
-              filteredUsers.map(user => (
-                <TableRow key={user.id}>
-                  <TableCell>{user.fullName || user.displayName || 'N/A'}</TableCell>
-                  <TableCell>{user.email || 'N/A'}</TableCell>
-                  <TableCell>{user.phoneNumber || user.phone || 'N/A'}</TableCell>
-                  <TableCell>{user.id}</TableCell>
-                  <TableCell>
-                    {editingUser === user.id ? (
-                      <RoleSelect
-                        value={user.role}
-                        onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                        autoFocus
-                      >
-                        <option value="Admin">Admin</option>
-                        <option value="Manager">Manager</option>
-                        <option value="User">User</option>
-                      </RoleSelect>
-                    ) : (
-                      <span style={{ 
-                        backgroundColor: user.role === 'Admin' ? colors.pineGreen : user.role === 'Manager' ? colors.accent : colors.lightGray,
-                        color: user.role === 'User' ? colors.darkGray : colors.white,
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        fontSize: '12px'
-                      }}>
-                        {user.role}
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {editingUser === user.id ? (
-                      <Button secondary onClick={() => setEditingUser(null)}>
-                        Cancel
-                      </Button>
-                    ) : (
-                      <Button onClick={() => setEditingUser(user.id)}>
-                        Edit Role
-                      </Button>
-                    )}
+
+      {loading ? (
+        <LoadingMessage>Loading users data...</LoadingMessage>
+      ) : error ? (
+        <ErrorMessage>{error}</ErrorMessage>
+      ) : (
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <tr>
+                <TableHeader>Name</TableHeader>
+                <TableHeader>Email</TableHeader>
+                <TableHeader>Phone</TableHeader>
+                <TableHeader>Role</TableHeader>
+                <TableHeader>ID Verification</TableHeader>
+              </tr>
+            </TableHead>
+            <tbody>
+              {filteredUsers.length > 0 ? (
+                filteredUsers.map(user => (
+                  <TableRow key={user.id} onClick={() => handleRowClick(user)}>
+                    <TableCell>{user.fullName || user.displayName || 'N/A'}</TableCell>
+                    <TableCell>{user.email || 'N/A'}</TableCell>
+                    <TableCell>{user.phoneNumber || 'N/A'}</TableCell>
+                    <TableCell>{user.role || 'User'}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={user.idVerificationStatus || 'unverified'}>
+                        {user.idVerificationStatus ? 
+                          user.idVerificationStatus.charAt(0).toUpperCase() + user.idVerificationStatus.slice(1) : 
+                          'Unverified'}
+                      </StatusBadge>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan="5" style={{ textAlign: 'center' }}>
+                    No users found matching your filters.
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </tbody>
-        </Table>
-      </TableContainer>
+              )}
+            </tbody>
+          </Table>
+        </TableContainer>
+      )}
+      
+      {selectedUser && (
+        <Modal onClick={() => setSelectedUser(null)}>
+          <div onClick={e => e.stopPropagation()}>
+            <UserIdVerification 
+              user={selectedUser} 
+              onClose={() => setSelectedUser(null)}
+              onStatusChange={(status) => handleVerificationStatusChange(selectedUser.id, status)}
+            />
+          </div>
+        </Modal>
+      )}
+
+      {showDetailsDialog && detailsUser && (
+        <UserDetailsDialog
+          user={detailsUser}
+          onClose={handleCloseDetailsDialog}
+          onRoleChange={handleRoleChange}
+          onVerificationStatusChange={handleVerificationStatusChange}
+          availableRoles={availableRoles}
+        />
+      )}
     </Container>
   );
 };

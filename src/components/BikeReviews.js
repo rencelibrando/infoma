@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
+import { useDataContext } from '../context/DataContext';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
-import { collection, getDocs, query, orderBy, collectionGroup } from 'firebase/firestore';
 
 // Pine green and gray theme colors
 const colors = {
@@ -166,196 +167,465 @@ const PageButton = styled.button`
   }
 `;
 
+const RefreshIndicator = styled.div`
+  background-color: ${colors.pineGreen};
+  color: ${colors.white};
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  text-align: center;
+`;
+
+const LastUpdateTime = styled.div`
+  background-color: ${colors.pineGreen};
+  color: ${colors.white};
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  text-align: center;
+`;
+
+const FiltersContainer = styled.div`
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+`;
+
+const StatsContainer = styled.div`
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+`;
+
+const StatCard = styled.div`
+  background-color: ${colors.white};
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 10px;
+  flex: 1;
+`;
+
+const StatValue = styled.div`
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 5px;
+`;
+
+const StatLabel = styled.div`
+  font-size: 14px;
+  color: ${colors.mediumGray};
+`;
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 30px;
+  color: ${colors.mediumGray};
+  font-style: italic;
+`;
+
+const EmptyIcon = styled.span`
+  font-size: 24px;
+  margin-bottom: 10px;
+`;
+
+const EmptyText = styled.div`
+  font-size: 16px;
+`;
+
+const Button = styled.button`
+  padding: 10px 20px;
+  background-color: ${colors.pineGreen};
+  color: ${colors.white};
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  
+  &:hover {
+    background-color: ${colors.lightPineGreen};
+  }
+`;
+
+const ErrorMessage = styled.div`
+  text-align: center;
+  padding: 20px;
+  color: #d32f2f;
+  background-color: #ffebee;
+  border-radius: 4px;
+  margin: 20px 0;
+`;
+
+const Avatar = styled.div`
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: ${colors.pineGreen};
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  margin-right: 10px;
+`;
+
+const UserName = styled.div`
+  font-weight: 500;
+  color: ${colors.darkGray};
+`;
+
+const StarRating = styled.div`
+  display: flex;
+  color: ${colors.warning};
+`;
+
+const Star = styled.span`
+  color: ${props => props.filled ? colors.warning : '#e0e0e0'};
+  margin: 0 1px;
+`;
+
+const BikeName = styled.div`
+  font-weight: 500;
+  color: ${colors.pineGreen};
+  margin: 10px 0;
+`;
+
+const ReviewFooter = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+  font-size: 12px;
+`;
+
+const DateInfo = styled.div`
+  color: ${colors.mediumGray};
+`;
+
+const PageNumber = styled.button`
+  padding: 5px 10px;
+  border: 1px solid ${props => props.active ? colors.pineGreen : '#ddd'};
+  background-color: ${props => props.active ? colors.pineGreen : colors.white};
+  color: ${props => props.active ? colors.white : colors.darkGray};
+  border-radius: 4px;
+  cursor: pointer;
+  
+  &:hover {
+    background-color: ${props => props.active ? colors.pineGreen : colors.lightGray};
+  }
+`;
+
+// Function to manually fetch reviews
+const fetchReviewsDirectly = async (bikesData) => {
+  console.log('Manually fetching reviews...');
+  let allReviews = [];
+  
+  // First try the top-level collection
+  try {
+    const topLevelQuery = query(
+      collection(db, 'reviews'),
+      limit(50)
+    );
+    const topSnapshot = await getDocs(topLevelQuery);
+    const topReviews = topSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      source: 'top-level'
+    }));
+    console.log(`Found ${topReviews.length} reviews in top-level collection`);
+    allReviews = [...allReviews, ...topReviews];
+  } catch (err) {
+    console.error('Error fetching top-level reviews:', err);
+  }
+  
+  // Now try to get reviews from each bike's subcollection
+  if (bikesData && bikesData.length > 0) {
+    console.log(`Checking reviews for ${bikesData.length} bikes...`);
+    
+    const bikeReviewPromises = bikesData.map(async (bike) => {
+      try {
+        console.log(`Checking reviews for bike: ${bike.id} (${bike.name || 'unnamed'})`);
+        const subQuery = query(
+          collection(db, `bikes/${bike.id}/reviews`),
+          limit(10)
+        );
+        const subSnapshot = await getDocs(subQuery);
+        const subReviews = subSnapshot.docs.map(doc => {
+          const data = doc.data();
+          console.log(`Raw review data for bike ${bike.id}:`, data);
+          return {
+            id: doc.id,
+            bikeId: bike.id, // Explicitly add bikeId from parent path
+            ...data,
+            source: 'subcollection'
+          };
+        });
+        
+        console.log(`Found ${subReviews.length} reviews for bike ${bike.id}`);
+        return subReviews;
+      } catch (err) {
+        console.error(`Error fetching reviews for bike ${bike.id}:`, err);
+        return [];
+      }
+    });
+    
+    try {
+      const bikeReviewsResults = await Promise.all(bikeReviewPromises);
+      const allBikeReviews = bikeReviewsResults.flat();
+      console.log(`Found total of ${allBikeReviews.length} reviews across all bike subcollections`);
+      allReviews = [...allReviews, ...allBikeReviews];
+    } catch (err) {
+      console.error('Error processing bike review promises:', err);
+    }
+  } else {
+    console.warn('No bikes data available to check for reviews');
+  }
+  
+  console.log('All reviews found manually:', allReviews);
+  return allReviews;
+};
+
 const BikeReviews = () => {
-  const [reviews, setReviews] = useState([]);
-  const [filteredReviews, setFilteredReviews] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  // Get data from context
+  const { 
+    reviews, 
+    loading: contextLoading, 
+    lastUpdateTime,
+    showUpdateIndicator,
+    stats,
+    bikes
+  } = useDataContext();
+  
+  const [searchTerm, setSearchTerm] = useState('');
   const [bikeFilter, setBikeFilter] = useState('all');
   const [ratingFilter, setRatingFilter] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [bikes, setBikes] = useState([]);
+  const [sortBy, setSortBy] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
-  const reviewsPerPage = 10;
-
-  // Fetch reviews and bikes data
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        
-        // Fetch bikes data for dropdown
-        const bikesSnapshot = await getDocs(collection(db, 'bikes'));
-        const bikesData = bikesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setBikes(bikesData);
-        
-        try {
-          // Fetch all reviews using collectionGroup to get subcollections
-          const reviewsQuery = query(
-            collectionGroup(db, 'reviews')
-            // Temporarily remove orderBy to check if that's causing issues
-            // orderBy('timestamp', 'desc')
-          );
-          
-          const reviewsSnapshot = await getDocs(reviewsQuery);
-          
-          const reviewsData = reviewsSnapshot.docs.map(doc => {
-            const data = doc.data();
-            const parentPath = doc.ref.parent.parent.id;
-            
-            return {
-              id: doc.id,
-              ...data,
-              // Ensure bikeId is set either from the document or from parent path
-              bikeId: data.bikeId || parentPath,
-              // Convert timestamp to Date if it exists, otherwise use current date
-              createdAt: data.timestamp ? 
-                (typeof data.timestamp === 'number' ? new Date(data.timestamp) : data.timestamp.toDate()) 
-                : new Date(),
-              // Make sure we have a comment field
-              comment: data.comment || ''
-            };
-          });
-          
-          setReviews(reviewsData);
-          setFilteredReviews(reviewsData);
-        } catch (reviewErr) {
-          console.error('Error in reviews query:', reviewErr);
-          setReviews([]);
-          setFilteredReviews([]);
-          setError('Failed to load reviews: ' + reviewErr.message);
-        }
-      } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load data: ' + err.message);
-      } finally {
-        setLoading(false);
+  const [reviewsPerPage] = useState(10);
+  const [showDetailDialog, setShowDetailDialog] = useState(false);
+  const [selectedReview, setSelectedReview] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [manualReviews, setManualReviews] = useState([]);
+  const [usingManualReviews, setUsingManualReviews] = useState(false);
+  
+  // Get unique bike IDs for filtering - moved up before it's used
+  const uniqueBikeIds = useMemo(() => {
+    if (usingManualReviews) {
+      return [...new Set(manualReviews.map(review => review.bikeId).filter(Boolean))];
+    }
+    if (!reviews || !Array.isArray(reviews)) return [];
+    return [...new Set(reviews.map(review => review.bikeId).filter(Boolean))];
+  }, [reviews, manualReviews, usingManualReviews]);
+  
+  // Apply filters and sorting to reviews
+  const filteredReviews = useMemo(() => {
+    // Use manual reviews if we've loaded them
+    const reviewsToUse = usingManualReviews ? manualReviews : reviews;
+    
+    // Guard against missing reviews data
+    if (!reviewsToUse || !Array.isArray(reviewsToUse)) {
+      console.log("No reviews data available");
+      return [];
+    }
+    
+    return reviewsToUse.filter(review => {
+      // Filter by search term (in comment or username)
+      if (searchTerm && !(
+        (review.comment && review.comment.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (review.userName && review.userName.toLowerCase().includes(searchTerm.toLowerCase()))
+      )) {
+        return false;
       }
-    };
-    
-    fetchData();
-  }, []);
-
-  // Apply filters when reviews or filter values change
-  useEffect(() => {
-    try {
-      filterReviews();
-    } catch (err) {
-      console.error('Error applying filters:', err);
-      setError('Error applying filters: ' + err.message);
-    }
-  }, [reviews, bikeFilter, ratingFilter, searchTerm]);
-
-  const filterReviews = () => {
-    if (!reviews || reviews.length === 0) {
-      setFilteredReviews([]);
-      return;
-    }
-    
-    let filtered = [...reviews];
-    
-    // Apply bike filter
-    if (bikeFilter !== 'all') {
-      filtered = filtered.filter(review => review.bikeId === bikeFilter);
-    }
-    
-    // Apply rating filter
-    if (ratingFilter !== 'all') {
-      filtered = filtered.filter(review => review.rating === parseInt(ratingFilter));
-    }
-    
-    // Apply search
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase();
-      filtered = filtered.filter(review => 
-        (review.comment && review.comment.toLowerCase().includes(search)) ||
-        (review.userName && review.userName.toLowerCase().includes(search))
-      );
-    }
-    
-    setFilteredReviews(filtered);
-    setCurrentPage(1); // Reset to first page when filters change
-  };
-
-  // Get current page of reviews
+      
+      // Filter by bike (only if bikeId is present and filter is active)
+      if (bikeFilter !== 'all' && review.bikeId && review.bikeId !== bikeFilter) {
+        return false;
+      }
+      
+      // Filter by rating
+      if (ratingFilter !== 'all' && review.rating !== undefined) {
+        const minRating = parseInt(ratingFilter);
+        if (review.rating < minRating || review.rating >= minRating + 1) {
+          return false;
+        }
+      }
+      
+      return true;
+    }).sort((a, b) => {
+      // Apply sorting, with fallbacks for missing fields
+      switch (sortBy) {
+        case 'newest':
+          return (b.timestamp || 0) - (a.timestamp || 0);
+        case 'oldest':
+          return (a.timestamp || 0) - (b.timestamp || 0);
+        case 'highestRating':
+          return (b.rating || 0) - (a.rating || 0);
+        case 'lowestRating':
+          return (a.rating || 0) - (b.rating || 0);
+        default:
+          return 0;
+      }
+    });
+  }, [reviews, manualReviews, usingManualReviews, searchTerm, bikeFilter, ratingFilter, sortBy]);
+  
+  // Pagination logic
   const indexOfLastReview = currentPage * reviewsPerPage;
   const indexOfFirstReview = indexOfLastReview - reviewsPerPage;
   const currentReviews = filteredReviews.slice(indexOfFirstReview, indexOfLastReview);
   const totalPages = Math.ceil(filteredReviews.length / reviewsPerPage);
-
-  // Function to get bike name by ID
-  const getBikeName = (bikeId) => {
-    if (!bikeId) return 'Unknown Bike';
-    const bike = bikes.find(b => b.id === bikeId);
-    return bike ? bike.name : 'Unknown Bike';
-  };
-
-  // Format date for display
-  const formatDate = (date) => {
-    if (!date) return 'Unknown Date';
+  
+  // Add debug data to UI to show reviews information
+  const debugInfo = useMemo(() => {
+    return {
+      totalReviews: usingManualReviews ? manualReviews.length : (reviews?.length || 0),
+      reviewsInCurrentPage: filteredReviews.slice(indexOfFirstReview, indexOfLastReview).length,
+      uniqueBikeIds: uniqueBikeIds?.length || 0,
+      hasSubcollectionReviews: usingManualReviews 
+        ? manualReviews.some(r => r.source === 'subcollection')
+        : (reviews?.some(r => r.bikeId && r.id) || false),
+      usingManualFetch: usingManualReviews
+    };
+  }, [reviews, uniqueBikeIds, filteredReviews, indexOfFirstReview, indexOfLastReview, manualReviews, usingManualReviews]);
+  
+  // Handle manual review fetch button
+  const handleManualFetch = async () => {
+    setLoading(true);
     try {
-      return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+      const reviews = await fetchReviewsDirectly(bikes);
+      setManualReviews(reviews);
+      setUsingManualReviews(true);
+      setError(null);
     } catch (err) {
-      console.error('Error formatting date:', err);
-      return 'Invalid Date';
+      console.error('Error in manual fetch:', err);
+      setError('Failed to fetch reviews: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
-
-  // Generate star rating display
-  const renderStars = (rating) => {
-    if (!rating || isNaN(rating)) return '☆☆☆☆☆';
-    const ratingNum = parseInt(rating);
-    if (ratingNum < 1 || ratingNum > 5) return '☆☆☆☆☆';
-    return '★'.repeat(ratingNum) + '☆'.repeat(5 - ratingNum);
+  
+  // Function to get bike name by ID - using bikes from context
+  const getBikeName = useCallback((bikeId) => {
+    if (!bikes) return `Bike ${bikeId.substring(0, 6)}`;
+    
+    const bike = bikes.find(b => b.id === bikeId);
+    return bike ? bike.name : `Bike ${bikeId.substring(0, 6)}`;
+  }, [bikes]);
+  
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+    // Scroll to top of reviews section
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
   };
-
-  if (loading) {
-    return <LoadingMessage>Loading reviews...</LoadingMessage>;
-  }
-
-  if (error) {
-    return <NoDataMessage>{error}</NoDataMessage>;
-  }
-
+  
+  // Format date for display
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'Unknown date';
+    const date = new Date(timestamp);
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+  
   return (
     <Container>
       <Title>Bike Reviews</Title>
       
+      {showUpdateIndicator && (
+        <RefreshIndicator>
+          <span role="img" aria-label="refresh">🔄</span> Data refreshed
+        </RefreshIndicator>
+      )}
+      
+      <StatsContainer>
+        <StatCard>
+          <StatValue>{stats?.totalReviews || 0}</StatValue>
+          <StatLabel>Total Reviews</StatLabel>
+        </StatCard>
+        
+        <StatCard>
+          <StatValue>
+            {stats?.averageRating ? stats.averageRating.toFixed(1) : '0.0'}
+            <span role="img" aria-label="star" style={{ marginLeft: '5px', color: colors.warning }}>⭐</span>
+          </StatValue>
+          <StatLabel>Average Rating</StatLabel>
+        </StatCard>
+        
+        <StatCard>
+          <StatValue>{uniqueBikeIds.length}</StatValue>
+          <StatLabel>Bikes Reviewed</StatLabel>
+        </StatCard>
+      </StatsContainer>
+      
+      {/* Debug information to help diagnose issues */}
+      <div style={{ 
+        margin: '10px 0', 
+        padding: '10px', 
+        backgroundColor: '#f8f9fa', 
+        borderRadius: '4px',
+        fontSize: '12px',
+        color: '#666'
+      }}>
+        <strong>Debug Info:</strong>
+        <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+          <li>Reviews in Context: {debugInfo.totalReviews}</li>
+          <li>Reviews in Current Page: {debugInfo.reviewsInCurrentPage}</li>
+          <li>Unique Bike IDs: {debugInfo.uniqueBikeIds}</li>
+          <li>Has Subcollection Reviews: {debugInfo.hasSubcollectionReviews ? 'Yes' : 'No'}</li>
+          <li>Using Manual Fetch: {debugInfo.usingManualFetch ? 'Yes' : 'No'}</li>
+          <li>Current Filters: {searchTerm ? `Search: ${searchTerm}, ` : ''}Bike: {bikeFilter}, Rating: {ratingFilter}</li>
+        </ul>
+        
+        {/* Manual fetch button */}
+        <div style={{ marginTop: '10px' }}>
+          <button 
+            onClick={handleManualFetch} 
+            disabled={loading}
+            style={{
+              padding: '5px 10px',
+              backgroundColor: colors.pineGreen,
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: loading ? 'wait' : 'pointer'
+            }}
+          >
+            {loading ? 'Loading...' : 'Fetch Reviews Directly from Firestore'}
+          </button>
+          {error && <div style={{ color: 'red', marginTop: '5px' }}>{error}</div>}
+        </div>
+      </div>
+      
       <ReviewsContainer>
         <ReviewsHeader>
-          <ReviewsTitle>Customer Reviews ({filteredReviews.length})</ReviewsTitle>
+          <ReviewsTitle>All Reviews</ReviewsTitle>
           
           <FilterContainer>
             <SearchInput 
-              type="text" 
-              placeholder="Search reviews..." 
+              type="text"
+              placeholder="Search reviews..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
             
             <Select 
-              value={bikeFilter} 
+              value={bikeFilter}
               onChange={(e) => setBikeFilter(e.target.value)}
             >
               <option value="all">All Bikes</option>
-              {bikes.map(bike => (
-                <option key={bike.id} value={bike.id}>
-                  {bike.name}
+              {uniqueBikeIds.map(bikeId => (
+                <option key={bikeId} value={bikeId}>
+                  {getBikeName(bikeId)}
                 </option>
               ))}
             </Select>
             
             <Select 
-              value={ratingFilter} 
+              value={ratingFilter}
               onChange={(e) => setRatingFilter(e.target.value)}
             >
               <option value="all">All Ratings</option>
@@ -365,56 +635,195 @@ const BikeReviews = () => {
               <option value="2">2 Stars</option>
               <option value="1">1 Star</option>
             </Select>
+            
+            <Select 
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="highestRating">Highest Rating</option>
+              <option value="lowestRating">Lowest Rating</option>
+            </Select>
           </FilterContainer>
         </ReviewsHeader>
         
-        {currentReviews.length === 0 ? (
-          <NoDataMessage>No reviews found matching your criteria</NoDataMessage>
+        {contextLoading ? (
+          <LoadingMessage>
+            <div style={{ 
+              display: 'inline-block',
+              border: '4px solid #f3f3f3',
+              borderTop: '4px solid #1D3C34',
+              borderRadius: '50%',
+              width: '30px',
+              height: '30px',
+              animation: 'spin 2s linear infinite',
+              marginRight: '10px'
+            }} />
+            Loading reviews...
+            <style>{`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}</style>
+          </LoadingMessage>
+        ) : error ? (
+          <ErrorMessage>
+            Error loading reviews: {error}
+          </ErrorMessage>
+        ) : filteredReviews.length === 0 ? (
+          <NoDataMessage>
+            {searchTerm || bikeFilter !== 'all' || ratingFilter !== 'all' 
+              ? 'No reviews match your search criteria' 
+              : 'No reviews available yet'}
+          </NoDataMessage>
         ) : (
-          <ReviewsList>
-            {currentReviews.map(review => (
-              <ReviewCard key={review.id}>
-                <ReviewHeader>
-                  <BikeInfo>{getBikeName(review.bikeId)}</BikeInfo>
-                  <Rating>{renderStars(review.rating)}</Rating>
-                </ReviewHeader>
+          <>
+            <ReviewsList>
+              {currentReviews.map(review => (
+                <ReviewCard key={review.id} onClick={() => {
+                  setSelectedReview(review);
+                  setShowDetailDialog(true);
+                }}>
+                  <ReviewHeader>
+                    <BikeInfo>
+                      {review.bikeId ? getBikeName(review.bikeId) : "Unknown Bike"}
+                    </BikeInfo>
+                    <Rating>
+                      {review.rating !== undefined ? review.rating.toFixed(1) : '?'} <span role="img" aria-label="star">⭐</span>
+                    </Rating>
+                  </ReviewHeader>
+                  
+                  <UserInfo>By {review.userName || 'Anonymous User'}</UserInfo>
+                  
+                  <ReviewText>
+                    {review.comment ? 
+                      (review.comment.length > 150 
+                        ? `${review.comment.substring(0, 150)}...` 
+                        : review.comment)
+                      : 'No comment provided'
+                    }
+                  </ReviewText>
+                  
+                  <ReviewDate>
+                    {review.timestamp ? formatDate(review.timestamp) : 'Unknown date'}
+                  </ReviewDate>
+                  
+                  {/* Show review details for debugging */}
+                  <div style={{ fontSize: '10px', color: '#999', marginTop: '5px' }}>
+                    ID: {review.id?.substring(0, 8) || 'unknown'}...
+                    {review.bikeId && <span> | Bike: {review.bikeId?.substring(0, 8)}...</span>}
+                    {review.source && <span> | Source: {review.source}</span>}
+                    <div>Fields: {Object.keys(review).join(', ')}</div>
+                  </div>
+                </ReviewCard>
+              ))}
+            </ReviewsList>
+            
+            {totalPages > 1 && (
+              <Pagination>
+                <PageButton 
+                  onClick={() => handlePageChange(1)} 
+                  disabled={currentPage === 1}
+                >
+                  &laquo;
+                </PageButton>
                 
-                <UserInfo>Review by {review.userName || review.userId || 'Anonymous'}</UserInfo>
-                <ReviewText>{review.comment || 'No comment provided'}</ReviewText>
-                <ReviewDate>{formatDate(review.createdAt)}</ReviewDate>
-              </ReviewCard>
-            ))}
-          </ReviewsList>
-        )}
-        
-        {totalPages > 1 && (
-          <Pagination>
-            <PageButton 
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-            >
-              Previous
-            </PageButton>
-            
-            {[...Array(totalPages)].map((_, index) => (
-              <PageButton 
-                key={index} 
-                active={currentPage === index + 1}
-                onClick={() => setCurrentPage(index + 1)}
-              >
-                {index + 1}
-              </PageButton>
-            ))}
-            
-            <PageButton 
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-            >
-              Next
-            </PageButton>
-          </Pagination>
+                <PageButton 
+                  onClick={() => handlePageChange(currentPage - 1)} 
+                  disabled={currentPage === 1}
+                >
+                  &lsaquo;
+                </PageButton>
+                
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  // Show 5 pages around current page
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <PageButton 
+                      key={pageNum}
+                      onClick={() => handlePageChange(pageNum)} 
+                      active={currentPage === pageNum}
+                    >
+                      {pageNum}
+                    </PageButton>
+                  );
+                })}
+                
+                <PageButton 
+                  onClick={() => handlePageChange(currentPage + 1)} 
+                  disabled={currentPage === totalPages}
+                >
+                  &rsaquo;
+                </PageButton>
+                
+                <PageButton 
+                  onClick={() => handlePageChange(totalPages)} 
+                  disabled={currentPage === totalPages}
+                >
+                  &raquo;
+                </PageButton>
+              </Pagination>
+            )}
+          </>
         )}
       </ReviewsContainer>
+      
+      {/* Review Detail Dialog */}
+      {showDetailDialog && selectedReview && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            padding: '20px',
+            maxWidth: '600px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto'
+          }}>
+            <h3 style={{ marginTop: 0 }}>Review Details</h3>
+            <p><strong>Bike:</strong> {getBikeName(selectedReview.bikeId || '')}</p>
+            <p><strong>Rating:</strong> {selectedReview.rating} ⭐</p>
+            <p><strong>User:</strong> {selectedReview.userName || 'Anonymous'}</p>
+            <p><strong>Date:</strong> {formatDate(selectedReview.timestamp)}</p>
+            <p><strong>Comment:</strong></p>
+            <div style={{ 
+              padding: '10px', 
+              backgroundColor: '#f5f5f5', 
+              borderRadius: '4px',
+              marginBottom: '20px'
+            }}>
+              {selectedReview.comment || 'No comment provided'}
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button onClick={() => setShowDetailDialog(false)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Container>
   );
 };

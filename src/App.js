@@ -49,66 +49,74 @@ const AuthHistoryHandler = () => {
   return null;
 };
 
-// Enhanced protected route component
-const ProtectedRoute = ({ children }) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const user = auth.currentUser;
-  
-  useEffect(() => {
-    // If this is a protected route, save it as the last authenticated route
-    if (user) {
-      sessionStorage.setItem('lastAuthRoute', location.pathname);
-    }
-  }, [location.pathname, user]);
-  
-  if (!user) {
-    // Redirect to login if not authenticated
-    return <Navigate to="/login" replace />;
-  }
-  
-  return children;
-};
-
 function App() {
   return (
     <Router>
-      {/* History management component */}
-      <AuthHistoryHandler />
-      
-      {/* Preload Google Maps API */}
       <GoogleMapsPreloader />
-      
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/status" element={<StatusCheck />} />
-        <Route 
-          path="/dashboard" 
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/ride/:bikeId" 
-          element={
-            <ProtectedRoute>
-              <BikeRideScreen />
-            </ProtectedRoute>
-          } 
-        />
-        
-        {/* Catch all route to redirect to dashboard if authenticated */}
-        <Route path="*" element={
-          auth.currentUser ? 
-            <Navigate to="/dashboard" replace /> : 
-            <Navigate to="/login" replace />
-        } />
-      </Routes>
+      <AuthHistoryHandler />
+      <StatusCheck>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/ride/:bikeId" element={<ProtectedRoute><BikeRideScreen /></ProtectedRoute>} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </StatusCheck>
     </Router>
   );
 }
+
+// Protected route component
+const ProtectedRoute = ({ children }) => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = React.useState(true);
+  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
+  
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      setIsAuthenticated(!!user);
+      setLoading(false);
+      
+      if (!user) {
+        navigate('/login', { replace: true });
+      }
+    });
+    
+    return () => unsubscribe();
+  }, [navigate]);
+  
+  if (loading) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        backgroundColor: '#f5f5f5'
+      }}>
+        <div>
+          <div style={{
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #1D3C34',
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            animation: 'spin 2s linear infinite',
+            margin: '0 auto 20px'
+          }}></div>
+          <p style={{ color: '#666', textAlign: 'center' }}>Loading...</p>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
+  }
+  
+  return isAuthenticated ? children : null;
+};
 
 export default App;
