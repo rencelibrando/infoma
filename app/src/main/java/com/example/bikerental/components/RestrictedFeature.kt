@@ -255,6 +255,7 @@ fun RestrictedButton(
     LaunchedEffect(Unit) {
         val currentUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
         if (currentUser != null) {
+            android.util.Log.d("RestrictedButton", "Loading user data for $featureType button")
             com.google.firebase.firestore.FirebaseFirestore.getInstance()
                 .collection("users")
                 .document(currentUser.uid)
@@ -262,13 +263,18 @@ fun RestrictedButton(
                 .addOnSuccessListener { document ->
                     if (document.exists()) {
                         userData = document.data
+                        android.util.Log.d("RestrictedButton", "User data loaded: ${userData?.keys}")
+                    } else {
+                        android.util.Log.d("RestrictedButton", "Document doesn't exist")
                     }
                     isLoading = false
                 }
                 .addOnFailureListener {
+                    android.util.Log.d("RestrictedButton", "Error loading user data: ${it.message}")
                     isLoading = false
                 }
         } else {
+            android.util.Log.d("RestrictedButton", "No current user")
             isLoading = false
         }
     }
@@ -280,9 +286,25 @@ fun RestrictedButton(
         null
     }
     
+    // Add more logging
+    LaunchedEffect(isRestricted, isLoading) {
+        android.util.Log.d("RestrictedButton", "$featureType button: isRestricted=$isRestricted, isLoading=$isLoading")
+        if (isRestricted) {
+            android.util.Log.d("RestrictedButton", "Restriction message: $tooltipMessage")
+        }
+    }
+    
     Button(
-        onClick = if (isRestricted) onCompleteProfile else onClick,
-        enabled = !isLoading && enabled && !isRestricted,
+        onClick = { 
+            if (isRestricted) {
+                android.util.Log.d("RestrictedButton", "Calling onCompleteProfile for $featureType")
+                onCompleteProfile()
+            } else {
+                android.util.Log.d("RestrictedButton", "Calling onClick for $featureType")
+                onClick()
+            }
+        },
+        enabled = !isLoading && enabled,
         modifier = modifier,
         colors = ButtonDefaults.buttonColors(containerColor = containerColor)
     ) {
@@ -320,13 +342,40 @@ object ProfileRestrictionUtils {
     fun isFeatureRestricted(featureType: String, userData: Map<String, Any>?): Boolean {
         if (userData == null) return true
         
-        return when (featureType) {
-            "email_verification" -> !(userData["isEmailVerified"] as? Boolean ?: false)
-            "phone_verification" -> !(userData["isPhoneVerified"] as? Boolean ?: false)
-            "profile_completion" -> !isProfileComplete(userData)
-            "booking" -> !(userData["isEmailVerified"] as? Boolean ?: false) || !(userData["isPhoneVerified"] as? Boolean ?: false)
+        // Add debug logging
+        android.util.Log.d("RestrictedFeature", "Checking restriction for $featureType with userData keys: ${userData.keys}")
+        
+        val result = when (featureType) {
+            "email_verification" -> {
+                val isVerified = !(userData["isEmailVerified"] as? Boolean ?: false)
+                android.util.Log.d("RestrictedFeature", "Email verification restricted: $isVerified")
+                isVerified
+            }
+            "phone_verification" -> {
+                val isVerified = !(userData["isPhoneVerified"] as? Boolean ?: false)
+                android.util.Log.d("RestrictedFeature", "Phone verification restricted: $isVerified")
+                isVerified
+            }
+            "profile_completion" -> {
+                val isComplete = !isProfileComplete(userData)
+                android.util.Log.d("RestrictedFeature", "Profile completion restricted: $isComplete")
+                isComplete
+            }
+            "booking" -> {
+                val emailVerified = userData["isEmailVerified"] as? Boolean ?: false
+                val phoneVerified = userData["isPhoneVerified"] as? Boolean ?: false
+                val idStatus = userData["idVerificationStatus"]?.toString()
+                val isRestricted = !emailVerified || !phoneVerified || idStatus != "approved"
+                
+                android.util.Log.d("RestrictedFeature", "Booking restricted: $isRestricted " +
+                                  "(email: $emailVerified, phone: $phoneVerified, idStatus: $idStatus)")
+                isRestricted
+            }
             else -> false
         }
+        
+        android.util.Log.d("RestrictedFeature", "Final restriction result for $featureType: $result")
+        return result
     }
     
     /**
@@ -349,7 +398,17 @@ object ProfileRestrictionUtils {
             }
             "phone_verification" -> "Please verify your phone number to access this feature."
             "profile_completion" -> "Please complete your profile information to access this feature."
-            "booking" -> "Please verify your email and phone number to book bikes."
+            "booking" -> {
+                if (!(userData["isEmailVerified"] as? Boolean ?: false)) {
+                    "Please verify your email address to book bikes."
+                } else if (!(userData["isPhoneVerified"] as? Boolean ?: false)) {
+                    "Please verify your phone number to book bikes."
+                } else if (userData["idVerificationStatus"]?.toString() != "approved") {
+                    "You need to verify your ID before you can book a bike."
+                } else {
+                    "Please complete required verification to book bikes."
+                }
+            }
             else -> "Please complete required verification to access this feature."
         }
     }

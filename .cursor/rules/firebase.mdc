@@ -1,5 +1,10 @@
 ---
 description: 
+globs: C:\Github\infoma\app\src\main\java\com\example\bikerental, .kt
+alwaysApply: false
+---
+---
+description: 
 globs: C:\Github\infoma\app\src\main\java\com\example\bikerental,.kt
 alwaysApply: false
 ---

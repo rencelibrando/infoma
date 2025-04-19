@@ -28,6 +28,9 @@ import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.components.ReviewSection
 import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.example.bikerental.utils.ProfileRestrictionUtils
 
 // Use Dark Green color from ColorUtils
 private val DarkGreen = ColorUtils.DarkGreen
@@ -43,9 +46,85 @@ fun BikeDetailScreen(
     val isLoading by bikeViewModel.isLoading.collectAsState()
     val error by bikeViewModel.error.collectAsState()
     
+    // Define userData for use in onCompleteProfile
+    var userData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    
+    // Get context for Toast messages
+    val context = LocalContext.current
+    
+    // Fetch user data when screen is displayed
+    LaunchedEffect(Unit) {
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        if (currentUser != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    if (document.exists()) {
+                        userData = document.data
+                    }
+                }
+        }
+    }
+    
     // Fetch bike details when screen is displayed
     LaunchedEffect(bikeId) {
         bikeViewModel.getBikeById(bikeId)
+    }
+    
+    // Create a function to handle profile completion navigation
+    val handleProfileCompletion = {
+        // Add debug logging to track the navigation flow
+        Log.d("BikeDetailScreen", "Starting profile completion check with userData: ${userData?.keys}")
+        
+        // Navigate to appropriate screen based on verification needs
+        if (userData != null) {
+            val userDataSnapshot = userData // Create a non-null local copy for safe access
+            
+            // Log verification states to debug
+            Log.d("BikeDetailScreen", "Profile complete: ${userDataSnapshot?.let { ProfileRestrictionUtils.isProfileComplete(it) }}")
+            Log.d("BikeDetailScreen", "Email verified: ${userDataSnapshot?.let { ProfileRestrictionUtils.isEmailVerified(it) }}")
+            Log.d("BikeDetailScreen", "ID verified: ${userDataSnapshot?.let { ProfileRestrictionUtils.isIdVerified(it) }}")
+            Log.d("BikeDetailScreen", "ID status: ${userDataSnapshot?.get("idVerificationStatus")}")
+            
+            if (userDataSnapshot?.let { !ProfileRestrictionUtils.isProfileComplete(it) } == true) {
+                Log.d("BikeDetailScreen", "Navigating to profile completion")
+                navController.navigate("editProfile")
+                android.widget.Toast.makeText(context, "Please complete your profile first", android.widget.Toast.LENGTH_SHORT).show()
+            } else if (userDataSnapshot?.let { !ProfileRestrictionUtils.isEmailVerified(it) } == true) {
+                Log.d("BikeDetailScreen", "Navigating to email verification")
+                navController.navigate("emailVerification")
+                android.widget.Toast.makeText(context, "Please verify your email first", android.widget.Toast.LENGTH_SHORT).show()
+            } else if (userDataSnapshot?.let { !ProfileRestrictionUtils.isIdVerified(it) } == true) {
+                // Only navigate to ID verification if it's required and not already verified
+                Log.d("BikeDetailScreen", "Navigating to ID verification using direct route")
+                try {
+                    // Try with screen object reference
+                    navController.navigate(com.example.bikerental.navigation.Screen.IdVerification.route)
+                    android.widget.Toast.makeText(context, "Please verify your ID before booking", android.widget.Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Log.e("BikeDetailScreen", "Error navigating with Screen reference: ${e.message}")
+                    // Fallback to string-based navigation
+                    try {
+                        navController.navigate("idVerification")
+                        android.widget.Toast.makeText(context, "Please verify your ID before booking", android.widget.Toast.LENGTH_LONG).show()
+                    } catch (e2: Exception) {
+                        Log.e("BikeDetailScreen", "Failed to navigate to ID verification: ${e2.message}")
+                        android.widget.Toast.makeText(context, "Error: Couldn't open ID verification. Please try again.", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+            } else {
+                // All verification steps are complete, proceed with booking
+                Log.d("BikeDetailScreen", "All verifications complete, proceeding to booking")
+                navController.navigate("bookingForm/${bikeId}")
+            }
+        } else {
+            // Navigate to profile edit by default
+            Log.d("BikeDetailScreen", "No user data, navigating to profile edit")
+            navController.navigate("editProfile")
+            android.widget.Toast.makeText(context, "Please complete your profile first", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
     
     Scaffold(
@@ -99,11 +178,11 @@ fun BikeDetailScreen(
                 BikeDetails(
                     bike = bike!!,
                     onBookClick = {
-                        // Would navigate to booking flow in a real implementation
+                        // Navigate to booking page
+                        navController.navigate("bookingForm/${bikeId}")
                     },
-                    onCompleteProfile = {
-                        navController.navigate("editProfile")
-                    }
+                    onCompleteProfile = handleProfileCompletion,
+                    navController = navController
                 )
             } else {
                 Text(
@@ -122,7 +201,8 @@ fun BikeDetailScreen(
 fun BikeDetails(
     bike: Bike,
     onBookClick: (Bike) -> Unit,
-    onCompleteProfile: () -> Unit
+    onCompleteProfile: () -> Unit,
+    navController: NavController
 ) {
     // View model to get reviews
     val bikeViewModel: BikeViewModel = viewModel()
@@ -296,7 +376,7 @@ fun BikeDetails(
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        // Book Now Button
+        // Book Now Button - With ID Verification Check
         RestrictedButton(
             text = "Book Now",
             featureType = "booking",
@@ -305,6 +385,101 @@ fun BikeDetails(
             modifier = Modifier.fillMaxWidth(),
             containerColor = DarkGreen
         )
+        
+        // Check ID verification status and show appropriate message
+        var idVerificationStatus by remember { mutableStateOf("") }
+        
+        LaunchedEffect(Unit) {
+            val currentUser = FirebaseAuth.getInstance().currentUser
+            if (currentUser != null) {
+                FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(currentUser.uid)
+                    .get()
+                    .addOnSuccessListener { document ->
+                        if (document.exists()) {
+                            idVerificationStatus = document.data?.get("idVerificationStatus")?.toString() ?: "unverified"
+                        }
+                    }
+            }
+        }
+        
+        // Show status cards based on verification status
+        if (idVerificationStatus.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            when (idVerificationStatus) {
+                "pending" -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFFFA000).copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = "ID Verification Pending",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFFA000)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            Text(
+                                text = "Your ID verification is under review. You'll be able to book once approved.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            TextButton(
+                                onClick = { navController.navigate("idVerification") }
+                            ) {
+                                Text("View Status")
+                            }
+                        }
+                    }
+                }
+                "declined" -> {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFF44336).copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = "ID Verification Declined",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFF44336)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            Text(
+                                text = "Your ID verification was declined. Please resubmit with a clearer image.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Button(
+                                onClick = { navController.navigate("idVerification") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFF44336)
+                                )
+                            ) {
+                                Text("Resubmit ID")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -27,8 +27,8 @@ object ProfileRestrictionUtils {
         
         // Different features may have different requirements
         return when (featureType) {
-            // Booking requires email verification and profile completion
-            "booking" -> !isEmailVerified(userData) || !isProfileComplete(userData)
+            // Booking requires email verification, profile completion and ID verification
+            "booking" -> !isEmailVerified(userData) || !isProfileComplete(userData) || !isIdVerified(userData)
             
             // Payment features require email verification
             "payment" -> !isEmailVerified(userData) || !isProfileComplete(userData)
@@ -67,6 +67,8 @@ object ProfileRestrictionUtils {
                     "Your email address needs to be verified before you can book a bike. This helps us ensure the security of our rental services."
                 else if (!isProfileComplete(userData)) 
                     "Please complete your profile information to book a bike. We need your details to process your booking."
+                else if (!isIdVerified(userData))
+                    "You need to verify your age and ID before booking a bike. This is for security and legal requirements."
                 else "Feature unavailable"
             }
             "payment" -> {
@@ -127,6 +129,37 @@ object ProfileRestrictionUtils {
     }
     
     /**
+     * Check if the user's ID is verified
+     */
+    fun isIdVerified(userData: Map<String, Any>?): Boolean {
+        val status = userData?.get("idVerificationStatus")?.toString() ?: "unverified"
+        return status == "approved"
+    }
+    
+    /**
+     * Check if the user has submitted ID verification that is pending review
+     */
+    fun isIdVerificationPending(userData: Map<String, Any>?): Boolean {
+        val status = userData?.get("idVerificationStatus")?.toString() ?: "unverified"
+        return status == "pending"
+    }
+    
+    /**
+     * Check if the user's ID verification has been declined
+     */
+    fun isIdVerificationDeclined(userData: Map<String, Any>?): Boolean {
+        val status = userData?.get("idVerificationStatus")?.toString() ?: "unverified"
+        return status == "declined"
+    }
+    
+    /**
+     * Check if the user has accepted the terms and conditions
+     */
+    fun hasAcceptedTerms(userData: Map<String, Any>?): Boolean {
+        return userData?.get("termsAccepted") as? Boolean ?: false
+    }
+    
+    /**
      * Composable that provides the user's profile data
      * and checks if specific features are restricted
      */
@@ -179,6 +212,10 @@ object ProfileRestrictionUtils {
                 val isProfileComplete = userData?.let { isProfileComplete(it) } ?: false
                 val isPhoneVerified = userData?.let { isPhoneVerified(it) } ?: false
                 val isEmailVerified = userData?.let { isEmailVerified(it) } ?: false
+                val isIdVerified = userData?.let { isIdVerified(it) } ?: false
+                val isIdVerificationPending = userData?.let { isIdVerificationPending(it) } ?: false
+                val isIdVerificationDeclined = userData?.let { isIdVerificationDeclined(it) } ?: false
+                val hasAcceptedTerms = userData?.let { hasAcceptedTerms(it) } ?: false
             }
         }
     }

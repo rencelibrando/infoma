@@ -68,6 +68,7 @@ import kotlinx.coroutines.launch
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.bikerental.screens.BikeDetailScreen
+import com.example.bikerental.screens.verification.IdVerificationScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -301,6 +302,7 @@ fun MainNavigation(
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
                 composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                composable(Screen.IdVerification.route) { IdVerificationScreen(navController) }
                 
                 // Add BikeDetailScreen route
                 composable(
@@ -308,6 +310,16 @@ fun MainNavigation(
                     arguments = listOf(navArgument("bikeId") { type = NavType.StringType })
                 ) { backStackEntry ->
                     val bikeId = backStackEntry.arguments?.getString("bikeId") ?: ""
+                    BikeDetailScreen(bikeId = bikeId, navController = navController)
+                }
+                
+                // Add BookingForm route
+                composable(
+                    route = Screen.BookingForm.route,
+                    arguments = listOf(navArgument("bikeId") { type = NavType.StringType })
+                ) { backStackEntry ->
+                    val bikeId = backStackEntry.arguments?.getString("bikeId") ?: ""
+                    // Placeholder for future booking form implementation
                     BikeDetailScreen(bikeId = bikeId, navController = navController)
                 }
             }
@@ -330,6 +342,7 @@ fun MainNavigation(
                 modifier = Modifier.fillMaxSize()
             ) {
                 composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                composable(Screen.IdVerification.route) { IdVerificationScreen(navController) }
                 composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
@@ -361,6 +374,7 @@ fun MainNavigation(
                 composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
                 composable(Screen.SignUp.route) { SignUpScreen(navController) }
                 composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+                composable(Screen.IdVerification.route) { IdVerificationScreen(navController) }
                 composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
             }
         }

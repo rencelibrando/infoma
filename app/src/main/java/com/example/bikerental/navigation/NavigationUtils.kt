@@ -134,6 +134,25 @@ object NavigationUtils {
             launchSingleTop = true
         }
     }
+    
+    /**
+     * Navigate to ID verification screen
+     */
+    fun navigateToIdVerification(navController: NavController, popUpRoute: String? = null) {
+        navController.navigate(Screen.IdVerification.route) {
+            if (popUpRoute != null) {
+                popUpTo(popUpRoute) { inclusive = true }
+            }
+            launchSingleTop = true
+        }
+    }
+    
+    /**
+     * Navigate to booking form with the specified bike ID
+     */
+    fun navigateToBookingForm(navController: NavController, bikeId: String) {
+        navController.navigate(Screen.BookingForm.createRoute(bikeId))
+    }
 }
 
 /**

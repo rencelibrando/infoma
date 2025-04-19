@@ -14,6 +14,7 @@ sealed class Screen(val route: String) {
     object SignUp : Screen("signUp")
     object AccessAccount : Screen("accessAccount")
     object EmailVerification : Screen("emailVerification")
+    object IdVerification : Screen("idVerification")
     
     // Profile related screens
     object Profile : Screen("profile")
@@ -34,5 +35,8 @@ sealed class Screen(val route: String) {
     object Bookings : Screen("bookings")
     object BookingDetails : Screen("bookingDetails/{bookingId}") {
         fun createRoute(bookingId: String) = "bookingDetails/$bookingId"
+    }
+    object BookingForm : Screen("bookingForm/{bikeId}") {
+        fun createRoute(bikeId: String) = "bookingForm/$bikeId"
     }
 } 

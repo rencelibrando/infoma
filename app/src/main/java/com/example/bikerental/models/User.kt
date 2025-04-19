@@ -39,7 +39,11 @@ data class User(
     val street: String? = null,
     val barangay: String? = null,
     val city: String? = null,
-    val verificationMethod: String? = null
+    val verificationMethod: String? = null,
+    val age: Int? = null,
+    val idUrl: String? = null,
+    val idVerificationStatus: String = "unverified", // Can be: "unverified", "pending", "approved", "declined"
+    val termsAccepted: Boolean = false
 ) {
     /**
      * Convert user to a map for Firestore updates
@@ -69,7 +73,11 @@ data class User(
             "street" to street,
             "barangay" to barangay,
             "city" to city,
-            "verificationMethod" to verificationMethod
+            "verificationMethod" to verificationMethod,
+            "age" to age,
+            "idUrl" to idUrl,
+            "idVerificationStatus" to idVerificationStatus,
+            "termsAccepted" to termsAccepted
         )
     }
 } 
