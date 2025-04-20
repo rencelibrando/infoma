@@ -312,9 +312,9 @@ const PageNumber = styled.button`
   }
 `;
 
-// Function to manually fetch reviews
-const fetchReviewsDirectly = async (bikesData) => {
-  console.log('Manually fetching reviews...');
+// Auto-fetch function to get reviews directly from Firestore
+const fetchReviewsDirectlyFromFirestore = async (bikesData) => {
+  console.log('Auto-fetching reviews from Firestore...');
   let allReviews = [];
   
   // First try the top-level collection
@@ -349,7 +349,6 @@ const fetchReviewsDirectly = async (bikesData) => {
         const subSnapshot = await getDocs(subQuery);
         const subReviews = subSnapshot.docs.map(doc => {
           const data = doc.data();
-          console.log(`Raw review data for bike ${bike.id}:`, data);
           return {
             id: doc.id,
             bikeId: bike.id, // Explicitly add bikeId from parent path
@@ -378,14 +377,14 @@ const fetchReviewsDirectly = async (bikesData) => {
     console.warn('No bikes data available to check for reviews');
   }
   
-  console.log('All reviews found manually:', allReviews);
+  console.log('All reviews found:', allReviews);
   return allReviews;
 };
 
 const BikeReviews = () => {
   // Get data from context
   const { 
-    reviews, 
+    reviews: contextReviews, 
     loading: contextLoading, 
     lastUpdateTime,
     showUpdateIndicator,
@@ -393,6 +392,15 @@ const BikeReviews = () => {
     bikes
   } = useDataContext();
   
+  // Local state for reviews that combines context data and direct fetched data
+  const [reviews, setReviews] = useState([]);
+  
+  // Add debug logs to check reviews from context
+  useEffect(() => {
+    console.log('Reviews from context:', contextReviews);
+    console.log('Context loading state:', contextLoading);
+  }, [contextReviews, contextLoading]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [bikeFilter, setBikeFilter] = useState('all');
   const [ratingFilter, setRatingFilter] = useState('all');
@@ -401,32 +409,64 @@ const BikeReviews = () => {
   const [reviewsPerPage] = useState(10);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [selectedReview, setSelectedReview] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [manualReviews, setManualReviews] = useState([]);
-  const [usingManualReviews, setUsingManualReviews] = useState(false);
+  // Add loading state back for UX purposes
+  const [loading, setLoading] = useState(false);
   
-  // Get unique bike IDs for filtering - moved up before it's used
-  const uniqueBikeIds = useMemo(() => {
-    if (usingManualReviews) {
-      return [...new Set(manualReviews.map(review => review.bikeId).filter(Boolean))];
+  // Auto-fetch reviews if context doesn't have them
+  useEffect(() => {
+    // If we already have reviews from context, use those
+    if (contextReviews && Array.isArray(contextReviews) && contextReviews.length > 0) {
+      console.log('Using reviews from context:', contextReviews.length);
+      setReviews(contextReviews);
+      return;
     }
+    
+    // Otherwise, check if we should fetch them directly
+    if ((!contextReviews || contextReviews.length === 0) && !contextLoading && bikes) {
+      console.log('No reviews in context, fetching directly from Firestore');
+      
+      setLoading(true);
+      fetchReviewsDirectlyFromFirestore(bikes)
+        .then(directReviews => {
+          console.log(`Fetched ${directReviews.length} reviews directly`);
+          setReviews(directReviews);
+          setError(null);
+        })
+        .catch(err => {
+          console.error('Error in direct fetch:', err);
+          setError('Failed to fetch reviews: ' + err.message);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [contextReviews, contextLoading, bikes]);
+  
+  // Force initial data load from context if needed
+  useEffect(() => {
+    if (!reviews || reviews.length === 0) {
+      console.log('No reviews found, might need to trigger a refresh');
+    }
+  }, [reviews]);
+  
+  // Get unique bike IDs for filtering - modified to only use automatic reviews
+  const uniqueBikeIds = useMemo(() => {
     if (!reviews || !Array.isArray(reviews)) return [];
     return [...new Set(reviews.map(review => review.bikeId).filter(Boolean))];
-  }, [reviews, manualReviews, usingManualReviews]);
+  }, [reviews]);
   
-  // Apply filters and sorting to reviews
+  // Apply filters and sorting to reviews - simplified to only use automatic reviews
   const filteredReviews = useMemo(() => {
-    // Use manual reviews if we've loaded them
-    const reviewsToUse = usingManualReviews ? manualReviews : reviews;
-    
     // Guard against missing reviews data
-    if (!reviewsToUse || !Array.isArray(reviewsToUse)) {
+    if (!reviews || !Array.isArray(reviews)) {
       console.log("No reviews data available");
       return [];
     }
     
-    return reviewsToUse.filter(review => {
+    console.log(`Filtering ${reviews.length} reviews with filters:`, { searchTerm, bikeFilter, ratingFilter, sortBy });
+    
+    const filtered = reviews.filter(review => {
       // Filter by search term (in comment or username)
       if (searchTerm && !(
         (review.comment && review.comment.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -464,42 +504,33 @@ const BikeReviews = () => {
           return 0;
       }
     });
-  }, [reviews, manualReviews, usingManualReviews, searchTerm, bikeFilter, ratingFilter, sortBy]);
+    
+    console.log(`Filtered down to ${filtered.length} reviews`);
+    return filtered;
+  }, [reviews, searchTerm, bikeFilter, ratingFilter, sortBy]);
   
   // Pagination logic
   const indexOfLastReview = currentPage * reviewsPerPage;
   const indexOfFirstReview = indexOfLastReview - reviewsPerPage;
   const currentReviews = filteredReviews.slice(indexOfFirstReview, indexOfLastReview);
+  
+  // Add log to check if currentReviews has items
+  useEffect(() => {
+    console.log(`Current page ${currentPage} shows ${currentReviews.length} reviews`);
+    console.log('Current reviews:', currentReviews);
+  }, [currentReviews, currentPage]);
+  
   const totalPages = Math.ceil(filteredReviews.length / reviewsPerPage);
   
-  // Add debug data to UI to show reviews information
+  // Update debug info to remove manual fetch references
   const debugInfo = useMemo(() => {
     return {
-      totalReviews: usingManualReviews ? manualReviews.length : (reviews?.length || 0),
+      totalReviews: reviews?.length || 0,
       reviewsInCurrentPage: filteredReviews.slice(indexOfFirstReview, indexOfLastReview).length,
       uniqueBikeIds: uniqueBikeIds?.length || 0,
-      hasSubcollectionReviews: usingManualReviews 
-        ? manualReviews.some(r => r.source === 'subcollection')
-        : (reviews?.some(r => r.bikeId && r.id) || false),
-      usingManualFetch: usingManualReviews
+      hasSubcollectionReviews: reviews?.some(r => r.bikeId && r.id) || false
     };
-  }, [reviews, uniqueBikeIds, filteredReviews, indexOfFirstReview, indexOfLastReview, manualReviews, usingManualReviews]);
-  
-  // Handle manual review fetch button
-  const handleManualFetch = async () => {
-    setLoading(true);
-    try {
-      const reviews = await fetchReviewsDirectly(bikes);
-      setManualReviews(reviews);
-      setUsingManualReviews(true);
-      setError(null);
-    } catch (err) {
-      console.error('Error in manual fetch:', err);
-      setError('Failed to fetch reviews: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [reviews, uniqueBikeIds, filteredReviews, indexOfFirstReview, indexOfLastReview]);
   
   // Function to get bike name by ID - using bikes from context
   const getBikeName = useCallback((bikeId) => {
@@ -531,6 +562,22 @@ const BikeReviews = () => {
     });
   };
   
+  // Add a function to manually trigger refresh
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      const directReviews = await fetchReviewsDirectlyFromFirestore(bikes);
+      console.log(`Refreshed and found ${directReviews.length} reviews`);
+      setReviews(directReviews);
+      setError(null);
+    } catch (err) {
+      console.error('Error in refresh:', err);
+      setError('Failed to refresh reviews: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Container>
       <Title>Bike Reviews</Title>
@@ -543,13 +590,15 @@ const BikeReviews = () => {
       
       <StatsContainer>
         <StatCard>
-          <StatValue>{stats?.totalReviews || 0}</StatValue>
+          <StatValue>{stats?.totalReviews || reviews.length || 0}</StatValue>
           <StatLabel>Total Reviews</StatLabel>
         </StatCard>
         
         <StatCard>
           <StatValue>
-            {stats?.averageRating ? stats.averageRating.toFixed(1) : '0.0'}
+            {stats?.averageRating !== undefined && typeof stats.averageRating === 'number' 
+              ? stats.averageRating.toFixed(1) 
+              : '0.0'}
             <span role="img" aria-label="star" style={{ marginLeft: '5px', color: colors.warning }}>⭐</span>
           </StatValue>
           <StatLabel>Average Rating</StatLabel>
@@ -561,7 +610,7 @@ const BikeReviews = () => {
         </StatCard>
       </StatsContainer>
       
-      {/* Debug information to help diagnose issues */}
+      {/* Enhanced debug information */}
       <div style={{ 
         margin: '10px 0', 
         padding: '10px', 
@@ -572,18 +621,20 @@ const BikeReviews = () => {
       }}>
         <strong>Debug Info:</strong>
         <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
-          <li>Reviews in Context: {debugInfo.totalReviews}</li>
-          <li>Reviews in Current Page: {debugInfo.reviewsInCurrentPage}</li>
-          <li>Unique Bike IDs: {debugInfo.uniqueBikeIds}</li>
-          <li>Has Subcollection Reviews: {debugInfo.hasSubcollectionReviews ? 'Yes' : 'No'}</li>
-          <li>Using Manual Fetch: {debugInfo.usingManualFetch ? 'Yes' : 'No'}</li>
+          <li>Reviews in Context: {contextReviews?.length || 0}</li>
+          <li>Reviews in Local State: {reviews?.length || 0}</li>
+          <li>Reviews in Current Page: {currentReviews?.length || 0}</li>
+          <li>Unique Bike IDs: {uniqueBikeIds?.length || 0}</li>
+          <li>Has Subcollection Reviews: {reviews?.some(r => r.bikeId && r.id) || false}</li>
           <li>Current Filters: {searchTerm ? `Search: ${searchTerm}, ` : ''}Bike: {bikeFilter}, Rating: {ratingFilter}</li>
+          <li>Context Loading: {contextLoading ? 'Yes' : 'No'}</li>
+          <li>Local Loading: {loading ? 'Yes' : 'No'}</li>
         </ul>
         
-        {/* Manual fetch button */}
+        {/* Add refresh button to force direct fetch */}
         <div style={{ marginTop: '10px' }}>
           <button 
-            onClick={handleManualFetch} 
+            onClick={handleRefresh} 
             disabled={loading}
             style={{
               padding: '5px 10px',
@@ -594,9 +645,8 @@ const BikeReviews = () => {
               cursor: loading ? 'wait' : 'pointer'
             }}
           >
-            {loading ? 'Loading...' : 'Fetch Reviews Directly from Firestore'}
+            {loading ? 'Loading...' : 'Refresh Reviews from Firestore'}
           </button>
-          {error && <div style={{ color: 'red', marginTop: '5px' }}>{error}</div>}
         </div>
       </div>
       
@@ -648,7 +698,7 @@ const BikeReviews = () => {
           </FilterContainer>
         </ReviewsHeader>
         
-        {contextLoading ? (
+        {contextLoading || loading ? (
           <LoadingMessage>
             <div style={{ 
               display: 'inline-block',
@@ -672,6 +722,10 @@ const BikeReviews = () => {
           <ErrorMessage>
             Error loading reviews: {error}
           </ErrorMessage>
+        ) : (!reviews || reviews.length === 0) ? (
+          <NoDataMessage>
+            No review data available. Reviews might not be loaded yet.
+          </NoDataMessage>
         ) : filteredReviews.length === 0 ? (
           <NoDataMessage>
             {searchTerm || bikeFilter !== 'all' || ratingFilter !== 'all' 

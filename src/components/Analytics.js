@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import AnalyticsChart from './AnalyticsChart';
-import { getAnalyticsData, subscribeToAnalytics } from '../services/dashboardService';
+import RatingsChart from './RatingsChart';
+import { getAnalyticsData, subscribeToAnalytics, clearReviewsCache } from '../services/dashboardService';
 
 // Pine green and gray theme colors
 const colors = {
@@ -152,6 +153,28 @@ const LastUpdateTime = styled.div`
   margin-bottom: 5px;
 `;
 
+const RefreshButton = styled.button`
+  background-color: ${colors.pineGreen};
+  color: ${colors.white};
+  border: none;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  margin-bottom: 10px;
+  
+  &:hover {
+    background-color: ${colors.lightPineGreen};
+  }
+  
+  span {
+    margin-right: 5px;
+  }
+`;
+
 const Analytics = () => {
   const [analyticsData, setAnalyticsData] = useState({
     bikes: [],
@@ -178,6 +201,9 @@ const Analytics = () => {
 
   useEffect(() => {
     setLoading(true);
+    
+    // Clear reviews cache on component mount to ensure fresh data
+    clearReviewsCache();
     
     // Initial data fetch
     const initialFetch = async () => {
@@ -240,6 +266,25 @@ const Analytics = () => {
     };
   }, []);
 
+  // Add refresh function to manually update the analytics data
+  const handleRefresh = async () => {
+    try {
+      setLoading(true);
+      clearReviewsCache();
+      const data = await getAnalyticsData();
+      setAnalyticsData(data);
+      setLastUpdateTime(new Date());
+      setShowUpdateIndicator(true);
+      setTimeout(() => {
+        setShowUpdateIndicator(false);
+      }, 3000);
+    } catch (error) {
+      console.error('Error refreshing analytics data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatDate = (date) => {
     return new Date(date).toLocaleDateString('en-US', {
       year: 'numeric',
@@ -269,6 +314,10 @@ const Analytics = () => {
       <LastUpdateTime>
         Last updated: {lastUpdateTime.toLocaleTimeString()}
       </LastUpdateTime>
+      
+      <RefreshButton onClick={handleRefresh}>
+        <span>🔄</span> Refresh Data
+      </RefreshButton>
       
       <StatsGrid>
         <StatCard>
@@ -313,6 +362,8 @@ const Analytics = () => {
       </StatsGrid>
       
       <AnalyticsChart data={analyticsData} />
+      
+      <RatingsChart data={analyticsData} />
       
       <RecentActivitiesCard>
         <SectionTitle>Recent Rides</SectionTitle>

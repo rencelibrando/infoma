@@ -169,6 +169,13 @@ export const preloadDashboardData = async () => {
   }
 };
 
+// Clear reviews cache to force a fresh fetch of reviews data
+export const clearReviewsCache = () => {
+  dataCache.reviews = null;
+  dataCache.lastUpdated.reviews = null;
+  console.log('Reviews cache cleared, next fetch will get fresh data');
+};
+
 // Fetch analytics data for the dashboard
 export const getAnalyticsData = async () => {
   try {
@@ -326,6 +333,30 @@ const calculateStats = (bikes, users, rides, reviews) => {
   const inUseBikes = bikes.filter(bike => bike.isInUse);
   const verifiedUsers = users.filter(user => user.idVerificationStatus === 'approved');
   
+  // Check if bikes have totalReviews and averageRating directly attached
+  const bikesWithReviews = bikes.filter(bike => 
+    bike.totalReviews !== undefined && bike.averageRating !== undefined
+  );
+  
+  let totalReviewsCount = reviews.length;
+  let calculatedAvgRating = calculateAverageRating(reviews);
+  
+  // If we have bikes with direct review data, use that instead
+  if (bikesWithReviews.length > 0) {
+    console.log('Using direct review data from bike documents');
+    totalReviewsCount = bikesWithReviews.reduce((total, bike) => total + (bike.totalReviews || 0), 0);
+    
+    // Calculate weighted average based on number of reviews per bike
+    if (totalReviewsCount > 0) {
+      const weightedSum = bikesWithReviews.reduce((sum, bike) => {
+        return sum + (bike.averageRating || 0) * (bike.totalReviews || 0);
+      }, 0);
+      calculatedAvgRating = (weightedSum / totalReviewsCount).toFixed(1);
+    }
+    
+    console.log(`Using bike direct data: ${totalReviewsCount} reviews, avg rating: ${calculatedAvgRating}`);
+  }
+  
   return {
     totalBikes: bikes.length,
     activeBikes: availableBikes.length,
@@ -338,17 +369,31 @@ const calculateStats = (bikes, users, rides, reviews) => {
     activeRides: activeRides.length,
     totalRides: rides.length,
     
-    totalReviews: reviews.length,
-    averageRating: calculateAverageRating(reviews)
+    totalReviews: totalReviewsCount,
+    averageRating: calculatedAvgRating
   };
 };
 
-// Calculate average rating from reviews
+// Modify the calculateAverageRating function to better handle numeric conversion
 const calculateAverageRating = (reviews) => {
-  if (reviews.length === 0) return 0;
+  if (!reviews || reviews.length === 0) return 0;
   
-  const sum = reviews.reduce((total, review) => total + (review.rating || 0), 0);
-  return (sum / reviews.length).toFixed(1);
+  // Log the ratings to help with debugging
+  console.log('Calculating average from ratings:', reviews.map(r => parseFloat(r.rating) || 0));
+  
+  let validRatingsCount = 0;
+  const sum = reviews.reduce((total, review) => {
+    // Ensure rating is a valid number
+    const ratingValue = parseFloat(review.rating);
+    if (!isNaN(ratingValue) && ratingValue > 0) {
+      validRatingsCount++;
+      return total + ratingValue;
+    }
+    return total;
+  }, 0);
+  
+  // Only divide by valid ratings count
+  return validRatingsCount > 0 ? (sum / validRatingsCount).toFixed(1) : 0;
 };
 
 // Set up optimized real-time listener for dashboard analytics data

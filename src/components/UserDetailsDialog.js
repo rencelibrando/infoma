@@ -266,9 +266,11 @@ const UserDetailsDialog = ({
         
         <UserHeader>
           <UserAvatar>
-            {user.photoURL ? 
-              <UserImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
-              getInitials(user.fullName || user.displayName)
+            {user.profilePictureUrl ? 
+              <UserImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} /> :
+              user.photoURL ? 
+                <UserImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
+                getInitials(user.fullName || user.displayName)
             }
           </UserAvatar>
           <UserInfo>
@@ -325,6 +327,22 @@ const UserDetailsDialog = ({
               <DetailItem>
                 <DetailLabel>Phone Number</DetailLabel>
                 <DetailValue>{user.phoneNumber || 'Not provided'}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Age</DetailLabel>
+                <DetailValue>{user.age || 'Not provided'}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Street</DetailLabel>
+                <DetailValue>{user.street || 'Not provided'}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Barangay</DetailLabel>
+                <DetailValue>{user.barangay || 'Not provided'}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>City</DetailLabel>
+                <DetailValue>{user.city || 'Not provided'}</DetailValue>
               </DetailItem>
               <DetailItem>
                 <DetailLabel>Created On</DetailLabel>

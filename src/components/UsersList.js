@@ -66,6 +66,31 @@ const TableHeader = styled.th`
   color: ${colors.darkGray};
 `;
 
+const Avatar = styled.div`
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: ${colors.lightGray};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: ${colors.mediumGray};
+  overflow: hidden;
+`;
+
+const AvatarImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const UserName = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+`;
+
 const TableCell = styled.td`
   padding: 12px 15px;
   border-bottom: 1px solid #ddd;
@@ -216,6 +241,12 @@ const LastUpdateTime = styled.div`
   text-align: right;
   margin-bottom: 5px;
 `;
+
+// Helper function to get user initials
+const getUserInitials = (name) => {
+  if (!name) return '?';
+  return name.split(' ').map(n => n[0]).join('').toUpperCase();
+};
 
 const UsersList = () => {
   const [users, setUsers] = useState([]);
@@ -431,7 +462,19 @@ const UsersList = () => {
               {filteredUsers.length > 0 ? (
                 filteredUsers.map(user => (
                   <TableRow key={user.id} onClick={() => handleRowClick(user)}>
-                    <TableCell>{user.fullName || user.displayName || 'N/A'}</TableCell>
+                    <TableCell>
+                      <UserName>
+                        <Avatar>
+                          {user.profilePictureUrl ? 
+                            <AvatarImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} /> :
+                            user.photoURL ?
+                              <AvatarImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
+                              getUserInitials(user.fullName || user.displayName)
+                          }
+                        </Avatar>
+                        {user.fullName || user.displayName || 'N/A'}
+                      </UserName>
+                    </TableCell>
                     <TableCell>{user.email || 'N/A'}</TableCell>
                     <TableCell>{user.phoneNumber || 'N/A'}</TableCell>
                     <TableCell>{user.role || 'User'}</TableCell>

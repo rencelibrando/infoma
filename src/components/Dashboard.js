@@ -13,6 +13,7 @@ import { initializeBikesData } from '../services/bikeService';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
+import BikeActivityOverview from './BikeActivityOverview';
 
 // Pine green and gray theme colors
 const colors = {
@@ -302,6 +303,12 @@ const Dashboard = () => {
               Overview
             </MenuOption>
             <MenuOption 
+              active={activeTab === 'activity'}
+              onClick={() => handleMenuClick('activity')}
+            >
+              Ride Activity
+            </MenuOption>
+            <MenuOption 
               active={activeTab === 'bikes'}
               onClick={() => handleMenuClick('bikes')}
             >
@@ -341,6 +348,9 @@ const Dashboard = () => {
           <ContentSection>
             {activeTab === 'overview' && (
               <Analytics />
+            )}
+            {activeTab === 'activity' && (
+              <BikeActivityOverview />
             )}
             {activeTab === 'bikes' && (
               <BikesList onEditBike={handleEditBike} />

@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, Legend, ReferenceLine } from 'recharts';
 
-// Enhanced color theme
+// Enhanced color theme matching AnalyticsChart
 const colors = {
   pineGreen: '#1D3C34',
-  lightPineGreen: '#2D5A4C', 
+  lightPineGreen: '#2D5A4C',
   mediumPineGreen: '#356859',
   darkGray: '#333333',
   mediumGray: '#666666',
   lightGray: '#f2f2f2',
   white: '#ffffff',
-  chartGradientStart: '#2D5A4C',
-  chartGradientEnd: '#B5FFD9',
-  accent: '#FD5901'
+  goldYellow: '#FFC107',
+  lineColor: '#2D5A4C',
+  accent: '#FD5901',
+  averageLine: '#757575'
 };
 
 const ChartContainer = styled.div`
@@ -92,9 +93,31 @@ const ErrorMessage = styled.div`
   text-align: center;
 `;
 
-// Custom tooltip for better look and feel
+const AverageIndicator = styled.div`
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  
+  span {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 5px;
+    font-weight: 600;
+    color: ${colors.pineGreen};
+  }
+  
+  .star {
+    color: ${colors.goldYellow};
+    margin-right: 4px;
+  }
+`;
+
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
+    const rating = payload[0].value;
+    const countText = payload[1] ? `${payload[1].value} reviews` : '';
+    
     return (
       <div 
         style={{ 
@@ -106,43 +129,60 @@ const CustomTooltip = ({ active, payload, label }) => {
         }}
       >
         <p style={{ margin: '0 0 5px', fontWeight: 'bold', color: colors.darkGray }}>{label}</p>
-        <p style={{ margin: '0', color: colors.pineGreen }}>
-          <span style={{ fontWeight: 'bold' }}>{payload[0].value}</span> rides
+        <p style={{ margin: '0 0 3px', color: colors.pineGreen }}>
+          <span style={{ color: colors.goldYellow, marginRight: '4px' }}>★</span>
+          <span style={{ fontWeight: 'bold' }}>{rating?.toFixed(1) || 'No data'}</span>
         </p>
+        {countText && (
+          <p style={{ margin: 0, fontSize: '12px', color: colors.mediumGray }}>
+            {countText}
+          </p>
+        )}
       </div>
     );
   }
   return null;
 };
 
-const AnalyticsChart = ({ data = { rides: [] } }) => {
+const RatingsChart = ({ data = { reviews: [] } }) => {
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [chartType, setChartType] = useState('weekly'); // weekly or monthly
   const [error, setError] = useState(null);
+  const [averageRating, setAverageRating] = useState(0);
+  const [totalReviewCount, setTotalReviewCount] = useState(0);
   
   useEffect(() => {
     try {
       setLoading(true);
       
-      // Use the rides data from props
-      const rides = data.rides || [];
+      // Use the reviews data from props
+      const reviews = data.reviews || [];
+      setTotalReviewCount(reviews.length);
+      
+      // Calculate overall average rating
+      if (reviews.length > 0) {
+        const totalRating = reviews.reduce((sum, review) => sum + review.rating, 0);
+        setAverageRating(totalRating / reviews.length);
+      } else {
+        setAverageRating(0);
+      }
       
       // Process chart data based on the selected chart type
-      const processedData = processChartData(rides, chartType);
+      const processedData = processChartData(reviews, chartType);
       setChartData(processedData);
       setError(null);
     } catch (error) {
-      console.error('Error processing ride data:', error);
-      setError('Failed to process ride data: ' + error.message);
+      console.error('Error processing review data:', error);
+      setError('Failed to process review data: ' + error.message);
     } finally {
       setLoading(false);
     }
   }, [data, chartType]);
   
   // Process chart data based on the selected chart type
-  const processChartData = (rides, type) => {
-    if (!rides || rides.length === 0) {
+  const processChartData = (reviews, type) => {
+    if (!reviews || reviews.length === 0) {
       return [];
     }
     
@@ -155,29 +195,31 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
         const date = new Date(today);
         date.setDate(date.getDate() - i);
         const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
-        dataMap.set(dayStr, { count: 0, date });
+        dataMap.set(dayStr, { totalRating: 0, count: 0, date });
       }
       
-      // Count rides per day
-      rides.forEach(ride => {
-        if (!ride.startTime) return;
+      // Aggregate ratings per day
+      reviews.forEach(review => {
+        if (!review.timestamp) return;
         
-        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
+        const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
         // Only count if within the last 7 days
-        if ((today - rideDate) / (1000 * 60 * 60 * 24) <= 7) {
-          const dayStr = rideDate.toLocaleDateString('en-US', { weekday: 'short' });
+        if ((today - reviewDate) / (1000 * 60 * 60 * 24) <= 7) {
+          const dayStr = reviewDate.toLocaleDateString('en-US', { weekday: 'short' });
           if (dataMap.has(dayStr)) {
             const dayData = dataMap.get(dayStr);
+            dayData.totalRating += review.rating;
             dayData.count += 1;
           }
         }
       });
       
-      // Convert map to array
+      // Convert map to array and calculate average ratings
       return Array.from(dataMap.entries())
-        .map(([label, { count, date }]) => ({ 
+        .map(([label, { totalRating, count, date }]) => ({
           name: label,
-          value: count,
+          rating: count > 0 ? totalRating / count : null,
+          count,
           date
         }))
         .sort((a, b) => a.date - b.date);
@@ -186,31 +228,33 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
       for (let i = 5; i >= 0; i--) {
         const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
         const monthStr = date.toLocaleDateString('en-US', { month: 'short' });
-        dataMap.set(monthStr, { count: 0, date });
+        dataMap.set(monthStr, { totalRating: 0, count: 0, date });
       }
       
-      // Count rides per month
-      rides.forEach(ride => {
-        if (!ride.startTime) return;
+      // Aggregate ratings per month
+      reviews.forEach(review => {
+        if (!review.timestamp) return;
         
-        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
-        const monthsAgo = (today.getFullYear() - rideDate.getFullYear()) * 12 + 
-                          today.getMonth() - rideDate.getMonth();
+        const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
+        const monthsAgo = (today.getFullYear() - reviewDate.getFullYear()) * 12 + 
+                          today.getMonth() - reviewDate.getMonth();
         
         if (monthsAgo <= 5 && monthsAgo >= 0) {
-          const monthStr = rideDate.toLocaleDateString('en-US', { month: 'short' });
+          const monthStr = reviewDate.toLocaleDateString('en-US', { month: 'short' });
           if (dataMap.has(monthStr)) {
             const monthData = dataMap.get(monthStr);
+            monthData.totalRating += review.rating;
             monthData.count += 1;
           }
         }
       });
       
-      // Convert map to array
+      // Convert map to array and calculate average ratings
       return Array.from(dataMap.entries())
-        .map(([label, { count, date }]) => ({ 
+        .map(([label, { totalRating, count, date }]) => ({
           name: label,
-          value: count,
+          rating: count > 0 ? totalRating / count : null,
+          count,
           date
         }))
         .sort((a, b) => a.date - b.date);
@@ -220,7 +264,7 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
   if (loading) {
     return (
       <ChartContainer>
-        <ChartTitle>Ride Activity {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
+        <ChartTitle>Rating Trends {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
         <NoDataMessage>Loading chart data...</NoDataMessage>
       </ChartContainer>
     );
@@ -229,17 +273,29 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
   if (error) {
     return (
       <ChartContainer>
-        <ChartTitle>Ride Activity {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
+        <ChartTitle>Rating Trends {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
         <ErrorMessage>{error}</ErrorMessage>
       </ChartContainer>
     );
   }
   
-  const hasData = chartData.some(item => item.value > 0);
+  const hasData = chartData.some(item => item.rating !== null);
   
   return (
     <ChartContainer>
-      <ChartTitle>Ride Activity {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
+      <ChartTitle>Rating Trends {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
+      
+      {averageRating > 0 && (
+        <AverageIndicator>
+          Overall Average: 
+          <span><span className="star">★</span> {averageRating.toFixed(1)}</span>
+          {totalReviewCount > 0 && (
+            <span style={{ marginLeft: '10px', fontSize: '12px', color: colors.mediumGray }}>
+              ({totalReviewCount} {totalReviewCount === 1 ? 'review' : 'reviews'})
+            </span>
+          )}
+        </AverageIndicator>
+      )}
       
       <ChartToggle>
         <ToggleButton 
@@ -259,21 +315,15 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
       </ChartToggle>
       
       {!hasData ? (
-        <NoDataMessage>No ride data available</NoDataMessage>
+        <NoDataMessage>No rating data available</NoDataMessage>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
-          <AreaChart 
+          <LineChart 
             data={chartData} 
-            margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
+            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
             animationDuration={1000}
             animationEasing="ease-out"
           >
-            <defs>
-              <linearGradient id="rideGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={colors.chartGradientStart} stopOpacity={0.8}/>
-                <stop offset="95%" stopColor={colors.chartGradientEnd} stopOpacity={0.2}/>
-              </linearGradient>
-            </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
             <XAxis 
               dataKey="name" 
@@ -281,28 +331,51 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
               axisLine={{ stroke: colors.mediumGray }} 
             />
             <YAxis 
+              domain={[0, 5]} 
+              ticks={[0, 1, 2, 3, 4, 5]} 
               tick={{ fill: colors.darkGray }} 
               axisLine={{ stroke: colors.mediumGray }}
-              allowDecimals={false}
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ marginTop: 10 }} />
-            <Area
+            {averageRating > 0 && (
+              <ReferenceLine 
+                y={averageRating} 
+                stroke={colors.averageLine} 
+                strokeDasharray="3 3"
+                label={{ 
+                  value: `Avg: ${averageRating.toFixed(1)}`, 
+                  fill: colors.darkGray,
+                  position: 'right'
+                }}
+              />
+            )}
+            <Line 
               type="monotone" 
-              dataKey="value"
-              name="Ride Count" 
-              stroke={colors.pineGreen}
-              fillOpacity={1}
-              fill="url(#rideGradient)"
+              dataKey="rating" 
+              name="Average Rating" 
+              stroke={colors.lineColor}
               strokeWidth={2}
               activeDot={{ r: 6, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
-              isAnimationActive={true}
+              dot={{ r: 4, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
+              connectNulls={true}
             />
-          </AreaChart>
+            <Line 
+              type="monotone" 
+              dataKey="count" 
+              name="Review Count" 
+              stroke="#F44336"
+              strokeWidth={1.5}
+              strokeDasharray="5 5"
+              activeDot={{ r: 5, fill: "#F44336", stroke: colors.white, strokeWidth: 2 }}
+              dot={{ r: 3, fill: "#F44336", stroke: colors.white, strokeWidth: 1 }}
+              connectNulls={true}
+            />
+          </LineChart>
         </ResponsiveContainer>
       )}
     </ChartContainer>
   );
 };
 
-export default AnalyticsChart; 
+export default RatingsChart; 

@@ -6,6 +6,7 @@ import { auth } from '../firebase';
 import styled from 'styled-components';
 import { Marker } from '@react-google-maps/api';
 import MapContainer from './MapContainer';
+import BikeActivityOverview from './BikeActivityOverview';
 
 // Pine green and gray theme colors
 const colors = {
@@ -445,6 +446,10 @@ const BikeRideScreen = () => {
           )}
         </MapContainer>
       </MapWrapper>
+      
+      {rideActive && (
+        <BikeActivityOverview />
+      )}
       
       {rideActive ? (
         <ActionButton 
