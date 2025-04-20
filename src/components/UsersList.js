@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../firebase';
 import styled from 'styled-components';
-import UserIdVerification from './UserIdVerification';
 import UserDetailsDialog from './UserDetailsDialog';
-import { getUsers, updateUserRole, updateUserVerificationStatus, subscribeToUsers } from '../services/userService';
+import { 
+  getUsers, 
+  updateUserRole, 
+  subscribeToUsers,
+  updateUserBlockStatus,
+  deleteUser
+} from '../services/userService';
 import { getUserRoles } from '../services/dashboardService';
 
 // Pine green and gray theme colors
@@ -184,18 +189,8 @@ const StatusBadge = styled.span`
   font-size: 12px;
   font-weight: 500;
   text-transform: uppercase;
-  background-color: ${props => {
-    if (props.status === 'approved') return 'rgba(76, 175, 80, 0.1)';
-    if (props.status === 'pending') return 'rgba(255, 160, 0, 0.1)';
-    if (props.status === 'declined') return 'rgba(244, 67, 54, 0.1)';
-    return 'rgba(0, 0, 0, 0.05)';
-  }};
-  color: ${props => {
-    if (props.status === 'approved') return colors.success;
-    if (props.status === 'pending') return colors.warning;
-    if (props.status === 'declined') return colors.error;
-    return colors.mediumGray;
-  }};
+  background-color: rgba(0, 0, 0, 0.05);
+  color: ${colors.mediumGray};
 `;
 
 const Modal = styled.div`
@@ -257,7 +252,6 @@ const UsersList = () => {
   const [roleFilter, setRoleFilter] = useState('all');
   const [editingUser, setEditingUser] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
-  const [verificationFilter, setVerificationFilter] = useState('all');
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [detailsUser, setDetailsUser] = useState(null);
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
@@ -338,12 +332,12 @@ const UsersList = () => {
         user.role?.toLowerCase() === roleFilter.toLowerCase();
       
       const matchesVerification = 
-        verificationFilter === 'all' || 
-        user.idVerificationStatus === verificationFilter;
+        roleFilter === 'all' || 
+        user.role?.toLowerCase() === roleFilter.toLowerCase();
         
       return matchesSearch && matchesRole && matchesVerification;
     });
-  }, [searchTerm, roleFilter, verificationFilter, users]);
+  }, [searchTerm, roleFilter, users]);
 
   // Update filtered users when memoized result changes
   useEffect(() => {
@@ -363,22 +357,6 @@ const UsersList = () => {
     } catch (err) {
       console.error('Error updating user role:', err);
       alert('Failed to update user role');
-    }
-  };
-
-  const handleVerificationStatusChange = async (userId, newStatus) => {
-    try {
-      await updateUserVerificationStatus(userId, newStatus);
-      
-      // Update local state (this will be redundant with real-time updates)
-      setUsers(users.map(user => 
-        user.id === userId ? { ...user, idVerificationStatus: newStatus } : user
-      ));
-      
-      setSelectedUser(null);
-    } catch (err) {
-      console.error('Error updating verification status:', err);
-      alert('Failed to update verification status');
     }
   };
 
@@ -429,17 +407,6 @@ const UsersList = () => {
             </option>
           ))}
         </Select>
-        
-        <Select 
-          value={verificationFilter} 
-          onChange={e => setVerificationFilter(e.target.value)}
-        >
-          <option value="all">All Verification</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="declined">Declined</option>
-          <option value="unverified">Unverified</option>
-        </Select>
       </SearchContainer>
 
       {loading ? (
@@ -455,7 +422,6 @@ const UsersList = () => {
                 <TableHeader>Email</TableHeader>
                 <TableHeader>Phone</TableHeader>
                 <TableHeader>Role</TableHeader>
-                <TableHeader>ID Verification</TableHeader>
               </tr>
             </TableHead>
             <tbody>
@@ -478,13 +444,6 @@ const UsersList = () => {
                     <TableCell>{user.email || 'N/A'}</TableCell>
                     <TableCell>{user.phoneNumber || 'N/A'}</TableCell>
                     <TableCell>{user.role || 'User'}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={user.idVerificationStatus || 'unverified'}>
-                        {user.idVerificationStatus ? 
-                          user.idVerificationStatus.charAt(0).toUpperCase() + user.idVerificationStatus.slice(1) : 
-                          'Unverified'}
-                      </StatusBadge>
-                    </TableCell>
                   </TableRow>
                 ))
               ) : (
@@ -499,25 +458,11 @@ const UsersList = () => {
         </TableContainer>
       )}
       
-      {selectedUser && (
-        <Modal onClick={() => setSelectedUser(null)}>
-          <div onClick={e => e.stopPropagation()}>
-            <UserIdVerification 
-              user={selectedUser} 
-              onClose={() => setSelectedUser(null)}
-              onStatusChange={(status) => handleVerificationStatusChange(selectedUser.id, status)}
-            />
-          </div>
-        </Modal>
-      )}
-
       {showDetailsDialog && detailsUser && (
         <UserDetailsDialog
           user={detailsUser}
           onClose={handleCloseDetailsDialog}
           onRoleChange={handleRoleChange}
-          onVerificationStatusChange={handleVerificationStatusChange}
-          availableRoles={availableRoles}
         />
       )}
     </Container>

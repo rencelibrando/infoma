@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import UserIdVerification from './UserIdVerification';
+import { updateUserBlockStatus, deleteUser } from '../services/userService';
 
 // Pine green and gray theme colors
 const colors = {
@@ -118,6 +118,10 @@ const DetailItem = styled.div`
   margin-bottom: 8px;
 `;
 
+const FullWidthDetailItem = styled(DetailItem)`
+  grid-column: 1 / -1;
+`;
+
 const DetailLabel = styled.div`
   font-size: 14px;
   color: ${colors.mediumGray};
@@ -136,18 +140,8 @@ const StatusBadge = styled.span`
   font-size: 12px;
   font-weight: 500;
   text-transform: uppercase;
-  background-color: ${props => {
-    if (props.status === 'approved') return 'rgba(76, 175, 80, 0.1)';
-    if (props.status === 'pending') return 'rgba(255, 160, 0, 0.1)';
-    if (props.status === 'declined') return 'rgba(244, 67, 54, 0.1)';
-    return 'rgba(0, 0, 0, 0.05)';
-  }};
-  color: ${props => {
-    if (props.status === 'approved') return colors.success;
-    if (props.status === 'pending') return colors.warning;
-    if (props.status === 'declined') return colors.error;
-    return colors.mediumGray;
-  }};
+  background-color: rgba(0, 0, 0, 0.05);
+  color: ${colors.mediumGray};
 `;
 
 const Tabs = styled.div`
@@ -220,13 +214,15 @@ const Button = styled.button`
 const UserDetailsDialog = ({ 
   user, 
   onClose, 
-  onRoleChange,
-  onVerificationStatusChange 
+  onRoleChange 
 }) => {
   const [activeTab, setActiveTab] = useState('info');
-  const [showIdVerification, setShowIdVerification] = useState(false);
   const [editingRole, setEditingRole] = useState(false);
   const [selectedRole, setSelectedRole] = useState(user?.role || 'User');
+  const [confirmingBlock, setConfirmingBlock] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(null);
 
   if (!user) return null;
 
@@ -235,11 +231,32 @@ const UserDetailsDialog = ({
     setEditingRole(false);
   };
 
-  const handleVerificationClick = () => {
-    if (user.idUrl) {
-      setShowIdVerification(true);
-    } else {
-      alert("User hasn't uploaded an ID document");
+  const handleBlockUser = async () => {
+    try {
+      setProcessing(true);
+      setError(null);
+      await updateUserBlockStatus(user.id, !user.isBlocked);
+      setConfirmingBlock(false);
+      // Feedback could be shown here
+    } catch (err) {
+      console.error("Error blocking/unblocking user:", err);
+      setError("Failed to update user block status. Please try again.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    try {
+      setProcessing(true);
+      setError(null);
+      await deleteUser(user.id);
+      setConfirmingDelete(false);
+      onClose(); // Close the dialog after deletion
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      setError("Failed to delete user. Please try again.");
+      setProcessing(false);
     }
   };
 
@@ -248,69 +265,65 @@ const UserDetailsDialog = ({
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
 
+  // Format dates from Firestore timestamps or timestamp objects
   const formatDate = (timestamp) => {
-    if (!timestamp) return 'N/A';
+    if (!timestamp) return 'Not available';
     
     try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      return date.toLocaleDateString();
+      if (timestamp.seconds) {
+        return new Date(timestamp.seconds * 1000).toLocaleString();
+      } else if (typeof timestamp === 'number') {
+        return new Date(timestamp).toLocaleString();
+      } else if (timestamp instanceof Date) {
+        return timestamp.toLocaleString();
+      }
     } catch (e) {
-      return 'Invalid date';
+      console.error("Error formatting date:", e);
     }
+    
+    return 'Invalid date format';
   };
 
   return (
     <Modal onClick={onClose}>
       <ModalContent onClick={e => e.stopPropagation()}>
-        <CloseButton onClick={onClose}>×</CloseButton>
+        <CloseButton onClick={onClose}>&times;</CloseButton>
         
         <UserHeader>
           <UserAvatar>
-            {user.profilePictureUrl ? 
-              <UserImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} /> :
-              user.photoURL ? 
-                <UserImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
-                getInitials(user.fullName || user.displayName)
-            }
+            {user.profilePictureUrl ? (
+              <UserImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} />
+            ) : user.photoURL ? (
+              <UserImage src={user.photoURL} alt={user.fullName || user.displayName} />
+            ) : (
+              getInitials(user.fullName || user.displayName || user.email)
+            )}
           </UserAvatar>
+          
           <UserInfo>
-            <UserName>{user.fullName || user.displayName || 'Unnamed User'}</UserName>
-            <UserEmail>{user.email || 'No email provided'}</UserEmail>
-            
-            <StatusBadge status={user.idVerificationStatus || 'unverified'}>
-              {user.idVerificationStatus ? 
-                user.idVerificationStatus.charAt(0).toUpperCase() + user.idVerificationStatus.slice(1) : 
-                'Unverified'}
-            </StatusBadge>
+            <UserName>{user.fullName || user.displayName || 'Anonymous User'}</UserName>
+            <UserEmail>{user.email}</UserEmail>
           </UserInfo>
         </UserHeader>
-
+        
         <Tabs>
           <Tab 
             active={activeTab === 'info'} 
             onClick={() => setActiveTab('info')}
           >
-            User Info
+            User Information
           </Tab>
           <Tab 
-            active={activeTab === 'role'} 
-            onClick={() => setActiveTab('role')}
+            active={activeTab === 'management'} 
+            onClick={() => setActiveTab('management')}
           >
-            Role & Permissions
+            Account Management
           </Tab>
-          {user.idUrl && (
-            <Tab 
-              active={activeTab === 'verification'} 
-              onClick={() => setActiveTab('verification')}
-            >
-              ID Verification
-            </Tab>
-          )}
         </Tabs>
-
+        
         {activeTab === 'info' && (
           <DetailSection>
-            <SectionTitle>Personal Information</SectionTitle>
+            <SectionTitle>Basic Information</SectionTitle>
             <DetailGrid>
               <DetailItem>
                 <DetailLabel>Full Name</DetailLabel>
@@ -325,117 +338,291 @@ const UserDetailsDialog = ({
                 <DetailValue>{user.email || 'Not provided'}</DetailValue>
               </DetailItem>
               <DetailItem>
-                <DetailLabel>Phone Number</DetailLabel>
+                <DetailLabel>Phone</DetailLabel>
                 <DetailValue>{user.phoneNumber || 'Not provided'}</DetailValue>
               </DetailItem>
               <DetailItem>
-                <DetailLabel>Age</DetailLabel>
-                <DetailValue>{user.age || 'Not provided'}</DetailValue>
+                <DetailLabel>Role</DetailLabel>
+                <DetailValue>{user.role || 'User'}</DetailValue>
               </DetailItem>
               <DetailItem>
-                <DetailLabel>Street</DetailLabel>
-                <DetailValue>{user.street || 'Not provided'}</DetailValue>
+                <DetailLabel>User ID</DetailLabel>
+                <DetailValue style={{wordBreak: 'break-all', fontSize: '13px'}}>{user.id || 'Unknown'}</DetailValue>
               </DetailItem>
               <DetailItem>
-                <DetailLabel>Barangay</DetailLabel>
-                <DetailValue>{user.barangay || 'Not provided'}</DetailValue>
-              </DetailItem>
-              <DetailItem>
-                <DetailLabel>City</DetailLabel>
-                <DetailValue>{user.city || 'Not provided'}</DetailValue>
-              </DetailItem>
-              <DetailItem>
-                <DetailLabel>Created On</DetailLabel>
+                <DetailLabel>Account Created</DetailLabel>
                 <DetailValue>{formatDate(user.createdAt)}</DetailValue>
               </DetailItem>
               <DetailItem>
                 <DetailLabel>Last Login</DetailLabel>
                 <DetailValue>{formatDate(user.lastLoginAt)}</DetailValue>
               </DetailItem>
+              <DetailItem>
+                <DetailLabel>Last Updated</DetailLabel>
+                <DetailValue>{formatDate(user.lastUpdated)}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Account Status</DetailLabel>
+                <DetailValue>
+                  {user.isActive === false ? 'Inactive' : 'Active'}
+                </DetailValue>
+              </DetailItem>
             </DetailGrid>
+
+            {(user.address || user.city || user.state || user.country || user.postalCode) && (
+              <>
+                <SectionTitle style={{marginTop: '20px'}}>Address Information</SectionTitle>
+                <DetailGrid>
+                  {user.address && (
+                    <FullWidthDetailItem>
+                      <DetailLabel>Address</DetailLabel>
+                      <DetailValue>{user.address}</DetailValue>
+                    </FullWidthDetailItem>
+                  )}
+                  
+                  {user.city && (
+                    <DetailItem>
+                      <DetailLabel>City</DetailLabel>
+                      <DetailValue>{user.city}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.state && (
+                    <DetailItem>
+                      <DetailLabel>State/Province</DetailLabel>
+                      <DetailValue>{user.state}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.country && (
+                    <DetailItem>
+                      <DetailLabel>Country</DetailLabel>
+                      <DetailValue>{user.country}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.postalCode && (
+                    <DetailItem>
+                      <DetailLabel>Postal Code</DetailLabel>
+                      <DetailValue>{user.postalCode}</DetailValue>
+                    </DetailItem>
+                  )}
+                </DetailGrid>
+              </>
+            )}
+
+            {(user.emergencyContact || user.preferredBikeType || user.ridingExperience || 
+              user.membershipTier || user.marketingOptIn !== undefined) && (
+              <>
+                <SectionTitle style={{marginTop: '20px'}}>Preferences & Additional Info</SectionTitle>
+                <DetailGrid>
+                  {user.emergencyContact && (
+                    <FullWidthDetailItem>
+                      <DetailLabel>Emergency Contact</DetailLabel>
+                      <DetailValue>{user.emergencyContact}</DetailValue>
+                    </FullWidthDetailItem>
+                  )}
+                  
+                  {user.preferredBikeType && (
+                    <DetailItem>
+                      <DetailLabel>Preferred Bike Type</DetailLabel>
+                      <DetailValue>{user.preferredBikeType}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.marketingOptIn !== undefined && (
+                    <DetailItem>
+                      <DetailLabel>Marketing Opt-in</DetailLabel>
+                      <DetailValue>
+                        {user.marketingOptIn === true ? 'Yes' : 
+                        user.marketingOptIn === false ? 'No' : 'Not specified'}
+                      </DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.ridingExperience && (
+                    <DetailItem>
+                      <DetailLabel>Riding Experience</DetailLabel>
+                      <DetailValue>{user.ridingExperience}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.membershipTier && (
+                    <DetailItem>
+                      <DetailLabel>Membership Tier</DetailLabel>
+                      <DetailValue>{user.membershipTier}</DetailValue>
+                    </DetailItem>
+                  )}
+                  
+                  {user.paymentMethods && user.paymentMethods.length > 0 && (
+                    <DetailItem>
+                      <DetailLabel>Payment Methods</DetailLabel>
+                      <DetailValue>{user.paymentMethods.length} saved</DetailValue>
+                    </DetailItem>
+                  )}
+                </DetailGrid>
+              </>
+            )}
+
+            {user.notes && (
+              <>
+                <SectionTitle style={{marginTop: '20px'}}>Admin Notes</SectionTitle>
+                <DetailValue style={{
+                  whiteSpace: 'pre-wrap', 
+                  backgroundColor: colors.lightGray, 
+                  padding: '10px', 
+                  borderRadius: '4px'
+                }}>
+                  {user.notes}
+                </DetailValue>
+              </>
+            )}
           </DetailSection>
         )}
-
-        {activeTab === 'role' && (
+        
+        {activeTab === 'management' && (
           <DetailSection>
             <SectionTitle>Role Management</SectionTitle>
+            
             <DetailItem>
               <DetailLabel>Current Role</DetailLabel>
               {editingRole ? (
-                <>
-                  <RoleSelect
-                    value={selectedRole}
+                <div>
+                  <RoleSelect 
+                    value={selectedRole} 
                     onChange={e => setSelectedRole(e.target.value)}
                   >
                     <option value="User">User</option>
                     <option value="Admin">Admin</option>
                     <option value="Manager">Manager</option>
                   </RoleSelect>
+                  
                   <ActionSection>
-                    <Button secondary onClick={() => setEditingRole(false)}>Cancel</Button>
-                    <Button onClick={handleRoleChange}>Save Role</Button>
+                    <Button 
+                      secondary 
+                      onClick={() => setEditingRole(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleRoleChange}
+                    >
+                      Save Role
+                    </Button>
                   </ActionSection>
-                </>
+                </div>
               ) : (
-                <DetailValue>
-                  {user.role || 'User'} 
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <DetailValue>{user.role || 'User'}</DetailValue>
                   <Button 
-                    style={{ marginLeft: '10px', padding: '4px 8px', fontSize: '12px' }}
+                    secondary
                     onClick={() => setEditingRole(true)}
                   >
-                    Change
+                    Change Role
                   </Button>
-                </DetailValue>
+                </div>
+              )}
+            </DetailItem>
+            
+            <SectionTitle style={{marginTop: '24px'}}>Account Actions</SectionTitle>
+            
+            {error && (
+              <div style={{
+                padding: '10px', 
+                marginBottom: '16px', 
+                backgroundColor: 'rgba(244, 67, 54, 0.1)', 
+                color: colors.error,
+                borderRadius: '4px'
+              }}>
+                {error}
+              </div>
+            )}
+            
+            <DetailItem>
+              <DetailLabel>Block User</DetailLabel>
+              {confirmingBlock ? (
+                <div>
+                  <DetailValue style={{marginBottom: '10px', color: colors.error}}>
+                    Are you sure you want to {user.isBlocked ? 'unblock' : 'block'} this user? 
+                    {!user.isBlocked && ' They will not be able to login or use the app.'}
+                  </DetailValue>
+                  
+                  <ActionSection>
+                    <Button 
+                      secondary 
+                      onClick={() => setConfirmingBlock(false)}
+                      disabled={processing}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      danger
+                      onClick={handleBlockUser}
+                      disabled={processing}
+                    >
+                      {processing ? 'Processing...' : `Confirm ${user.isBlocked ? 'Unblock' : 'Block'}`}
+                    </Button>
+                  </ActionSection>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <DetailValue>{user.isBlocked ? 'Currently blocked' : 'Not blocked'}</DetailValue>
+                  <Button 
+                    danger
+                    onClick={() => setConfirmingBlock(true)}
+                    disabled={processing}
+                  >
+                    {user.isBlocked ? 'Unblock User' : 'Block User'}
+                  </Button>
+                </div>
+              )}
+            </DetailItem>
+            
+            <DetailItem style={{marginTop: '16px'}}>
+              <DetailLabel>Delete User</DetailLabel>
+              {confirmingDelete ? (
+                <div>
+                  <DetailValue style={{marginBottom: '10px', color: colors.error}}>
+                    <strong>Warning:</strong> This action cannot be undone. This will permanently delete the user account and all associated data.
+                  </DetailValue>
+                  
+                  <ActionSection>
+                    <Button 
+                      secondary 
+                      onClick={() => setConfirmingDelete(false)}
+                      disabled={processing}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      danger
+                      onClick={handleDeleteUser}
+                      disabled={processing}
+                    >
+                      {processing ? 'Processing...' : 'Permanently Delete'}
+                    </Button>
+                  </ActionSection>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <DetailValue>Delete this user account</DetailValue>
+                  <Button 
+                    danger
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={processing}
+                  >
+                    Delete User
+                  </Button>
+                </div>
               )}
             </DetailItem>
           </DetailSection>
         )}
-
-        {activeTab === 'verification' && (
-          <DetailSection>
-            <SectionTitle>ID Verification</SectionTitle>
-            <DetailItem>
-              <DetailLabel>Status</DetailLabel>
-              <DetailValue>
-                <StatusBadge status={user.idVerificationStatus || 'unverified'}>
-                  {user.idVerificationStatus ? 
-                    user.idVerificationStatus.charAt(0).toUpperCase() + user.idVerificationStatus.slice(1) : 
-                    'Unverified'}
-                </StatusBadge>
-              </DetailValue>
-            </DetailItem>
-            <Button 
-              onClick={handleVerificationClick}
-              disabled={!user.idUrl}
-            >
-              View ID Document
-            </Button>
-          </DetailSection>
-        )}
-
+        
         <ActionSection>
           <Button secondary onClick={onClose}>Close</Button>
-          <Button 
-            onClick={handleVerificationClick}
-            disabled={!user.idUrl}
-          >
-            Review ID Verification
-          </Button>
         </ActionSection>
       </ModalContent>
-
-      {showIdVerification && (
-        <div style={{ position: 'absolute', zIndex: 1001 }}>
-          <UserIdVerification 
-            user={user} 
-            onClose={() => setShowIdVerification(false)}
-            onStatusChange={(status) => {
-              onVerificationStatusChange(user.id, status);
-              setShowIdVerification(false);
-            }}
-          />
-        </div>
-      )}
     </Modal>
   );
 };

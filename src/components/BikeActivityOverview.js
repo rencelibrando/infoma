@@ -58,7 +58,6 @@ const BikeActivityOverview = () => {
       inUseBikes: 0,
       maintenanceBikes: 0,
       totalUsers: 0,
-      verifiedUsers: 0,
       activeRides: 0,
       totalRides: 0,
       totalReviews: 0,

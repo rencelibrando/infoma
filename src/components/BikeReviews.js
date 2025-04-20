@@ -415,40 +415,32 @@ const BikeReviews = () => {
   
   // Auto-fetch reviews if context doesn't have them
   useEffect(() => {
-    // If we already have reviews from context, use those
-    if (contextReviews && Array.isArray(contextReviews) && contextReviews.length > 0) {
-      console.log('Using reviews from context:', contextReviews.length);
-      setReviews(contextReviews);
-      return;
-    }
+    // Always fetch directly from Firestore when component mounts
+    console.log('Fetching reviews directly from Firestore on mount');
     
-    // Otherwise, check if we should fetch them directly
-    if ((!contextReviews || contextReviews.length === 0) && !contextLoading && bikes) {
-      console.log('No reviews in context, fetching directly from Firestore');
-      
-      setLoading(true);
-      fetchReviewsDirectlyFromFirestore(bikes)
-        .then(directReviews => {
-          console.log(`Fetched ${directReviews.length} reviews directly`);
-          setReviews(directReviews);
-          setError(null);
-        })
-        .catch(err => {
-          console.error('Error in direct fetch:', err);
-          setError('Failed to fetch reviews: ' + err.message);
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-    }
-  }, [contextReviews, contextLoading, bikes]);
+    setLoading(true);
+    fetchReviewsDirectlyFromFirestore(bikes)
+      .then(directReviews => {
+        console.log(`Fetched ${directReviews.length} reviews directly`);
+        setReviews(directReviews);
+        setError(null);
+      })
+      .catch(err => {
+        console.error('Error in direct fetch:', err);
+        setError('Failed to fetch reviews: ' + err.message);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [bikes]); // Only depend on bikes to prevent unnecessary re-fetches
   
-  // Force initial data load from context if needed
+  // Use context reviews as fallback if direct fetch isn't complete yet
   useEffect(() => {
-    if (!reviews || reviews.length === 0) {
-      console.log('No reviews found, might need to trigger a refresh');
+    if ((!reviews || reviews.length === 0) && contextReviews && Array.isArray(contextReviews) && contextReviews.length > 0) {
+      console.log('Using reviews from context as fallback:', contextReviews.length);
+      setReviews(contextReviews);
     }
-  }, [reviews]);
+  }, [contextReviews, reviews]);
   
   // Get unique bike IDs for filtering - modified to only use automatic reviews
   const uniqueBikeIds = useMemo(() => {
@@ -596,9 +588,20 @@ const BikeReviews = () => {
         
         <StatCard>
           <StatValue>
-            {stats?.averageRating !== undefined && typeof stats.averageRating === 'number' 
-              ? stats.averageRating.toFixed(1) 
-              : '0.0'}
+            {(() => {
+              // Calculate average rating directly from reviews if stats doesn't have it
+              if (stats?.averageRating && Number(stats.averageRating) > 0) {
+                return Number(stats.averageRating).toFixed(1);
+              } else if (reviews && reviews.length > 0) {
+                // Calculate average from reviews array
+                const sum = reviews.reduce((total, review) => 
+                  total + (typeof review.rating === 'number' ? Number(review.rating) : 0), 0);
+                const avg = sum / reviews.length;
+                return isNaN(avg) ? '0.0' : avg.toFixed(1);
+              } else {
+                return '0.0';
+              }
+            })()}
             <span role="img" aria-label="star" style={{ marginLeft: '5px', color: colors.warning }}>⭐</span>
           </StatValue>
           <StatLabel>Average Rating</StatLabel>
@@ -745,7 +748,7 @@ const BikeReviews = () => {
                       {review.bikeId ? getBikeName(review.bikeId) : "Unknown Bike"}
                     </BikeInfo>
                     <Rating>
-                      {review.rating !== undefined ? review.rating.toFixed(1) : '?'} <span role="img" aria-label="star">⭐</span>
+                      {review.rating !== undefined ? Number(review.rating).toFixed(1) : '?'} <span role="img" aria-label="star">⭐</span>
                     </Rating>
                   </ReviewHeader>
                   
@@ -859,7 +862,7 @@ const BikeReviews = () => {
           }}>
             <h3 style={{ marginTop: 0 }}>Review Details</h3>
             <p><strong>Bike:</strong> {getBikeName(selectedReview.bikeId || '')}</p>
-            <p><strong>Rating:</strong> {selectedReview.rating} ⭐</p>
+            <p><strong>Rating:</strong> {selectedReview.rating !== undefined ? Number(selectedReview.rating).toFixed(1) : '?'} ⭐</p>
             <p><strong>User:</strong> {selectedReview.userName || 'Anonymous'}</p>
             <p><strong>Date:</strong> {formatDate(selectedReview.timestamp)}</p>
             <p><strong>Comment:</strong></p>

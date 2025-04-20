@@ -331,7 +331,6 @@ const calculateStats = (bikes, users, rides, reviews) => {
   const activeRides = rides.filter(ride => ride.isActive);
   const availableBikes = bikes.filter(bike => bike.isAvailable && !bike.isInUse);
   const inUseBikes = bikes.filter(bike => bike.isInUse);
-  const verifiedUsers = users.filter(user => user.idVerificationStatus === 'approved');
   
   // Check if bikes have totalReviews and averageRating directly attached
   const bikesWithReviews = bikes.filter(bike => 
@@ -364,7 +363,6 @@ const calculateStats = (bikes, users, rides, reviews) => {
     maintenanceBikes: bikes.length - availableBikes.length - inUseBikes.length,
     
     totalUsers: users.length,
-    verifiedUsers: verifiedUsers.length,
     
     activeRides: activeRides.length,
     totalRides: rides.length,

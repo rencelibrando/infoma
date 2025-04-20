@@ -1,17 +1,20 @@
 import { db } from '../firebase';
-import { collection, getDocs, doc, updateDoc, onSnapshot, query } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
+import { httpsCallable, getFunctions } from 'firebase/functions';
 
 // Fetch all users
 export const getUsers = async () => {
   try {
-    const querySnapshot = await getDocs(collection(db, 'users'));
-    return querySnapshot.docs.map(doc => ({
+    const usersCollection = collection(db, 'users');
+    const usersSnapshot = await getDocs(usersCollection);
+    
+    return usersSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       role: doc.data().role || (doc.data().isAdmin ? 'Admin' : 'User')
     }));
   } catch (error) {
-    console.error('Error fetching users:', error);
+    console.error('Error getting users:', error);
     throw error;
   }
 };
@@ -22,25 +25,10 @@ export const updateUserRole = async (userId, newRole) => {
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { 
       role: newRole,
-      isAdmin: newRole === 'Admin',
-      updatedAt: new Date()
-    });
-  } catch (error) {
-    console.error('Error updating user role:', error);
-    throw error;
-  }
-};
-
-// Update user verification status
-export const updateUserVerificationStatus = async (userId, newStatus) => {
-  try {
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, { 
-      idVerificationStatus: newStatus,
       lastUpdated: new Date()
     });
   } catch (error) {
-    console.error('Error updating verification status:', error);
+    console.error('Error updating user role:', error);
     throw error;
   }
 };
@@ -64,4 +52,43 @@ export const subscribeToUsers = (callback) => {
   
   // Return the unsubscribe function to clean up the listener
   return unsubscribe;
+};
+
+// Block or unblock a user
+export const updateUserBlockStatus = async (userId, isBlocked) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, { 
+      isBlocked: isBlocked,
+      lastUpdated: new Date()
+    });
+    return true;
+  } catch (error) {
+    console.error('Error updating user block status:', error);
+    throw error;
+  }
+};
+
+// Delete a user
+export const deleteUser = async (userId) => {
+  try {
+    // 1. Delete the user document from Firestore
+    const userRef = doc(db, 'users', userId);
+    await deleteDoc(userRef);
+    
+    try {
+      // 2. Call Cloud Function to delete the user from Firebase Authentication
+      const functions = getFunctions();
+      const deleteFirebaseUser = httpsCallable(functions, 'deleteUser');
+      await deleteFirebaseUser({ userId });
+    } catch (authError) {
+      console.error('Error deleting user from Authentication:', authError);
+      // Continue execution - at least the Firestore document was deleted
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw error;
+  }
 }; 

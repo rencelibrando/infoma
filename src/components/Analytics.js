@@ -187,7 +187,6 @@ const Analytics = () => {
       inUseBikes: 0,
       maintenanceBikes: 0,
       totalUsers: 0,
-      verifiedUsers: 0,
       activeRides: 0,
       totalRides: 0,
       totalReviews: 0,
@@ -319,47 +318,53 @@ const Analytics = () => {
         <span>🔄</span> Refresh Data
       </RefreshButton>
       
-      <StatsGrid>
-        <StatCard>
-          <StatTitle>Total Users</StatTitle>
-          <StatValue>{stats.totalUsers}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Total Bikes</StatTitle>
-          <StatValue>{stats.totalBikes}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Available Bikes</StatTitle>
-          <StatValue color={colors.success}>{stats.activeBikes}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>In-Use Bikes</StatTitle>
-          <StatValue color={colors.accent}>{stats.inUseBikes}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Bikes in Maintenance</StatTitle>
-          <StatValue color={colors.warning}>{stats.maintenanceBikes}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Active Rides</StatTitle>
-          <StatValue color={colors.success}>{stats.activeRides}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Total Rides</StatTitle>
-          <StatValue color={colors.accent}>{stats.totalRides}</StatValue>
-        </StatCard>
-        
-        <StatCard>
-          <StatTitle>Avg. Rating</StatTitle>
-          <StatValue color={colors.pineGreen}>{stats.averageRating} ★</StatValue>
-        </StatCard>
-      </StatsGrid>
+      {stats.totalBikes > 0 ? (
+        <StatsGrid>
+          <StatCard>
+            <StatTitle>Total Bikes</StatTitle>
+            <StatValue>{stats.totalBikes}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Active Bikes</StatTitle>
+            <StatValue color={colors.success}>{stats.activeBikes}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Bikes in Use</StatTitle>
+            <StatValue color={colors.accent}>{stats.inUseBikes}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Maintenance Bikes</StatTitle>
+            <StatValue color={colors.warning}>{stats.maintenanceBikes}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Active Rides</StatTitle>
+            <StatValue color={colors.accent}>{stats.activeRides}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Total Rides</StatTitle>
+            <StatValue>{stats.totalRides}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Total Users</StatTitle>
+            <StatValue>{stats.totalUsers}</StatValue>
+          </StatCard>
+          
+          <StatCard>
+            <StatTitle>Average Rating</StatTitle>
+            <StatValue color="#FFB400">
+              {stats.averageRating} <span style={{ fontSize: '20px' }}>⭐</span>
+            </StatValue>
+          </StatCard>
+        </StatsGrid>
+      ) : (
+        <p>No bikes found in the analytics data.</p>
+      )}
       
       <AnalyticsChart data={analyticsData} />
       
