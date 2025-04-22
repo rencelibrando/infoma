@@ -9,6 +9,7 @@ import UsersList from './UsersList';
 import Analytics from './Analytics';
 import BikesMap from './BikesMap';
 import BikeReviews from './BikeReviews';
+import BookingManagement from './BookingManagement';
 import { initializeBikesData } from '../services/bikeService';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
@@ -315,6 +316,12 @@ const Dashboard = () => {
               Manage Bikes
             </MenuOption>
             <MenuOption 
+              active={activeTab === 'bookings'}
+              onClick={() => handleMenuClick('bookings')}
+            >
+              Bookings
+            </MenuOption>
+            <MenuOption 
               active={activeTab === 'map'}
               onClick={() => handleMenuClick('map')}
             >
@@ -354,6 +361,9 @@ const Dashboard = () => {
             )}
             {activeTab === 'bikes' && (
               <BikesList onEditBike={handleEditBike} />
+            )}
+            {activeTab === 'bookings' && (
+              <BookingManagement />
             )}
             {activeTab === 'map' && (
               <BikesMap />

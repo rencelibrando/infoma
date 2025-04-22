@@ -50,6 +50,43 @@ service cloud.firestore {
                     exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
     }
     
+    // Bookings collection - for bike reservations
+    match /bookings/{bookingId} {
+      // Users can read their own bookings, admins can read all bookings
+      allow read: if request.auth != null && 
+                 (request.auth.uid == resource.data.userId || 
+                  exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      
+      // Only admins can list all bookings
+      allow list: if request.auth != null && 
+                 exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      
+      // Users can create bookings for themselves
+      allow create: if request.auth != null && 
+                    request.resource.data.userId == request.auth.uid;
+      
+      // Users can update their own bookings with limited fields, admins can update any booking
+      allow update: if request.auth != null && 
+                   (
+                     // Admins can update any field
+                     exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+                     // Users can only update their own bookings with limited fields
+                     (resource.data.userId == request.auth.uid && 
+                      request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['notes', 'status']) &&
+                      // Users can only cancel their bookings, not confirm or complete them
+                      (
+                        !('status' in request.resource.data.diff(resource.data).affectedKeys()) ||
+                        request.resource.data.status == 'cancelled'
+                      )
+                     )
+                   );
+      
+      // Only admins can delete bookings
+      allow delete: if request.auth != null && 
+                    exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
     // Bike location history collection - for tracking bike movements
     match /bikeLocationHistory/{entryId} {
       // Only authenticated users can read location history
