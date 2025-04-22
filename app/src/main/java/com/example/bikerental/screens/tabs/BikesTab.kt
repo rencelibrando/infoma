@@ -1,67 +1,36 @@
 package com.example.bikerental.screens.tabs
 
+import android.Manifest
+import android.content.Context
+import android.location.Location
+import android.os.Looper
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Error
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,32 +49,29 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
-import com.example.bikerental.models.Bike
-import com.example.bikerental.models.Review
-import com.example.bikerental.navigation.Screen
-import com.example.bikerental.utils.ColorUtils
-import com.example.bikerental.components.ReviewSection
+import com.example.bikerental.components.BookingCalendar
 import com.example.bikerental.components.RatingBar
 import com.example.bikerental.components.ReviewForm
 import com.example.bikerental.components.ReviewItem
+import com.example.bikerental.components.ReviewSection
+import com.example.bikerental.models.Bike
+import com.example.bikerental.models.Booking
+import com.example.bikerental.models.Review
+import com.example.bikerental.navigation.Screen
+import com.example.bikerental.ui.theme.DarkGreen
+import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.utils.LocationManager
 import com.example.bikerental.viewmodels.BikeViewModel
-import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.*
 import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 import java.text.SimpleDateFormat
 import java.util.*
-import androidx.compose.foundation.border
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import com.google.firebase.auth.FirebaseAuth
+import kotlin.math.*
 
 // Use Dark Green color from ColorUtils
 private val DarkGreen = ColorUtils.DarkGreen
@@ -143,10 +109,14 @@ fun BikesTab(
         }
     )
     
+    // Add state for currently selected bike for booking
+    var bookingBike by remember { mutableStateOf<Bike?>(null) }
+    val isBookingLoading by bikeViewModel.isBookingLoading.collectAsState()
+    
     // Get location
     LaunchedEffect(fusedLocationProviderClient) {
         locationManager.getLastLocation(
-            onSuccess = { location ->
+            onSuccess = { location: LatLng ->
                 currentLocation = location
             },
             onFailure = {
@@ -194,7 +164,7 @@ fun BikesTab(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(6) {
+                    items(6) { _ ->
                         ShimmerBikeCard()
                     }
                 }
@@ -252,11 +222,11 @@ fun BikesTab(
                             BikeCard(
                                 bike = bike,
                                 currentLocation = currentLocation,
-                                onBikeClick = {
-                                    selectedBike = bike
+                                onBikeClick = { bikeItem ->
+                                    selectedBike = bikeItem
                                     showBottomSheet = true
                                 },
-                                onBook = {
+                                onBook = { _ ->
                                     // Would navigate to booking flow in a real implementation
                                 },
                                 onCompleteProfile = {
@@ -314,19 +284,76 @@ fun BikesTab(
         ) {
             BikeDetailSheet(
                 bike = selectedBike!!,
-                currentLocation = currentLocation,
+                isVisible = showBottomSheet,
+                isAvailable = true, // You might want to dynamically determine this
                 onViewDetails = {
-                    showBottomSheet = false
-                    navController?.navigate(Screen.BikeDetails.createRoute(selectedBike!!.id))
+                    navController?.navigate("bikeDetail/${selectedBike!!.id}")
                 },
-                onBook = {
-                    // Handle booking
+                onBook = { bikeItem ->
+                    // Open the booking calendar dialog
+                    bookingBike = bikeItem
+                    // Fetch bookings for this bike
+                    bikeViewModel.fetchBookingsForBike(bikeItem.id)
+                },
+                onDismiss = {
+                    selectedBike = null
+                    showBottomSheet = false
                 },
                 onCompleteProfile = {
                     navController?.navigate("editProfile")
                 }
             )
         }
+    }
+
+    // Add the booking calendar dialog
+    bookingBike?.let { bike ->
+        BookingCalendar(
+            isVisible = bookingBike != null,
+            onDismiss = { bookingBike = null },
+            bike = bike,
+            bookedDates = bikeViewModel.getBookedDatesForBike(bike.id),
+            isLoading = isBookingLoading,
+            onDateSelected = { date: Date ->
+                // Optional: Handle single date selection feedback
+            },
+            onBookingConfirmed = { startDate: Date, endDate: Date ->
+                bikeViewModel.createBooking(
+                    bikeId = bike.id,
+                    startDate = startDate,
+                    endDate = endDate,
+                    onSuccess = { booking: Booking ->
+                        // Hide the calendar
+                        bookingBike = null
+                        // Show success message
+                        Toast.makeText(
+                            context,
+                            "Booking successful!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        // Navigate to Bookings tab
+                        navController?.navigate("bookings") {
+                            // Pop up to the start destination of the graph to
+                            // avoid building up a large stack of destinations
+                            popUpTo("home") { saveState = true }
+                            // Avoid multiple copies of the same destination when
+                            // reselecting the same item
+                            launchSingleTop = true
+                            // Restore state when reselecting a previously selected item
+                            restoreState = true
+                        }
+                    },
+                    onError = { errorMessage: String ->
+                        // Show error message
+                        Toast.makeText(
+                            context,
+                            "Booking failed: $errorMessage",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                )
+            }
+        )
     }
 }
 
@@ -483,10 +510,10 @@ fun BikeCard(
                     // Distance from user
                     currentLocation?.let { location ->
                         val distance = calculateDistance(
-                            location.latitude,
-                            location.longitude,
-                            bike.latitude,
-                            bike.longitude
+                            lat1 = location.latitude,
+                            lon1 = location.longitude,
+                            lat2 = bike.latitude,
+                            lon2 = bike.longitude
                         )
                         Text(
                             text = "%.1f km".format(distance),
@@ -503,13 +530,14 @@ fun BikeCard(
 @Composable
 fun BikeDetailSheet(
     bike: Bike,
-    currentLocation: LatLng?,
+    isVisible: Boolean,
+    isAvailable: Boolean,
     onViewDetails: () -> Unit,
     onBook: (Bike) -> Unit,
+    onDismiss: () -> Unit,
     onCompleteProfile: () -> Unit
 ) {
     val scrollState = rememberScrollState()
-    val isAvailable = remember(bike) { bike.isAvailable && !bike.isInUse }
     
     // Get ViewModel for reviews
     val bikeViewModel: BikeViewModel = viewModel()
@@ -527,6 +555,21 @@ fun BikeDetailSheet(
     
     // State for error messages
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    // Location state for this component
+    val context = LocalContext.current
+    var currentLocation by remember { mutableStateOf<LatLng?>(null) }
+    
+    // Get current location when component mounts
+    LaunchedEffect(Unit) {
+        val locationManager = LocationManager.getInstance(context)
+        locationManager.getLastLocation(
+            onSuccess = { location ->
+                currentLocation = location
+            },
+            onFailure = { /* Handle failure */ }
+        )
+    }
     
     // Load reviews when the sheet is shown
     LaunchedEffect(bike.id) {
@@ -687,10 +730,10 @@ fun BikeDetailSheet(
                 // Distance
                 currentLocation?.let { location ->
                     val distance = calculateDistance(
-                        location.latitude,
-                        location.longitude,
-                        bike.latitude,
-                        bike.longitude
+                        lat1 = location.latitude,
+                        lon1 = location.longitude,
+                        lat2 = bike.latitude,
+                        lon2 = bike.longitude
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically

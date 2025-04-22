@@ -23,11 +23,14 @@ import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.bikerental.components.RestrictedButton
 import com.example.bikerental.models.Bike
+import com.example.bikerental.models.Booking
 import com.example.bikerental.models.Review
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.components.ReviewSection
 import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.android.gms.maps.model.LatLng
+import com.example.bikerental.components.BookingCalendar
+import java.util.Date
 
 // Use Dark Green color from ColorUtils
 private val DarkGreen = ColorUtils.DarkGreen
@@ -43,9 +46,21 @@ fun BikeDetailScreen(
     val isLoading by bikeViewModel.isLoading.collectAsState()
     val error by bikeViewModel.error.collectAsState()
     
+    // Booking calendar state
+    var showBookingCalendar by remember { mutableStateOf(false) }
+    val isBookingLoading by bikeViewModel.isBookingLoading.collectAsState()
+    val bookedDates by bikeViewModel.bikeBookings.collectAsState()
+    
     // Fetch bike details when screen is displayed
     LaunchedEffect(bikeId) {
         bikeViewModel.getBikeById(bikeId)
+    }
+    
+    // Fetch bookings for this bike when screen is shown
+    LaunchedEffect(bike?.id) {
+        bike?.id?.let {
+            bikeViewModel.fetchBookingsForBike(it)
+        }
     }
     
     Scaffold(
@@ -99,10 +114,14 @@ fun BikeDetailScreen(
                 BikeDetails(
                     bike = bike!!,
                     onBookClick = {
-                        // Would navigate to booking flow in a real implementation
+                        // Show booking calendar
+                        showBookingCalendar = true
                     },
                     onCompleteProfile = {
                         navController.navigate("editProfile")
+                    },
+                    onBookingSuccess = {
+                        // Show success message
                     }
                 )
             } else {
@@ -116,13 +135,43 @@ fun BikeDetailScreen(
             }
         }
     }
+    
+    // Booking calendar dialog
+    bike?.let {
+        BookingCalendar(
+            isVisible = showBookingCalendar,
+            onDismiss = { showBookingCalendar = false },
+            bike = it,
+            bookedDates = bikeViewModel.getBookedDatesForBike(it.id),
+            isLoading = isBookingLoading,
+            onDateSelected = { date ->
+                // Optional: Handle single date selection feedback
+            },
+            onBookingConfirmed = { startDate, endDate ->
+                bikeViewModel.createBooking(
+                    bikeId = it.id,
+                    startDate = startDate,
+                    endDate = endDate,
+                    onSuccess = { booking: Booking ->
+                        showBookingCalendar = false
+                        // Show success message
+                    },
+                    onError = { errorMessage ->
+                        // We should show an error message here
+                        Log.e("BikeDetails", "Booking error: $errorMessage")
+                    }
+                )
+            }
+        )
+    }
 }
 
 @Composable
 fun BikeDetails(
     bike: Bike,
     onBookClick: (Bike) -> Unit,
-    onCompleteProfile: () -> Unit
+    onCompleteProfile: () -> Unit,
+    onBookingSuccess: () -> Unit = {}
 ) {
     // View model to get reviews
     val bikeViewModel: BikeViewModel = viewModel()
