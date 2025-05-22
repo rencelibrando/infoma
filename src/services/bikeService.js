@@ -457,4 +457,43 @@ export const fixBikeCoordinates = async () => {
   }
 };
 
+// Function to update bike status based on booking changes
+export const updateBikeStatus = async (bikeId, statusUpdate) => {
+  try {
+    const bikeRef = doc(db, "bikes", bikeId);
+    const bikeDoc = await getDoc(bikeRef);
+    
+    if (!bikeDoc.exists()) {
+      console.error(`Bike with ID ${bikeId} not found`);
+      return null;
+    }
+    
+    const currentBike = bikeDoc.data();
+    
+    // Determine lock state based on availability
+    // Business rule: available bikes should be locked
+    const isLocked = statusUpdate.isAvailable ? true : statusUpdate.isInUse ? false : currentBike.isLocked;
+    
+    const updateData = {
+      isAvailable: statusUpdate.isAvailable,
+      isInUse: statusUpdate.isInUse,
+      isLocked: isLocked,
+      updatedAt: new Date()
+    };
+    
+    console.log(`Updating bike ${bikeId} status:`, updateData);
+    
+    await updateDoc(bikeRef, updateData);
+    
+    return {
+      id: bikeId,
+      ...currentBike,
+      ...updateData
+    };
+  } catch (error) {
+    console.error('Error updating bike status:', error);
+    throw error;
+  }
+};
+
 // Update the subscribeToBikes function to normalize coordinates

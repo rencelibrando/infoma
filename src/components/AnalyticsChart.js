@@ -142,10 +142,6 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
   
   // Process chart data based on the selected chart type
   const processChartData = (rides, type) => {
-    if (!rides || rides.length === 0) {
-      return [];
-    }
-    
     const today = new Date();
     const dataMap = new Map();
     
@@ -158,20 +154,22 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
         dataMap.set(dayStr, { count: 0, date });
       }
       
-      // Count rides per day
-      rides.forEach(ride => {
-        if (!ride.startTime) return;
-        
-        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
-        // Only count if within the last 7 days
-        if ((today - rideDate) / (1000 * 60 * 60 * 24) <= 7) {
-          const dayStr = rideDate.toLocaleDateString('en-US', { weekday: 'short' });
-          if (dataMap.has(dayStr)) {
-            const dayData = dataMap.get(dayStr);
-            dayData.count += 1;
+      // Count rides per day (only if we have rides)
+      if (rides && rides.length > 0) {
+        rides.forEach(ride => {
+          if (!ride.startDate) return;
+          
+          const rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          // Only count if within the last 7 days
+          if ((today - rideDate) / (1000 * 60 * 60 * 24) <= 7) {
+            const dayStr = rideDate.toLocaleDateString('en-US', { weekday: 'short' });
+            if (dataMap.has(dayStr)) {
+              const dayData = dataMap.get(dayStr);
+              dayData.count += 1;
+            }
           }
-        }
-      });
+        });
+      }
       
       // Convert map to array
       return Array.from(dataMap.entries())
@@ -189,22 +187,24 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
         dataMap.set(monthStr, { count: 0, date });
       }
       
-      // Count rides per month
-      rides.forEach(ride => {
-        if (!ride.startTime) return;
-        
-        const rideDate = ride.startTime.toDate ? ride.startTime.toDate() : new Date(ride.startTime);
-        const monthsAgo = (today.getFullYear() - rideDate.getFullYear()) * 12 + 
-                          today.getMonth() - rideDate.getMonth();
-        
-        if (monthsAgo <= 5 && monthsAgo >= 0) {
-          const monthStr = rideDate.toLocaleDateString('en-US', { month: 'short' });
-          if (dataMap.has(monthStr)) {
-            const monthData = dataMap.get(monthStr);
-            monthData.count += 1;
+      // Count rides per month (only if we have rides)
+      if (rides && rides.length > 0) {
+        rides.forEach(ride => {
+          if (!ride.startDate) return;
+          
+          const rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          const monthsAgo = (today.getFullYear() - rideDate.getFullYear()) * 12 + 
+                            today.getMonth() - rideDate.getMonth();
+          
+          if (monthsAgo <= 5 && monthsAgo >= 0) {
+            const monthStr = rideDate.toLocaleDateString('en-US', { month: 'short' });
+            if (dataMap.has(monthStr)) {
+              const monthData = dataMap.get(monthStr);
+              monthData.count += 1;
+            }
           }
-        }
-      });
+        });
+      }
       
       // Convert map to array
       return Array.from(dataMap.entries())
@@ -258,48 +258,48 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
         </ToggleButton>
       </ChartToggle>
       
-      {!hasData ? (
+      <ResponsiveContainer width="100%" height={300}>
+        <AreaChart 
+          data={chartData} 
+          margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
+          animationDuration={1000}
+          animationEasing="ease-out"
+        >
+          <defs>
+            <linearGradient id="rideGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={colors.chartGradientStart} stopOpacity={0.8}/>
+              <stop offset="95%" stopColor={colors.chartGradientEnd} stopOpacity={0.2}/>
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+          <XAxis 
+            dataKey="name" 
+            tick={{ fill: colors.darkGray }} 
+            axisLine={{ stroke: colors.mediumGray }} 
+          />
+          <YAxis 
+            tick={{ fill: colors.darkGray }} 
+            axisLine={{ stroke: colors.mediumGray }}
+            allowDecimals={false}
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend wrapperStyle={{ marginTop: 10 }} />
+          <Area
+            type="monotone" 
+            dataKey="value"
+            name="Ride Count" 
+            stroke={colors.pineGreen}
+            fillOpacity={1}
+            fill="url(#rideGradient)"
+            strokeWidth={2}
+            activeDot={{ r: 6, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
+            isAnimationActive={true}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+      
+      {!hasData && (
         <NoDataMessage>No ride data available</NoDataMessage>
-      ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <AreaChart 
-            data={chartData} 
-            margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
-            animationDuration={1000}
-            animationEasing="ease-out"
-          >
-            <defs>
-              <linearGradient id="rideGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={colors.chartGradientStart} stopOpacity={0.8}/>
-                <stop offset="95%" stopColor={colors.chartGradientEnd} stopOpacity={0.2}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-            <XAxis 
-              dataKey="name" 
-              tick={{ fill: colors.darkGray }} 
-              axisLine={{ stroke: colors.mediumGray }} 
-            />
-            <YAxis 
-              tick={{ fill: colors.darkGray }} 
-              axisLine={{ stroke: colors.mediumGray }}
-              allowDecimals={false}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ marginTop: 10 }} />
-            <Area
-              type="monotone" 
-              dataKey="value"
-              name="Ride Count" 
-              stroke={colors.pineGreen}
-              fillOpacity={1}
-              fill="url(#rideGradient)"
-              strokeWidth={2}
-              activeDot={{ r: 6, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
-              isAnimationActive={true}
-            />
-          </AreaChart>
-        </ResponsiveContainer>
       )}
     </ChartContainer>
   );

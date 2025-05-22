@@ -1,4 +1,3 @@
-// src/components/BookingManagement.js
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { 
@@ -8,10 +7,23 @@ import {
   getBookingsByBike,
   getBookingsByDateRange,
   calculateBookingDuration,
-  getRevenueByPeriod
+  getRevenueByPeriod,
+  getBookingsByUserRole
 } from '../services/bookingService';
-import { getBikes } from '../services/bikeService';
-import { format } from 'date-fns';
+import { getBikes, updateBikeStatus } from '../services/bikeService';
+import { getUsers } from '../services/userService';
+import { format, parseISO, startOfWeek, endOfWeek, addDays, startOfDay, endOfDay } from 'date-fns';
+import { db } from '../firebase';
+import { 
+  collection, 
+  query, 
+  orderBy, 
+  onSnapshot,
+  doc,
+  getDocs
+} from 'firebase/firestore';
+import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
+import 'react-big-calendar/lib/css/react-big-calendar.css';
 
 // Pine green and gray theme colors consistent with app
 const colors = {
@@ -31,8 +43,12 @@ const colors = {
   lightAmber: '#fff8e1'
 };
 
+// Container styled component
 const Container = styled.div`
   width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 0 20px;
 `;
 
 const PageHeader = styled.div`
@@ -42,12 +58,15 @@ const PageHeader = styled.div`
   margin-bottom: 30px;
   flex-wrap: wrap;
   gap: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid ${colors.lightGray};
 `;
 
 const PageTitle = styled.h2`
-  font-size: 28px;
+  font-size: 30px;
   color: ${colors.darkGray};
   margin: 0;
+  font-weight: 600;
 `;
 
 const RevenueSummaryContainer = styled.div`
@@ -100,140 +119,70 @@ const BookingCount = styled.div`
   display: inline-block;
 `;
 
-const FilterPanel = styled.div`
+const BookingSummarySection = styled.div`
   background-color: white;
   border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 25px;
   margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 `;
 
-const FilterPanelTitle = styled.h3`
+const BookingSummaryTitle = styled.h3`
   font-size: 18px;
   color: ${colors.darkGray};
-  margin: 0 0 20px 0;
+  margin: 0 0 25px 0;
   display: flex;
   align-items: center;
+  font-weight: 600;
   
   svg {
-    margin-right: 8px;
+    margin-right: 10px;
+    color: ${colors.pineGreen};
   }
 `;
 
-const FilterContainer = styled.div`
+const BookingSummaryGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 15px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 30px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 20px;
+  }
 `;
 
-const FilterGroup = styled.div`
+const SummaryCard = styled.div`
   display: flex;
   flex-direction: column;
-`;
-
-const FilterLabel = styled.label`
-  font-weight: 500;
-  margin-bottom: 8px;
-  color: ${colors.darkGray};
-  font-size: 14px;
-`;
-
-const FilterSelect = styled.select`
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  background-color: white;
-  width: 100%;
-  font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  
-  &:focus {
-    border-color: ${colors.pineGreen};
-    box-shadow: 0 0 0 3px rgba(29, 60, 52, 0.1);
-    outline: none;
-  }
-`;
-
-const FilterInput = styled.input`
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  width: 100%;
-  font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  
-  &:focus {
-    border-color: ${colors.pineGreen};
-    box-shadow: 0 0 0 3px rgba(29, 60, 52, 0.1);
-    outline: none;
-  }
-`;
-
-const DateFilterContainer = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 10px;
-`;
-
-const FilterActions = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 20px;
-  flex-wrap: wrap;
-  gap: 15px;
-`;
-
-const ClearFiltersButton = styled.button`
-  padding: 8px 16px;
+  padding: 20px;
   background-color: ${colors.lightGray};
-  color: ${colors.mediumGray};
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: background-color 0.2s;
+  border-radius: 12px;
+  transition: all 0.3s;
   
   &:hover {
-    background-color: #e0e0e0;
+    transform: translateY(-5px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.08);
   }
 `;
 
-const ActiveFiltersContainer = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-`;
-
-const FilterTag = styled.div`
-  display: flex;
-  align-items: center;
-  background-color: ${colors.lightPineGreen};
-  color: white;
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 13px;
-  
-  span {
-    margin-left: 8px;
-    cursor: pointer;
-    font-weight: bold;
-  }
-`;
-
-const SortContainer = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-`;
-
-const SortLabel = styled.label`
-  margin-right: 8px;
-  color: ${colors.darkGray};
-  font-weight: 500;
+const SummaryLabel = styled.div`
   font-size: 14px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+`;
+
+const SummaryValue = styled.div`
+  font-size: 28px;
+  font-weight: 600;
+  color: ${colors.pineGreen};
+`;
+
+const SummarySubtext = styled.div`
+  font-size: 13px;
+  color: ${colors.mediumGray};
+  margin-top: 5px;
 `;
 
 const BookingsTable = styled.div`
@@ -242,6 +191,7 @@ const BookingsTable = styled.div`
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 25px;
 `;
 
 const TableHeader = styled.div`
@@ -250,7 +200,9 @@ const TableHeader = styled.div`
   background-color: ${colors.pineGreen};
   color: white;
   font-weight: 600;
-  padding: 18px 15px;
+  padding: 18px 20px;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
   
   @media (max-width: 768px) {
     display: none;
@@ -260,9 +212,9 @@ const TableHeader = styled.div`
 const TableRow = styled.div`
   display: grid;
   grid-template-columns: 1.5fr 1fr 1.5fr 1fr 1fr 1fr 1fr 1.5fr;
-  padding: 18px 15px;
+  padding: 20px;
   border-bottom: 1px solid #eee;
-  transition: all 0.2s;
+  transition: all 0.3s;
   align-items: center;
   
   &:hover {
@@ -271,12 +223,16 @@ const TableRow = styled.div`
     box-shadow: 0 2px 5px rgba(0,0,0,0.05);
   }
   
+  &:last-child {
+    border-bottom: none;
+  }
+  
   @media (max-width: 768px) {
     display: flex;
     flex-direction: column;
     padding: 20px 15px;
     position: relative;
-    margin-bottom: 15px;
+    margin: 15px;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     border-left: 5px solid ${props => {
@@ -296,6 +252,7 @@ const TableCell = styled.div`
   @media (max-width: 768px) {
     padding: 10px 0;
     border-bottom: 1px solid #f0f0f0;
+    width: 100%;
     
     &:last-child {
       border-bottom: none;
@@ -331,24 +288,22 @@ const ViewDetailsButton = styled.button`
 `;
 
 const BikeImage = styled.img`
-  width: 45px;
-  height: 45px;
+  width: 50px;
+  height: 50px;
   border-radius: 8px;
-  margin-right: 10px;
+  margin-right: 12px;
   object-fit: cover;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
 `;
 
-const BikeNameHeader = styled.div`
-  font-weight: 600;
-  font-size: 16px;
-  color: ${colors.darkGray};
-  margin-bottom: 5px;
+const BikeNameDisplay = styled.div`
+  display: flex;
+  align-items: center;
 `;
 
 const BookingTypeTag = styled.span`
   display: inline-block;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 20px;
   font-size: 11px;
   margin-left: 8px;
@@ -402,7 +357,7 @@ const PaymentBadge = styled.span`
 `;
 
 const ActionButton = styled.button`
-  padding: 8px 15px;
+  padding: 8px 16px;
   margin-right: 8px;
   border: none;
   border-radius: 8px;
@@ -456,7 +411,7 @@ const ButtonGroup = styled.div`
 `;
 
 const EmptyState = styled.div`
-  padding: 70px 20px;
+  padding: 80px 20px;
   text-align: center;
   color: ${colors.mediumGray};
   display: flex;
@@ -466,7 +421,7 @@ const EmptyState = styled.div`
   
   svg {
     font-size: 48px;
-    margin-bottom: 15px;
+    margin-bottom: 20px;
     color: ${colors.lightPineGreen};
     opacity: 0.7;
   }
@@ -476,12 +431,14 @@ const EmptyStateMessage = styled.div`
   font-size: 18px;
   margin-bottom: 10px;
   color: ${colors.darkGray};
+  font-weight: 500;
 `;
 
 const EmptyStateSubtext = styled.div`
   font-size: 14px;
   max-width: 400px;
   margin: 0 auto;
+  line-height: 1.5;
 `;
 
 const PaginationContainer = styled.div`
@@ -490,12 +447,25 @@ const PaginationContainer = styled.div`
   margin-top: 30px;
   gap: 10px;
   align-items: center;
+  margin-bottom: 40px;
+  
+  @media (max-width: 768px) {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
 `;
 
 const PageInfo = styled.div`
   color: ${colors.mediumGray};
   font-size: 14px;
   margin-right: 15px;
+  
+  @media (max-width: 768px) {
+    width: 100%;
+    text-align: center;
+    margin-right: 0;
+    margin-bottom: 10px;
+  }
 `;
 
 const PaginationButton = styled.button`
@@ -515,381 +485,12 @@ const PaginationButton = styled.button`
   }
 `;
 
-const ModalOverlay = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-  backdrop-filter: blur(3px);
-`;
-
-const ModalContent = styled.div`
-  background-color: white;
-  border-radius: 12px;
-  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
-  padding: 30px;
-  max-width: 900px;
-  width: 90%;
-  max-height: 90vh;
-  overflow-y: auto;
-  animation: modalFadeIn 0.3s ease;
-  
-  @keyframes modalFadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 25px;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 20px;
-`;
-
-const ModalTitle = styled.h3`
-  margin: 0;
-  color: ${colors.darkGray};
-  font-size: 24px;
-`;
-
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: ${colors.mediumGray};
-  transition: color 0.2s;
-  
-  &:hover {
-    color: ${colors.darkGray};
-  }
-`;
-
-const TabsContainer = styled.div`
-  display: flex;
-  margin-bottom: 25px;
-  border-bottom: 1px solid #eee;
-`;
-
-const TabButton = styled.button`
-  padding: 12px 20px;
-  background: none;
-  border: none;
-  border-bottom: 3px solid ${props => props.active ? colors.pineGreen : 'transparent'};
-  color: ${props => props.active ? colors.pineGreen : colors.mediumGray};
-  font-weight: ${props => props.active ? 600 : 400};
-  cursor: pointer;
-  transition: all 0.2s;
-  
-  &:hover {
-    color: ${colors.pineGreen};
-  }
-`;
-
-const DetailsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 30px;
-`;
-
-const DetailSection = styled.div`
-  margin-bottom: 30px;
-  background-color: ${colors.lightGray};
-  border-radius: 12px;
-  padding: 20px;
-`;
-
-const DetailSectionTitle = styled.h4`
-  margin: 0 0 20px;
-  color: ${colors.darkGray};
-  font-size: 18px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  
-  svg {
-    margin-right: 8px;
-    color: ${colors.pineGreen};
-  }
-`;
-
-const DetailItem = styled.div`
-  margin-bottom: 15px;
-  
-  &:last-child {
-    margin-bottom: 0;
-  }
-`;
-
-const DetailLabel = styled.div`
-  font-size: 13px;
-  color: ${colors.mediumGray};
-  margin-bottom: 6px;
-`;
-
-const DetailValue = styled.div`
-  font-size: 15px;
-  color: ${colors.darkGray};
-  font-weight: ${props => props.bold ? 600 : 400};
-`;
-
-const BikeDetailCard = styled.div`
-  display: flex;
-  align-items: center;
-  background-color: white;
-  padding: 20px;
-  border-radius: 12px;
-  margin-bottom: 30px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-`;
-
-const BikeDetailImage = styled.img`
-  width: 120px;
-  height: 120px;
-  border-radius: 12px;
-  object-fit: cover;
-  margin-right: 25px;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-`;
-
-const BikeDetailInfo = styled.div`
-  flex: 1;
-`;
-
-const BikeDetailName = styled.div`
-  font-size: 22px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: ${colors.darkGray};
-`;
-
-const BikeDetailType = styled.div`
-  font-size: 15px;
-  color: ${colors.mediumGray};
-  margin-bottom: 15px;
-`;
-
-const BikeDetailPrice = styled.div`
-  font-weight: 600;
-  color: ${colors.pineGreen};
-  font-size: 18px;
-`;
-
-const ActionButtonsContainer = styled.div`
-  margin-top: 30px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-  
-  @media (max-width: 576px) {
-    flex-direction: column;
-  }
-`;
-
-const BookingInfoCard = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-`;
-
-const BookingInfoLabel = styled.div`
-  font-size: 12px;
-  color: ${colors.mediumGray};
-  font-weight: 500;
-`;
-
-const BookingInfoValue = styled.div`
-  font-size: 14px;
-  font-weight: ${props => props.bold ? '600' : 'normal'};
-  color: ${colors.darkGray};
-`;
-
-const BookingPrice = styled.div`
-  font-weight: 600;
-  font-size: 15px;
-  color: ${colors.pineGreen};
-`;
-
-const BookingDuration = styled.div`
-  font-weight: 500;
-  color: ${colors.blue};
-  background-color: ${colors.lightBlue};
-  border-radius: 4px;
-  padding: 3px 6px;
-  display: inline-block;
-  font-size: 13px;
-`;
-
-const BookingSummarySection = styled.div`
-  background-color: white;
-  border-radius: 12px;
-  padding: 25px;
-  margin-bottom: 30px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-`;
-
-const BookingSummaryTitle = styled.h3`
-  font-size: 18px;
-  color: ${colors.darkGray};
-  margin: 0 0 20px 0;
-  display: flex;
-  align-items: center;
-  
-  svg {
-    margin-right: 8px;
-    color: ${colors.pineGreen};
-  }
-`;
-
-const BookingSummaryGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 30px;
-`;
-
-const SummaryCard = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-`;
-
-const SummaryLabel = styled.div`
-  font-size: 14px;
-  color: ${colors.mediumGray};
-  font-weight: 500;
-`;
-
-const SummaryValue = styled.div`
-  font-size: 24px;
-  font-weight: 600;
-  color: ${colors.pineGreen};
-`;
-
-const SummarySubtext = styled.div`
-  font-size: 13px;
-  color: ${colors.mediumGray};
-`;
-
 const BikeBookingsSection = styled.div`
   background-color: white;
   border-radius: 12px;
   padding: 25px;
   margin-bottom: 30px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-`;
-
-const BikeBookingsList = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
-`;
-
-const BikeBookingCard = styled.div`
-  border: 1px solid #eee;
-  border-radius: 8px;
-  padding: 15px;
-  background-color: ${colors.lightGray};
-  transition: transform 0.2s, box-shadow 0.2s;
-  
-  &:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-  }
-`;
-
-const BikeHeader = styled.div`
-  display: flex;
-  margin-bottom: 15px;
-  align-items: center;
-`;
-
-const BikeImageSmall = styled.img`
-  width: 60px;
-  height: 60px;
-  border-radius: 8px;
-  margin-right: 15px;
-  object-fit: cover;
-`;
-
-const BikeInfo = styled.div`
-  flex: 1;
-`;
-
-const BikeStats = styled.div`
-  display: flex;
-  gap: 15px;
-  margin-bottom: 10px;
-`;
-
-const BikeStat = styled.div`
-  font-size: 12px;
-  color: ${colors.mediumGray};
-  background-color: rgba(0,0,0,0.05);
-  padding: 4px 8px;
-  border-radius: 4px;
-`;
-
-const BookingMiniList = styled.div`
-  max-height: 200px;
-  overflow-y: auto;
-  border-top: 1px solid #eee;
-  padding-top: 10px;
-`;
-
-const BookingMiniItem = styled.div`
-  padding: 8px;
-  border-bottom: 1px solid #f5f5f5;
-  font-size: 13px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  
-  &:hover {
-    background-color: white;
-  }
-`;
-
-const BookingDate = styled.div`
-  font-size: 13px;
-  color: ${colors.mediumGray};
-`;
-
-const ViewAllButton = styled.button`
-  width: 100%;
-  padding: 8px;
-  margin-top: 10px;
-  background: none;
-  border: 1px dashed ${colors.pineGreen};
-  color: ${colors.pineGreen};
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  
-  &:hover {
-    background-color: ${colors.lightPineGreen};
-    color: white;
-  }
-`;
-
-const BikeNameDisplay = styled.div`
-  display: flex;
-  align-items: center;
 `;
 
 // Add a toggle button styled component
@@ -919,36 +520,554 @@ const BookingStatusPill = styled.div`
   font-weight: 500;
 `;
 
+const BookingInfoCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+`;
+
+const BookingInfoLabel = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+  margin-bottom: 2px;
+`;
+
+const BookingInfoValue = styled.div`
+  font-size: 14px;
+  font-weight: ${props => props.bold ? '600' : 'normal'};
+  color: ${colors.darkGray};
+  line-height: 1.4;
+`;
+
+const UserNameLink = styled.span`
+  color: ${colors.pineGreen};
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: inherit;
+  
+  &:hover {
+    color: ${colors.lightPineGreen};
+  }
+`;
+
+const UserInfoValue = styled.div`
+  font-size: 14px;
+  font-weight: ${props => props.bold ? '600' : 'normal'};
+  color: ${colors.darkGray};
+`;
+
+const BookingPrice = styled.div`
+  font-weight: 600;
+  font-size: 15px;
+  color: ${colors.pineGreen};
+`;
+
+const BookingDuration = styled.div`
+  font-weight: 500;
+  color: ${colors.blue};
+  background-color: ${colors.lightBlue};
+  border-radius: 4px;
+  padding: 4px 8px;
+  display: inline-block;
+  font-size: 13px;
+  margin-top: 4px;
+`;
+
+// Add a new styled component for filters
+const FiltersSection = styled.div`
+  background-color: white;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 25px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+`;
+
+const FiltersGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 18px;
+  margin-bottom: 20px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+`;
+
+const FilterSelect = styled.select`
+  width: 100%;
+  padding: 12px 15px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background-color: ${colors.white};
+  font-size: 14px;
+  
+  &:focus {
+    outline: none;
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 0 0 2px rgba(29, 60, 52, 0.1);
+  }
+`;
+
+const FilterInput = styled.input`
+  width: 100%;
+  padding: 12px 15px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background-color: ${colors.white};
+  font-size: 14px;
+  
+  &:focus {
+    outline: none;
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 0 0 2px rgba(29, 60, 52, 0.1);
+  }
+`;
+
+const FilterButton = styled.button`
+  background-color: ${colors.pineGreen};
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  
+  &:hover {
+    background-color: ${colors.lightPineGreen};
+  }
+  
+  svg {
+    margin-right: 8px;
+  }
+`;
+
+const ActiveFiltersContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 15px;
+`;
+
+const FilterTag = styled.div`
+  display: flex;
+  align-items: center;
+  background-color: ${colors.lightGray};
+  border-radius: 20px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: ${colors.darkGray};
+  
+  button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: ${colors.mediumGray};
+    margin-left: 8px;
+    display: flex;
+    align-items: center;
+    
+    &:hover {
+      color: ${colors.red};
+    }
+  }
+`;
+
+// New styled components for calendar view
+const CalendarContainer = styled.div`
+  background-color: white;
+  border-radius: 12px;
+  padding: 25px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  height: 700px;
+
+  .rbc-calendar {
+    height: 100%;
+  }
+
+  .rbc-event {
+    background-color: ${colors.pineGreen};
+  }
+
+  .rbc-event.confirmed {
+    background-color: ${colors.green};
+  }
+
+  .rbc-event.pending {
+    background-color: ${colors.amber};
+  }
+
+  .rbc-event.cancelled {
+    background-color: ${colors.red};
+    text-decoration: line-through;
+  }
+
+  .rbc-event.completed {
+    background-color: ${colors.blue};
+  }
+
+  .rbc-toolbar button {
+    color: ${colors.darkGray};
+  }
+
+  .rbc-toolbar button.rbc-active {
+    background-color: ${colors.pineGreen};
+    color: white;
+  }
+  
+  @media (max-width: 768px) {
+    height: 600px;
+    padding: 15px;
+  }
+`;
+
+const ViewSwitchContainer = styled.div`
+  display: flex;
+  margin-bottom: 25px;
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+  border: 1px solid ${colors.pineGreen};
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+`;
+
+const ViewSwitchButton = styled.button`
+  background-color: ${props => props.active ? colors.pineGreen : 'white'};
+  color: ${props => props.active ? 'white' : colors.pineGreen};
+  border: none;
+  padding: 12px 20px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover {
+    background-color: ${props => props.active ? colors.pineGreen : colors.lightGray};
+  }
+  
+  &:first-child {
+    border-right: 1px solid ${colors.pineGreen};
+  }
+`;
+
+const BookingTooltip = styled.div`
+  background-color: white;
+  border-radius: 8px;
+  padding: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  max-width: 280px;
+  border-left: 4px solid ${props => {
+    // Safely access nested properties with optional chaining
+    const status = props?.children?.props?.event?.status;
+    if (status === 'CONFIRMED') return colors.green;
+    if (status === 'PENDING') return colors.amber;
+    if (status === 'CANCELLED') return colors.red;
+    if (status === 'COMPLETED') return colors.blue;
+    return colors.pineGreen;
+  }};
+  
+  h4 {
+    margin: 0 0 12px;
+    color: ${colors.darkGray};
+    font-size: 16px;
+    border-bottom: 1px solid ${colors.lightGray};
+    padding-bottom: 8px;
+  }
+  
+  p {
+    margin: 6px 0;
+    font-size: 14px;
+    color: ${colors.mediumGray};
+    
+    strong {
+      color: ${colors.darkGray};
+    }
+  }
+  
+  button {
+    background-color: ${colors.pineGreen};
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-top: 12px;
+    font-size: 13px;
+    cursor: pointer;
+    width: 100%;
+    
+    &:hover {
+      background-color: ${colors.lightPineGreen};
+    }
+  }
+`;
+
+const ModalWrapper = styled.div`
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
+  width: 80%;
+  max-width: 800px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+
+  & > h3 {
+    margin-top: 0;
+    color: ${colors.darkGray};
+    border-bottom: 1px solid ${colors.lightGray};
+    padding-bottom: 10px;
+  }
+`;
+
+const UserInfoPopup = styled.div`
+  position: absolute;
+  background-color: white;
+  border-radius: 8px;
+  padding: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  max-width: 280px;
+  border-left: 4px solid ${colors.pineGreen};
+  z-index: 1000;
+`;
+
+const UserInfoHeader = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+`;
+
+const UserInfoRow = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+`;
+
+const UserInfoLabel = styled.div`
+  font-size: 13px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+  margin-right: 8px;
+`;
+
+const Notification = styled.div`
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2000;
+  padding: 15px 20px;
+  border-radius: 8px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 350px;
+  animation: slideIn 0.3s ease;
+  
+  background-color: ${props => 
+    props.type === 'success' ? colors.lightGreen : 
+    props.type === 'error' ? colors.lightRed : 
+    colors.lightGray};
+  
+  color: ${props => 
+    props.type === 'success' ? colors.green : 
+    props.type === 'error' ? colors.red : 
+    colors.darkGray};
+  
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+`;
+
 const BookingManagement = () => {
   const [bookings, setBookings] = useState([]);
-  const [filteredBookings, setFilteredBookings] = useState([]);
   const [bikes, setBikes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState([]);
+  const [revenueSummary, setRevenueSummary] = useState({
+    day: { totalRevenue: 0, bookings: 0, completedBookings: 0 },
+    week: { totalRevenue: 0, bookings: 0, completedBookings: 0 },
+    month: { totalRevenue: 0, bookings: 0, completedBookings: 0 }
+  });
+  const [bookingSummary, setBookingSummary] = useState({});
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userPopupPosition, setUserPopupPosition] = useState({ x: 0, y: 0 });
+  const [viewMode, setViewMode] = useState('list');
+  const [filters, setFilters] = useState({
+    bike: '',
+    status: '',
+    payment: '',
+    startDate: '',
+    endDate: ''
+  });
+  const [filteredBookings, setFilteredBookings] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [realTimeEnabled, setRealTimeEnabled] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(true);
+  const [showAllBikesView, setShowAllBikesView] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  
+  // Notification state
+  const [notification, setNotification] = useState(null);
+  
+  // Function to show a notification
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type });
+    
+    // Auto-hide notification after 5 seconds
+    setTimeout(() => {
+      setNotification(null);
+    }, 5000);
+  };
+  
+  // Mock data for filters and pagination
   const [statusFilter, setStatusFilter] = useState('all');
   const [bikeFilter, setBikeFilter] = useState('all');
   const [bookingTypeFilter, setBookingTypeFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [updating, setUpdating] = useState(false);
-  const [sortBy, setSortBy] = useState('startTime');
-  const [sortDirection, setSortDirection] = useState('desc');
-  const [selectedBooking, setSelectedBooking] = useState(null);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
-  const [revenueData, setRevenueData] = useState({
-    day: { totalRevenue: 0, bookings: 0 },
-    week: { totalRevenue: 0, bookings: 0 },
-    month: { totalRevenue: 0, bookings: 0 }
-  });
-  const [bikeBookingsMap, setBikeBookingsMap] = useState({});
-  const [selectedBikeId, setSelectedBikeId] = useState(null);
-  const [showAllBikesView, setShowAllBikesView] = useState(true);
+  const [activeFilters, setActiveFilters] = useState([]);
+  const indexOfFirstBooking = 0;
+  const indexOfLastBooking = 10;
+  const currentBookings = filteredBookings.slice(0, 10);
   
-  const bookingsPerPage = 10;
+  const locales = {
+    'en-US': require('date-fns/locale/en-US')
+  };
+  
+  const localizer = dateFnsLocalizer({
+    format,
+    parse: parseISO,
+    startOfWeek: () => startOfWeek(new Date()),
+    getDay: (date) => date.getDay(),
+    locales,
+  });
 
-  // Clear all filters
+  const toggleRealTimeUpdates = () => {
+    setRealTimeEnabled(!realTimeEnabled);
+  };
+
+  const handleViewAllBikes = () => {
+    setShowAllBikesView(true);
+  };
+
+  // Function to handle status changes
+  const handleStatusChange = async (bookingId, newStatus) => {
+    try {
+      setUpdating(true);
+      
+      // Update booking status in the database
+      const updatedBooking = await updateBooking(bookingId, {
+        status: newStatus,
+        updatedAt: new Date()
+      });
+      
+      // If status is changing to COMPLETED or CANCELLED, also update the bike availability
+      if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
+        const booking = bookings.find(b => b.id === bookingId);
+        if (booking && booking.bikeId) {
+          // Update bike status - mark as available when booking is completed or cancelled
+          await updateBikeStatus(booking.bikeId, {
+            isAvailable: true,
+            isInUse: false
+          });
+        }
+      } else if (newStatus === 'CONFIRMED') {
+        // When confirming, mark the bike as unavailable
+        const booking = bookings.find(b => b.id === bookingId);
+        if (booking && booking.bikeId) {
+          await updateBikeStatus(booking.bikeId, {
+            isInUse: true
+          });
+        }
+      }
+      
+      // Update the bookings state with the updated booking
+      setBookings(prevBookings => 
+        prevBookings.map(booking => 
+          booking.id === bookingId ? {...booking, status: newStatus} : booking
+        )
+      );
+      
+      // Update filtered bookings
+      setFilteredBookings(prevFilteredBookings => 
+        prevFilteredBookings.map(booking => 
+          booking.id === bookingId ? {...booking, status: newStatus} : booking
+        )
+      );
+      
+      // If the selected booking is the one being updated, update it too
+      if (selectedBooking && selectedBooking.id === bookingId) {
+        setSelectedBooking({...selectedBooking, status: newStatus});
+      }
+      
+      // Show success notification
+      const booking = bookings.find(b => b.id === bookingId);
+      const bookingName = booking?.bikeName || 'Booking';
+      
+      let statusText;
+      switch(newStatus) {
+        case 'CONFIRMED': statusText = 'confirmed'; break;
+        case 'COMPLETED': statusText = 'completed'; break;
+        case 'CANCELLED': statusText = 'cancelled'; break;
+        default: statusText = newStatus.toLowerCase();
+      }
+      
+      showNotification(`${bookingName} successfully ${statusText}!`, 'success');
+      
+    } catch (error) {
+      console.error(`Error updating booking status to ${newStatus}:`, error);
+      showNotification(`Error updating booking: ${error.message}`, 'error');
+    } finally {
+      setUpdating(false);
+    }
+  };
+  
+  // Function to view booking details
+  const handleViewDetails = (booking) => {
+    setSelectedBooking(booking);
+    setShowDetailsModal(true);
+  };
+  
+  // Function to handle user click
+  const handleUserClick = (booking, e) => {
+    e.stopPropagation();
+    const rect = e.target.getBoundingClientRect();
+    setUserPopupPosition({
+      x: rect.left,
+      y: rect.bottom + 5
+    });
+    setSelectedUser({
+      fullName: booking.fullName || booking.userName,
+      email: booking.userEmail,
+      phone: booking.userPhone,
+      userId: booking.userId,
+      booking
+    });
+  };
+  
+  // Function to clear filters
   const clearFilters = () => {
     setStatusFilter('all');
     setBikeFilter('all');
@@ -956,99 +1075,168 @@ const BookingManagement = () => {
     setSearchTerm('');
     setStartDateFilter('');
     setEndDateFilter('');
-    setSortBy('startTime');
-    setSortDirection('desc');
+    setActiveFilters([]);
   };
-
-  // Remove individual filter
-  const removeFilter = (filterType) => {
-    switch (filterType) {
-      case 'status':
-        setStatusFilter('all');
-        break;
-      case 'bike':
-        setBikeFilter('all');
-        break;
-      case 'type':
-        setBookingTypeFilter('all');
-        break;
-      case 'search':
-        setSearchTerm('');
-        break;
-      case 'dateRange':
+  
+  // Function to remove a filter
+  const removeFilter = (type) => {
+    switch(type) {
+      case 'status': setStatusFilter('all'); break;
+      case 'bike': setBikeFilter('all'); break;
+      case 'type': setBookingTypeFilter('all'); break;
+      case 'search': setSearchTerm(''); break;
+      case 'date': 
         setStartDateFilter('');
         setEndDateFilter('');
         break;
-      default:
-        break;
+      default: break;
     }
+    setActiveFilters(activeFilters.filter(f => f.type !== type));
+  };
+  
+  // Function to format bookings for calendar
+  const formatBookingsForCalendar = () => {
+    return bookings.map(booking => ({
+      title: `${booking.bikeName} - ${booking.fullName || booking.userName}`,
+      start: booking.startDate,
+      end: booking.endDate,
+      booking: booking,
+      status: booking.status
+    }));
+  };
+  
+  // Event style getter for calendar
+  const eventStyleGetter = (event) => {
+    let style = {
+      backgroundColor: colors.pineGreen
+    };
+    
+    if (event.status === 'CONFIRMED') {
+      style.backgroundColor = colors.green;
+    } else if (event.status === 'PENDING') {
+      style.backgroundColor = colors.amber;
+    } else if (event.status === 'CANCELLED') {
+      style.backgroundColor = colors.red;
+    } else if (event.status === 'COMPLETED') {
+      style.backgroundColor = colors.blue;
+    }
+    
+    return { style };
+  };
+  
+  // Event tooltip component
+  const EventTooltip = ({ event }) => {
+    return (
+      <div>
+        <strong>{event.title}</strong>
+        <p>{event.booking.isHourly ? 'Hourly Rental' : 'Daily Rental'}</p>
+      </div>
+    );
   };
 
-  // Get active filters for filter tags
-  const getActiveFilters = () => {
-    const filters = [];
-    
-    if (statusFilter !== 'all') {
-      filters.push({
-        type: 'status',
-        label: `Status: ${statusFilter}`,
-      });
-    }
-    
-    if (bikeFilter !== 'all') {
-      const bike = bikes.find(b => b.id === bikeFilter);
-      filters.push({
-        type: 'bike',
-        label: `Bike: ${bike ? bike.name : bikeFilter}`,
-      });
-    }
-    
-    if (bookingTypeFilter !== 'all') {
-      filters.push({
-        type: 'type',
-        label: `Type: ${bookingTypeFilter}`,
-      });
-    }
-    
-    if (searchTerm) {
-      filters.push({
-        type: 'search',
-        label: `Search: ${searchTerm}`,
-      });
-    }
-    
-    if (startDateFilter && endDateFilter) {
-      filters.push({
-        type: 'dateRange',
-        label: `Date: ${startDateFilter} to ${endDateFilter}`,
-      });
-    }
-    
-    return filters;
-  };
-
+  // Initial data loading
   useEffect(() => {
     // Load bookings, bikes, and revenue data
     const loadData = async () => {
       try {
-        setLoading(true);
+        setIsLoading(true);
         
-        // Load bookings and bikes in parallel
-        const [bookingsData, bikesData] = await Promise.all([
-          getAllBookings(),
-          getBikes()
+        // Load bikes and users in parallel
+        const [bikesData, usersData] = await Promise.all([
+          getBikes(),
+          getUsers()
         ]);
         
-        setBookings(bookingsData);
-        setFilteredBookings(bookingsData);
         setBikes(bikesData);
         
-        // Group bookings by bike
-        const groupedBookings = {};
-        bikesData.forEach(bike => {
-          groupedBookings[bike.id] = bookingsData.filter(booking => booking.bikeId === bike.id);
-        });
-        setBikeBookingsMap(groupedBookings);
+        // Set up real-time listener for bookings if enabled
+        if (realTimeEnabled) {
+          try {
+            // Use collection query to get bookings from main collection
+            const bookingsRef = collection(db, "bookings");
+            const bookingsQuery = query(bookingsRef, orderBy("createdAt", "desc"));
+            
+            // Set up the real-time listener
+            const unsubscribe = onSnapshot(bookingsQuery, (snapshot) => {
+              const bookingsData = [];
+              
+              snapshot.forEach(doc => {
+                const data = doc.data();
+                bookingsData.push({
+                  id: doc.id,
+                  ...data,
+                  startDate: data.startDate?.toDate ? data.startDate?.toDate() : data.startDate,
+                  endDate: data.endDate?.toDate ? data.endDate?.toDate() : data.endDate,
+                  createdAt: data.createdAt?.toDate ? data.createdAt?.toDate() : data.createdAt
+                });
+              });
+              
+              // Enhance booking data with bike and user information
+              const enhancedBookings = bookingsData.map(booking => {
+                let enhancedBooking = { ...booking };
+                
+                // Add bike information if missing
+                if (!booking.bikeName) {
+                  const matchingBike = bikesData.find(bike => bike.id === booking.bikeId);
+                  if (matchingBike) {
+                    enhancedBooking = {
+                      ...enhancedBooking,
+                      bikeName: matchingBike.name || 'Unknown Bike',
+                      bikeType: matchingBike.type || '',
+                      bikeImageUrl: matchingBike.imageUrl || ''
+                    };
+                  }
+                }
+                
+                // Add user fullName if missing
+                if (!booking.fullName) {
+                  const matchingUser = usersData.find(user => user.id === booking.userId);
+                  if (matchingUser) {
+                    enhancedBooking = {
+                      ...enhancedBooking,
+                      fullName: matchingUser.fullName || matchingUser.displayName || booking.userName,
+                      userEmail: matchingUser.email,
+                      userPhone: matchingUser.phoneNumber
+                    };
+                  }
+                }
+                
+                return enhancedBooking;
+              });
+              
+              // Update state with the real-time data
+              setBookings(enhancedBookings);
+              setFilteredBookings(enhancedBookings);
+              
+              // If we have a selected booking, update its data too
+              if (selectedBooking) {
+                const updatedSelectedBooking = enhancedBookings.find(booking => booking.id === selectedBooking.id);
+                if (updatedSelectedBooking) {
+                  setSelectedBooking(updatedSelectedBooking);
+                }
+              }
+              
+              setIsLoading(false);
+            }, (error) => {
+              console.error("Real-time bookings error:", error);
+              setIsLoading(false);
+              // Fall back to regular fetch if real-time listener fails
+              setRealTimeEnabled(false);
+              loadBookingsOnce(bikesData, usersData);
+            });
+            
+            // Clean up the listener when component unmounts or realTimeEnabled changes
+            return () => unsubscribe();
+          } catch (error) {
+            console.error("Error setting up real-time listener:", error);
+            setIsLoading(false);
+            setRealTimeEnabled(false);
+            loadBookingsOnce(bikesData, usersData);
+          }
+        } else {
+          // If real-time is disabled, load bookings once
+          await loadBookingsOnce(bikesData, usersData);
+        }
         
         // Load revenue data
         const [dayRevenue, weekRevenue, monthRevenue] = await Promise.all([
@@ -1057,46 +1245,101 @@ const BookingManagement = () => {
           getRevenueByPeriod('month')
         ]);
         
-        setRevenueData({
+        setRevenueSummary({
           day: dayRevenue,
           week: weekRevenue,
           month: monthRevenue
         });
       } catch (error) {
         console.error('Error loading booking data:', error);
-      } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     };
     
     loadData();
-  }, []);
-
-  // Handle filter changes
+    
+    // Clean up function
+    return () => {
+      // Any cleanup will be handled by the unsubscribe function returned by onSnapshot
+    };
+  }, [realTimeEnabled, selectedBooking]);
+  
+  // Helper function to load bookings without real-time updates
+  const loadBookingsOnce = async (bikesData, usersData) => {
+    try {
+      const bookingsData = await getAllBookings();
+      
+      // Enhance booking data with bike and user information
+      const enhancedBookings = bookingsData.map(booking => {
+        let enhancedBooking = { ...booking };
+        
+        // Add bike information if missing
+        if (!booking.bikeName) {
+          const matchingBike = bikesData.find(bike => bike.id === booking.bikeId);
+          if (matchingBike) {
+            enhancedBooking = {
+              ...enhancedBooking,
+              bikeName: matchingBike.name || 'Unknown Bike',
+              bikeType: matchingBike.type || '',
+              bikeImageUrl: matchingBike.imageUrl || ''
+            };
+          }
+        }
+        
+        // Add user fullName if missing
+        if (!booking.fullName) {
+          const matchingUser = usersData.find(user => user.id === booking.userId);
+          if (matchingUser) {
+            enhancedBooking = {
+              ...enhancedBooking,
+              fullName: matchingUser.fullName || matchingUser.displayName || booking.userName,
+              userEmail: matchingUser.email,
+              userPhone: matchingUser.phoneNumber
+            };
+          }
+        }
+        
+        return enhancedBooking;
+      });
+      
+      setBookings(enhancedBookings);
+      setFilteredBookings(enhancedBookings);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error loading bookings:', error);
+      setIsLoading(false);
+    }
+  };
+  
+  // Apply filters and search whenever filter states change
   useEffect(() => {
-    let filtered = [...bookings];
+    let result = [...bookings];
     
     // Filter by status
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(booking => booking.status === statusFilter);
+      result = result.filter(booking => booking.status === statusFilter);
     }
     
     // Filter by bike
     if (bikeFilter !== 'all') {
-      filtered = filtered.filter(booking => booking.bikeId === bikeFilter);
+      result = result.filter(booking => booking.bikeId === bikeFilter);
     }
     
-    // Filter by booking type (hourly/daily)
+    // Filter by booking type
     if (bookingTypeFilter !== 'all') {
-      const isHourly = bookingTypeFilter === 'hourly';
-      filtered = filtered.filter(booking => booking.isHourly === isHourly);
+      result = result.filter(booking => 
+        bookingTypeFilter === 'hourly' ? booking.isHourly : !booking.isHourly
+      );
     }
     
-    // Filter by search term (user name)
+    // Filter by search term
     if (searchTerm) {
-      filtered = filtered.filter(booking => 
-        (booking.userName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-         booking.bikeName?.toLowerCase().includes(searchTerm.toLowerCase()))
+      const lowercasedSearchTerm = searchTerm.toLowerCase();
+      result = result.filter(booking => 
+        (booking.fullName && booking.fullName.toLowerCase().includes(lowercasedSearchTerm)) ||
+        (booking.userName && booking.userName.toLowerCase().includes(lowercasedSearchTerm)) ||
+        (booking.bikeName && booking.bikeName.toLowerCase().includes(lowercasedSearchTerm)) ||
+        (booking.id && booking.id.toLowerCase().includes(lowercasedSearchTerm))
       );
     }
     
@@ -1106,226 +1349,120 @@ const BookingManagement = () => {
       const endDate = new Date(endDateFilter);
       endDate.setHours(23, 59, 59); // Set to end of day
       
-      filtered = filtered.filter(booking => {
-        const bookingStart = booking.startTime;
-        return bookingStart >= startDate && bookingStart <= endDate;
+      result = result.filter(booking => {
+        if (!booking.startDate) return false;
+        const bookingDate = new Date(booking.startDate);
+        return bookingDate >= startDate && bookingDate <= endDate;
       });
     }
     
-    // Apply sorting
-    filtered.sort((a, b) => {
-      let valueA, valueB;
-      
-      switch (sortBy) {
-        case 'startTime':
-          valueA = a.startTime ? a.startTime.getTime() : 0;
-          valueB = b.startTime ? b.startTime.getTime() : 0;
-          break;
-        case 'createdAt':
-          valueA = a.createdAt ? a.createdAt.getTime() : 0;
-          valueB = b.createdAt ? b.createdAt.getTime() : 0;
-          break;
-        case 'price':
-          valueA = parseFloat(a.totalPrice) || 0;
-          valueB = parseFloat(b.totalPrice) || 0;
-          break;
-        case 'duration':
-          valueA = a.endTime && a.startTime ? a.endTime.getTime() - a.startTime.getTime() : 0;
-          valueB = b.endTime && b.startTime ? b.endTime.getTime() - b.startTime.getTime() : 0;
-          break;
-        default:
-          valueA = a[sortBy] || '';
-          valueB = b[sortBy] || '';
-      }
-      
-      // For string values
-      if (typeof valueA === 'string') {
-        return sortDirection === 'asc' 
-          ? valueA.localeCompare(valueB)
-          : valueB.localeCompare(valueA);
-      }
-      
-      // For numeric values
-      return sortDirection === 'asc' ? valueA - valueB : valueB - valueA;
-    });
+    // Update active filters
+    const newActiveFilters = [];
     
-    setFilteredBookings(filtered);
-    setCurrentPage(1); // Reset to first page when filters change
-  }, [statusFilter, bikeFilter, bookingTypeFilter, searchTerm, startDateFilter, endDateFilter, sortBy, sortDirection, bookings]);
-
-  // Get current bookings for pagination
-  const indexOfLastBooking = currentPage * bookingsPerPage;
-  const indexOfFirstBooking = indexOfLastBooking - bookingsPerPage;
-  const currentBookings = filteredBookings.slice(indexOfFirstBooking, indexOfLastBooking);
-  const totalPages = Math.ceil(filteredBookings.length / bookingsPerPage);
-
-  // Handle status change
-  const handleStatusChange = async (bookingId, newStatus) => {
-    try {
-      setUpdating(true);
-      await updateBooking(bookingId, { status: newStatus });
-      
-      // Update local state
-      setBookings(prevBookings => 
-        prevBookings.map(booking => 
-          booking.id === bookingId ? { ...booking, status: newStatus } : booking
-        )
-      );
-      
-      // Also update selected booking if in modal
-      if (selectedBooking && selectedBooking.id === bookingId) {
-        setSelectedBooking(prevBooking => ({
-          ...prevBooking,
-          status: newStatus
-        }));
-      }
-    } catch (error) {
-      console.error('Error updating booking status:', error);
-    } finally {
-      setUpdating(false);
+    if (statusFilter !== 'all') {
+      newActiveFilters.push({ type: 'status', label: `Status: ${statusFilter}` });
     }
-  };
-
-  // Handle payment status change
-  const handlePaymentStatusChange = async (bookingId, newStatus) => {
-    try {
-      setUpdating(true);
-      await updateBooking(bookingId, { paymentStatus: newStatus });
-      
-      // Update local state
-      setBookings(prevBookings => 
-        prevBookings.map(booking => 
-          booking.id === bookingId ? { ...booking, paymentStatus: newStatus } : booking
-        )
-      );
-      
-      // Also update selected booking if in modal
-      if (selectedBooking && selectedBooking.id === bookingId) {
-        setSelectedBooking(prevBooking => ({
-          ...prevBooking,
-          paymentStatus: newStatus
-        }));
-      }
-    } catch (error) {
-      console.error('Error updating payment status:', error);
-    } finally {
-      setUpdating(false);
+    
+    if (bikeFilter !== 'all') {
+      const bikeName = bikes.find(bike => bike.id === bikeFilter)?.name || bikeFilter;
+      newActiveFilters.push({ type: 'bike', label: `Bike: ${bikeName}` });
     }
-  };
-
-  // Handle booking deletion
-  const handleDeleteBooking = async (bookingId) => {
-    if (window.confirm('Are you sure you want to delete this booking? This action cannot be undone.')) {
-      try {
-        setUpdating(true);
-        await deleteBooking(bookingId);
-        
-        // Update local state
-        setBookings(prevBookings => 
-          prevBookings.filter(booking => booking.id !== bookingId)
-        );
-        
-        // Close modal if open
-        if (selectedBooking && selectedBooking.id === bookingId) {
-          setShowDetailsModal(false);
-        }
-      } catch (error) {
-        console.error('Error deleting booking:', error);
-      } finally {
-        setUpdating(false);
-      }
+    
+    if (bookingTypeFilter !== 'all') {
+      newActiveFilters.push({ 
+        type: 'type', 
+        label: `Type: ${bookingTypeFilter === 'hourly' ? 'Hourly' : 'Daily'}` 
+      });
     }
-  };
-  
-  // Handle showing booking details
-  const handleViewDetails = (booking) => {
-    setSelectedBooking(booking);
-    setShowDetailsModal(true);
-    setActiveTab('details'); // Reset to details tab
-  };
-  
-  // Handle sort change
-  const handleSortChange = (field) => {
-    if (sortBy === field) {
-      // Toggle direction if same field
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      // New field, default to descending for dates, ascending for others
-      setSortBy(field);
-      setSortDirection(['startTime', 'createdAt'].includes(field) ? 'desc' : 'asc');
+    
+    if (searchTerm) {
+      newActiveFilters.push({ type: 'search', label: `Search: ${searchTerm}` });
     }
-  };
+    
+    if (startDateFilter && endDateFilter) {
+      newActiveFilters.push({ 
+        type: 'date', 
+        label: `Dates: ${startDateFilter} to ${endDateFilter}` 
+      });
+    }
+    
+    setActiveFilters(newActiveFilters);
+    setFilteredBookings(result);
+    setTotalPages(Math.ceil(result.length / 10));
+    setCurrentPage(1);
+  }, [statusFilter, bikeFilter, bookingTypeFilter, searchTerm, startDateFilter, endDateFilter, bookings, bikes]);
 
-  // Handle viewing all bookings for a specific bike
-  const handleViewBikeBookings = (bikeId) => {
-    setSelectedBikeId(bikeId);
-    setBikeFilter(bikeId);
-    setShowAllBikesView(false);
-  };
-
-  // Handle returning to all bikes view
-  const handleViewAllBikes = () => {
-    setSelectedBikeId(null);
-    setBikeFilter('all');
-    setShowAllBikesView(true);
-  };
-
-  if (loading) {
-    return (
-      <Container>
-        <PageHeader>
-          <PageTitle>Booking Management</PageTitle>
-        </PageHeader>
-        <EmptyState>
-          <div>Loading bookings data...</div>
-        </EmptyState>
-      </Container>
-    );
-  }
-
-  // Get active filters for display
-  const activeFilters = getActiveFilters();
-
+  // Return loading state or actual UI
   return (
     <Container>
       <PageHeader>
         <PageTitle>Booking Management</PageTitle>
-        <div>
-          <ViewToggleButton 
-            active={showAllBikesView}
-            onClick={handleViewAllBikes}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            background: colors.lightGray, 
+            padding: '6px 12px', 
+            borderRadius: '20px',
+            cursor: 'pointer',
+            opacity: realTimeEnabled ? 1 : 0.6
+          }}
+          onClick={toggleRealTimeUpdates}
           >
-            All Bookings
-          </ViewToggleButton>
-          <ViewToggleButton 
-            active={!showAllBikesView}
-            onClick={() => setShowAllBikesView(false)}
-          >
-            Per Bike View
-          </ViewToggleButton>
+            <span style={{ 
+              width: '10px', 
+              height: '10px', 
+              borderRadius: '50%', 
+              backgroundColor: realTimeEnabled ? '#4caf50' : '#999',
+              marginRight: '8px',
+              display: 'inline-block'
+            }}></span>
+            <span style={{ fontSize: '14px' }}>
+              {realTimeEnabled ? 'Real-time updates on' : 'Real-time updates off'}
+            </span>
+          </div>
+          
+          {isAdmin && (
+            <div>
+              <ViewToggleButton 
+                active={showAllBikesView}
+                onClick={handleViewAllBikes}
+              >
+                All Bookings
+              </ViewToggleButton>
+              <ViewToggleButton 
+                active={!showAllBikesView}
+                onClick={() => setShowAllBikesView(false)}
+              >
+                Per Bike View
+              </ViewToggleButton>
+            </div>
+          )}
         </div>
       </PageHeader>
       
-      {/* Revenue Summary */}
-      <RevenueSummaryContainer>
-        <RevenueCard period="day">
-          <RevenueAmount>₱{revenueData.day.totalRevenue.toFixed(2)}</RevenueAmount>
-          <RevenuePeriod>Today's Revenue</RevenuePeriod>
-          <BookingCount>{revenueData.day.bookings} bookings</BookingCount>
-        </RevenueCard>
-        <RevenueCard period="week">
-          <RevenueAmount>₱{revenueData.week.totalRevenue.toFixed(2)}</RevenueAmount>
-          <RevenuePeriod>This Week's Revenue</RevenuePeriod>
-          <BookingCount>{revenueData.week.bookings} bookings</BookingCount>
-        </RevenueCard>
-        <RevenueCard period="month">
-          <RevenueAmount>₱{revenueData.month.totalRevenue.toFixed(2)}</RevenueAmount>
-          <RevenuePeriod>This Month's Revenue</RevenuePeriod>
-          <BookingCount>{revenueData.month.bookings} bookings</BookingCount>
-        </RevenueCard>
-      </RevenueSummaryContainer>
+      {/* Revenue Summary - Admin Only */}
+      {isAdmin && (
+        <RevenueSummaryContainer>
+          <RevenueCard period="day">
+            <RevenueAmount>₱{revenueSummary?.day?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+            <RevenuePeriod>Today's Revenue</RevenuePeriod>
+            <BookingCount>{revenueSummary?.day?.completedBookings || 0} completed bookings</BookingCount>
+          </RevenueCard>
+          <RevenueCard period="week">
+            <RevenueAmount>₱{revenueSummary?.week?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+            <RevenuePeriod>This Week's Revenue</RevenuePeriod>
+            <BookingCount>{revenueSummary?.week?.completedBookings || 0} completed bookings</BookingCount>
+          </RevenueCard>
+          <RevenueCard period="month">
+            <RevenueAmount>₱{revenueSummary?.month?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+            <RevenuePeriod>This Month's Revenue</RevenuePeriod>
+            <BookingCount>{revenueSummary?.month?.completedBookings || 0} completed bookings</BookingCount>
+          </RevenueCard>
+        </RevenueSummaryContainer>
+      )}
       
-      {/* Booking Summary */}
+      {/* Booking Summary - Show for both admin and regular users */}
       <BookingSummarySection>
         <BookingSummaryTitle>
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1334,13 +1471,13 @@ const BookingManagement = () => {
             <line x1="8" y1="2" x2="8" y2="6"></line>
             <line x1="3" y1="10" x2="21" y2="10"></line>
           </svg>
-          Booking Overview
+          {isAdmin ? 'Booking Overview' : 'Your Bookings'}
         </BookingSummaryTitle>
         <BookingSummaryGrid>
           <SummaryCard>
             <SummaryLabel>Total Bookings</SummaryLabel>
             <SummaryValue>{bookings.length}</SummaryValue>
-            <SummarySubtext>All-time bookings</SummarySubtext>
+            <SummarySubtext>{isAdmin ? 'All-time bookings' : 'All your bookings'}</SummarySubtext>
           </SummaryCard>
           
           <SummaryCard>
@@ -1365,857 +1502,823 @@ const BookingManagement = () => {
         </BookingSummaryGrid>
       </BookingSummarySection>
       
-      {/* Bike Bookings Overview */}
-      <BikeBookingsSection>
-        <BookingSummaryTitle>
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="5" cy="16" r="3"></circle>
-            <circle cx="19" cy="16" r="3"></circle>
-            <path d="M19 16v-6a2 2 0 0 0-2-2H9"></path>
-            <path d="M5 16v-2h10"></path>
-          </svg>
-          {showAllBikesView ? 'All Bikes Booking Overview' : `Bookings for ${bikes.find(b => b.id === selectedBikeId)?.name || 'Selected Bike'}`}
-        </BookingSummaryTitle>
-        
-        {showAllBikesView ? (
-          <BikeBookingsList>
-            {bikes.map(bike => {
-              const bikeBookings = bikeBookingsMap[bike.id] || [];
-              const activeBookings = bikeBookings.filter(b => b.status === 'CONFIRMED').length;
-              const completedBookings = bikeBookings.filter(b => b.status === 'COMPLETED').length;
-              
-              return (
-                <BikeBookingCard key={bike.id}>
-                  <BikeHeader>
-                    {bike.imageUrl && <BikeImageSmall src={bike.imageUrl} alt={bike.name} />}
-                    <BikeInfo>
-                      <BikeNameHeader>{bike.name}</BikeNameHeader>
-                      <BikeStats>
-                        <BikeStat>
-                          <strong>{bikeBookings.length}</strong> bookings
-                        </BikeStat>
-                        <BikeStat>
-                          <strong>{activeBookings}</strong> active
-                        </BikeStat>
-                        <BikeStat>
-                          <strong>{completedBookings}</strong> completed
-                        </BikeStat>
-                      </BikeStats>
-                    </BikeInfo>
-                  </BikeHeader>
-                  
-                  <BookingMiniList>
-                    {bikeBookings.slice(0, 5).map(booking => (
-                      <BookingMiniItem key={booking.id}>
-                        <div>
-                          <StatusBadge status={booking.status} style={{ fontSize: '10px', padding: '3px 8px' }}>
-                            {booking.status}
-                          </StatusBadge>
-                          <span style={{ marginLeft: '8px' }}>{booking.userName}</span>
-                        </div>
-                        <BookingDate>
-                          {booking.startTime ? format(booking.startTime, 'MMM d, yyyy') : 'N/A'}
-                        </BookingDate>
-                      </BookingMiniItem>
-                    ))}
-                    
-                    {bikeBookings.length === 0 && (
-                      <div style={{ padding: '15px 0', textAlign: 'center', color: colors.mediumGray }}>
-                        No bookings yet for this bike
-                      </div>
-                    )}
-                  </BookingMiniList>
-                  
-                  {bikeBookings.length > 0 && (
-                    <ViewAllButton onClick={() => handleViewBikeBookings(bike.id)}>
-                      View all {bikeBookings.length} bookings
-                    </ViewAllButton>
-                  )}
-                </BikeBookingCard>
-              );
-            })}
-          </BikeBookingsList>
-        ) : (
-          <div>
-            <button 
-              style={{ 
-                background: 'none', 
-                border: 'none', 
-                color: colors.pineGreen, 
-                cursor: 'pointer', 
-                display: 'flex', 
-                alignItems: 'center', 
-                marginBottom: '20px' 
-              }}
-              onClick={handleViewAllBikes}
-            >
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width="16" 
-                height="16" 
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-                style={{ marginRight: '8px' }}
-              >
-                <line x1="19" y1="12" x2="5" y2="12"></line>
-                <polyline points="12 19 5 12 12 5"></polyline>
-              </svg>
-              Back to all bikes
-            </button>
-            
-            {/* Add after the "Back to all bikes" button in the Bike Bookings Overview section */}
-            <div style={{
-              background: colors.lightGray,
-              padding: '20px',
-              borderRadius: '10px',
-              marginBottom: '20px'
-            }}>
-              {/* Bike header with stats for selected bike */}
-              {selectedBikeId && (
-                <>
-                  {(() => {
-                    const selectedBike = bikes.find(b => b.id === selectedBikeId);
-                    if (!selectedBike) return null;
-                  
-                    const bikeBookings = bikeBookingsMap[selectedBikeId] || [];
-                    const pendingBookings = bikeBookings.filter(b => b.status === 'PENDING').length;
-                    const activeBookings = bikeBookings.filter(b => b.status === 'CONFIRMED').length;
-                    const completedBookings = bikeBookings.filter(b => b.status === 'COMPLETED').length;
-                    const cancelledBookings = bikeBookings.filter(b => b.status === 'CANCELLED').length;
-                    
-                    // Calculate total revenue for this bike
-                    const totalRevenue = bikeBookings.reduce((sum, booking) => {
-                      return sum + (parseFloat(booking.totalPrice) || 0);
-                    }, 0);
-                    
-                    return (
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '20px' }}>
-                        {selectedBike.imageUrl && (
-                          <img 
-                            src={selectedBike.imageUrl} 
-                            alt={selectedBike.name}
-                            style={{ 
-                              width: '120px', 
-                              height: '120px', 
-                              borderRadius: '10px',
-                              objectFit: 'cover'
-                            }}
-                          />
-                        )}
-                        
-                        <div style={{ flex: 1 }}>
-                          <h2 style={{ margin: '0 0 10px 0', color: colors.darkGray }}>
-                            {selectedBike.name}
-                          </h2>
-                          
-                          <div style={{ display: 'flex', gap: '15px', marginBottom: '15px', flexWrap: 'wrap' }}>
-                            <div style={{ 
-                              padding: '10px 15px', 
-                              backgroundColor: colors.lightPineGreen, 
-                              color: 'white',
-                              borderRadius: '8px',
-                              fontWeight: '500'
-                            }}>
-                              {bikeBookings.length} Total Bookings
-                            </div>
-                            
-                            <div style={{ 
-                              padding: '10px 15px', 
-                              backgroundColor: colors.lightBlue, 
-                              color: colors.blue,
-                              borderRadius: '8px',
-                              fontWeight: '500'
-                            }}>
-                              ₱{totalRevenue.toFixed(2)} Revenue
-                            </div>
-                          </div>
-                          
-                          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-                            <BookingStatusPill color={colors.amber}>
-                              {pendingBookings} Pending
-                            </BookingStatusPill>
-                            
-                            <BookingStatusPill color={colors.green}>
-                              {activeBookings} Active
-                            </BookingStatusPill>
-                            
-                            <BookingStatusPill color={colors.blue}>
-                              {completedBookings} Completed
-                            </BookingStatusPill>
-                            
-                            <BookingStatusPill color={colors.red}>
-                              {cancelledBookings} Cancelled
-                            </BookingStatusPill>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </>
-              )}
-            </div>
-            
-            {/* Display filtered bookings for the selected bike */}
-            {/* They will be shown in the main bookings table below */}
-          </div>
-        )}
-      </BikeBookingsSection>
+      {/* View Toggle for Admin Users */}
+      {isAdmin && (
+        <ViewSwitchContainer>
+          <ViewSwitchButton 
+            active={viewMode === 'list'} 
+            onClick={() => setViewMode('list')}
+          >
+            List View
+          </ViewSwitchButton>
+          <ViewSwitchButton 
+            active={viewMode === 'calendar'} 
+            onClick={() => setViewMode('calendar')}
+          >
+            Calendar View
+          </ViewSwitchButton>
+        </ViewSwitchContainer>
+      )}
       
-      {/* Filters */}
-      <FilterPanel>
-        <FilterPanelTitle>
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-          </svg>
-          Filter Bookings
-        </FilterPanelTitle>
-        
-        <FilterContainer>
-          <FilterGroup>
-            <FilterLabel>Status</FilterLabel>
-            <FilterSelect 
-              value={statusFilter} 
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All Statuses</option>
-              <option value="PENDING">Pending</option>
-              <option value="CONFIRMED">Confirmed</option>
-              <option value="CANCELLED">Cancelled</option>
-              <option value="COMPLETED">Completed</option>
-            </FilterSelect>
-          </FilterGroup>
+      {/* Calendar View - Admin Only */}
+      {isAdmin && viewMode === 'calendar' && (
+        <CalendarContainer>
+          <Calendar
+            localizer={localizer}
+            events={formatBookingsForCalendar()}
+            startAccessor="start"
+            endAccessor="end"
+            style={{ height: 650 }}
+            eventPropGetter={eventStyleGetter}
+            components={{
+              event: EventTooltip,
+              toolbar: CalendarToolbar
+            }}
+            views={['month', 'week', 'day', 'agenda']}
+            defaultView="week"
+            step={60}
+            timeslots={2}
+            selectable
+            onSelectEvent={(event) => handleViewDetails(event.booking)}
+            dayPropGetter={date => {
+              const today = new Date();
+              return {
+                style: {
+                  backgroundColor: 
+                    date.getDate() === today.getDate() &&
+                    date.getMonth() === today.getMonth() &&
+                    date.getFullYear() === today.getFullYear()
+                      ? '#f8f9ff'
+                      : undefined,
+                }
+              };
+            }}
+            dayLayoutAlgorithm="no-overlap"
+            popup
+            tooltipAccessor={null}
+            formats={{
+              timeGutterFormat: (date, culture, localizer) =>
+                localizer.format(date, 'h a', culture),
+              dayFormat: (date, culture, localizer) =>
+                localizer.format(date, 'ddd dd', culture),
+            }}
+          />
+        </CalendarContainer>
+      )}
+      
+      {/* Only show the list view when in list mode */}
+      {viewMode === 'list' && (
+        <>
+          {/* Filters Section */}
+          <FiltersSection>
+            <BookingSummaryTitle>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              Filters & Search
+            </BookingSummaryTitle>
+            
+            <FiltersGrid>
+              <div>
+                <FilterSelect 
+                  value={statusFilter} 
+                  onChange={e => setStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="CONFIRMED">Confirmed</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </FilterSelect>
+              </div>
+              
+              <div>
+                <FilterSelect 
+                  value={bikeFilter} 
+                  onChange={e => setBikeFilter(e.target.value)}
+                >
+                  <option value="all">All Bikes</option>
+                  {bikes.map(bike => (
+                    <option key={bike.id} value={bike.id}>{bike.name}</option>
+                  ))}
+                </FilterSelect>
+              </div>
+              
+              <div>
+                <FilterSelect 
+                  value={bookingTypeFilter} 
+                  onChange={e => setBookingTypeFilter(e.target.value)}
+                >
+                  <option value="all">All Types</option>
+                  <option value="hourly">Hourly Bookings</option>
+                  <option value="daily">Daily Bookings</option>
+                </FilterSelect>
+              </div>
+              
+              <div>
+                <FilterInput 
+                  type="text"
+                  placeholder="Search by name or ID"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                />
+              </div>
+              
+              <div>
+                <FilterInput 
+                  type="date"
+                  value={startDateFilter}
+                  onChange={e => setStartDateFilter(e.target.value)}
+                  placeholder="Start Date"
+                />
+              </div>
+              
+              <div>
+                <FilterInput 
+                  type="date"
+                  value={endDateFilter}
+                  onChange={e => setEndDateFilter(e.target.value)}
+                  placeholder="End Date"
+                />
+              </div>
+              
+              {/* Clear Filters Button */}
+              <FilterButton onClick={clearFilters}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                Clear Filters
+              </FilterButton>
+            </FiltersGrid>
+            
+            {/* Display active filters as tags */}
+            {activeFilters.length > 0 && (
+              <ActiveFiltersContainer>
+                {activeFilters.map((filter, index) => (
+                  <FilterTag key={index}>
+                    {filter.label}
+                    <button onClick={() => removeFilter(filter.type)}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </FilterTag>
+                ))}
+              </ActiveFiltersContainer>
+            )}
+          </FiltersSection>
           
-          <FilterGroup>
-            <FilterLabel>Bike</FilterLabel>
-            <FilterSelect 
-              value={bikeFilter} 
-              onChange={(e) => setBikeFilter(e.target.value)}
-            >
-              <option value="all">All Bikes</option>
-              {bikes.map(bike => (
-                <option key={bike.id} value={bike.id}>
-                  {bike.name}
-                </option>
-              ))}
-            </FilterSelect>
-          </FilterGroup>
+          {/* Bookings Table */}
+          <BookingsTable>
+            <TableHeader>
+              <div>Bike</div>
+              <div>User</div>
+              <div>Booking Period</div>
+              <div>Duration</div>
+              <div>Total Price</div>
+              <div>Status</div>
+              <div>Created</div>
+              <div>Actions</div>
+            </TableHeader>
+            
+            {currentBookings.length === 0 ? (
+              <EmptyState>
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <EmptyStateMessage>No bookings found</EmptyStateMessage>
+                <EmptyStateSubtext>
+                  {activeFilters.length > 0 
+                    ? 'Try changing or clearing your filters to see more results.' 
+                    : 'There are no bookings in the system yet.'}
+                </EmptyStateSubtext>
+              </EmptyState>
+            ) : (
+              currentBookings.map(booking => (
+                <TableRow key={booking.id} status={booking.status} onClick={() => handleViewDetails(booking)} style={{ cursor: 'pointer' }}>
+                  <TableCell label="Bike:">
+                    <BikeNameDisplay>
+                      {booking.bikeImageUrl && (
+                        <BikeImage src={booking.bikeImageUrl} alt={booking.bikeName} />
+                      )}
+                      <div>
+                        <BookingInfoValue bold>{booking.bikeName || 'Unknown Bike'}</BookingInfoValue>
+                        <BookingTypeTag isHourly={booking.isHourly}>
+                          {booking.isHourly ? 'Hourly' : 'Daily'}
+                        </BookingTypeTag>
+                      </div>
+                    </BikeNameDisplay>
+                  </TableCell>
+                  
+                  <TableCell label="User:">
+                    <BookingInfoCard>
+                      <BookingInfoLabel>Customer</BookingInfoLabel>
+                      <BookingInfoValue bold>
+                        <UserNameLink onClick={(e) => handleUserClick(booking, e)}>
+                          {booking.fullName || booking.userName || (booking.userId ? `User ID: ${booking.userId.substring(0, 8)}...` : 'Unknown User')}
+                        </UserNameLink>
+                      </BookingInfoValue>
+                    </BookingInfoCard>
+                  </TableCell>
+                  
+                  <TableCell label="Booking Period:">
+                    <BookingInfoCard>
+                      <BookingInfoLabel>Dates</BookingInfoLabel>
+                      <BookingInfoValue>
+                        {booking.startDate ? (
+                          <>
+                            {format(booking.startDate, 'MMM d, yyyy')}
+                            {booking.isHourly && (
+                              <>
+                                <br />
+                                {format(booking.startDate, 'h:mm a')} - 
+                                {booking.endDate && format(booking.endDate, 'h:mm a')}
+                              </>
+                            )}
+                          </>
+                        ) : 'N/A'}
+                      </BookingInfoValue>
+                    </BookingInfoCard>
+                  </TableCell>
+                  
+                  <TableCell label="Duration:">
+                    <BookingInfoCard>
+                      <BookingInfoLabel>Duration</BookingInfoLabel>
+                      <BookingDuration>
+                        {calculateBookingDuration(booking)}
+                      </BookingDuration>
+                    </BookingInfoCard>
+                  </TableCell>
+                  
+                  <TableCell label="Total Price:">
+                    <BookingInfoCard>
+                      <BookingInfoLabel>Price</BookingInfoLabel>
+                      <BookingPrice>₱{parseFloat(booking.totalPrice).toFixed(2)}</BookingPrice>
+                    </BookingInfoCard>
+                  </TableCell>
+                  
+                  <TableCell label="Status:">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <StatusBadge status={booking.status}>
+                        {booking.status}
+                      </StatusBadge>
+                      <PaymentBadge status={booking.paymentStatus}>
+                        {booking.paymentStatus}
+                      </PaymentBadge>
+                    </div>
+                  </TableCell>
+                  
+                  <TableCell label="Created:">
+                    {booking.createdAt ? format(booking.createdAt, 'MMM d, yyyy') : 'N/A'}
+                  </TableCell>
+                  
+                  <TableCell label="Actions:">
+                    <ButtonGroup>
+                      <ViewDetailsButton onClick={(e) => {
+                        e.stopPropagation(); // Prevent row click event from firing
+                        handleViewDetails(booking);
+                      }}>
+                        Details
+                      </ViewDetailsButton>
+                      
+                      {booking.status === 'PENDING' && (
+                        <ActionButton 
+                          confirm
+                          disabled={updating}
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent row click event from firing
+                            handleStatusChange(booking.id, 'CONFIRMED');
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                          Confirm
+                        </ActionButton>
+                      )}
+                    </ButtonGroup>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </BookingsTable>
           
-          <FilterGroup>
-            <FilterLabel>Type</FilterLabel>
-            <FilterSelect
-              value={bookingTypeFilter}
-              onChange={(e) => setBookingTypeFilter(e.target.value)}
-            >
-              <option value="all">All Types</option>
-              <option value="hourly">Hourly</option>
-              <option value="daily">Daily</option>
-            </FilterSelect>
-          </FilterGroup>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <PaginationContainer>
+              <PageInfo>
+                Showing {indexOfFirstBooking + 1}-{Math.min(indexOfLastBooking, filteredBookings.length)} of {filteredBookings.length} bookings
+              </PageInfo>
+              
+              <PaginationButton
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </PaginationButton>
+              
+              {Array.from({ length: totalPages }).map((_, index) => {
+                // Show first, last, and pages around current page
+                if (
+                  index === 0 || 
+                  index === totalPages - 1 || 
+                  (index >= currentPage - 2 && index <= currentPage + 1)
+                ) {
+                  return (
+                    <PaginationButton
+                      key={index}
+                      active={currentPage === index + 1}
+                      onClick={() => setCurrentPage(index + 1)}
+                    >
+                      {index + 1}
+                    </PaginationButton>
+                  );
+                } else if (
+                  // Show ellipsis for breaks
+                  (index === 1 && currentPage > 3) ||
+                  (index === totalPages - 2 && currentPage < totalPages - 2)
+                ) {
+                  return <span key={index} style={{ margin: '0 5px' }}>...</span>;
+                }
+                return null;
+              })}
+              
+              <PaginationButton
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </PaginationButton>
+            </PaginationContainer>
+          )}
+        </>
+      )}
+
+      {/* User Info Popup */}
+      {selectedUser && (
+        <UserInfoPopup 
+          className="user-info-popup"
+          x={userPopupPosition.x} 
+          y={userPopupPosition.y}
+        >
+          <UserInfoHeader>
+            <h4>User Details</h4>
+            {selectedUser.loading && (
+              <div style={{ 
+                display: 'inline-block', 
+                marginLeft: '10px',
+                width: '16px',
+                height: '16px',
+                border: '2px solid rgba(29, 60, 52, 0.3)',
+                borderTopColor: colors.pineGreen,
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite'
+              }} />
+            )}
+            <style>
+              {`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}
+            </style>
+          </UserInfoHeader>
           
-          <FilterGroup>
-            <FilterLabel>Search</FilterLabel>
-            <FilterInput 
-              type="text" 
-              value={searchTerm} 
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search user or bike name"
-            />
-          </FilterGroup>
-          
-          <FilterGroup>
-            <FilterLabel>Start Date</FilterLabel>
-            <FilterInput
-              type="date"
-              value={startDateFilter}
-              onChange={(e) => setStartDateFilter(e.target.value)}
-            />
-          </FilterGroup>
-          
-          <FilterGroup>
-            <FilterLabel>End Date</FilterLabel>
-            <FilterInput
-              type="date"
-              value={endDateFilter}
-              onChange={(e) => setEndDateFilter(e.target.value)}
-            />
-          </FilterGroup>
-        </FilterContainer>
-        
-        {/* Active Filters */}
-        {activeFilters.length > 0 && (
-          <ActiveFiltersContainer>
-            {activeFilters.map((filter, index) => (
-              <FilterTag key={index}>
-                {filter.label}
-                <span onClick={() => removeFilter(filter.type)}>×</span>
-              </FilterTag>
-            ))}
-          </ActiveFiltersContainer>
-        )}
-        
-        <FilterActions>
-          {activeFilters.length > 0 && (
-            <ClearFiltersButton onClick={clearFilters}>
-              Clear All Filters
-            </ClearFiltersButton>
+          {selectedUser.profileUrl && (
+            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+              <img 
+                src={selectedUser.profileUrl} 
+                alt={selectedUser.fullName} 
+                style={{
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '50%',
+                  objectFit: 'cover',
+                  border: `2px solid ${colors.pineGreen}`
+                }}
+              />
+            </div>
           )}
           
-          <SortContainer>
-            <SortLabel>Sort by:</SortLabel>
-            <FilterSelect
-              value={sortBy}
-              onChange={(e) => handleSortChange(e.target.value)}
+          <UserInfoRow>
+            <UserInfoLabel>Name:</UserInfoLabel>
+            <UserInfoValue bold>{selectedUser.fullName}</UserInfoValue>
+          </UserInfoRow>
+          
+          <UserInfoRow>
+            <UserInfoLabel>Email:</UserInfoLabel>
+            <UserInfoValue>
+              <a 
+                href={`mailto:${selectedUser.email}`} 
+                style={{ color: colors.pineGreen, textDecoration: 'none' }}
+              >
+                {selectedUser.email}
+              </a>
+            </UserInfoValue>
+          </UserInfoRow>
+          
+          <UserInfoRow>
+            <UserInfoLabel>Phone:</UserInfoLabel>
+            <UserInfoValue>
+              <a 
+                href={`tel:${selectedUser.phone}`} 
+                style={{ color: colors.pineGreen, textDecoration: 'none' }}
+              >
+                {selectedUser.phone}
+              </a>
+            </UserInfoValue>
+          </UserInfoRow>
+          
+          <UserInfoRow>
+            <UserInfoLabel>User ID:</UserInfoLabel>
+            <UserInfoValue>{selectedUser.userId || 'N/A'}</UserInfoValue>
+          </UserInfoRow>
+          
+          {selectedUser.address && (
+            <UserInfoRow>
+              <UserInfoLabel>Address:</UserInfoLabel>
+              <UserInfoValue>{selectedUser.address}</UserInfoValue>
+            </UserInfoRow>
+          )}
+          
+          {selectedUser.role && (
+            <UserInfoRow>
+              <UserInfoLabel>Role:</UserInfoLabel>
+              <UserInfoValue>{selectedUser.role}</UserInfoValue>
+            </UserInfoRow>
+          )}
+          
+          {selectedUser.membershipTier && (
+            <UserInfoRow>
+              <UserInfoLabel>Membership:</UserInfoLabel>
+              <UserInfoValue>{selectedUser.membershipTier}</UserInfoValue>
+            </UserInfoRow>
+          )}
+          
+          {selectedUser.joinDate && (
+            <UserInfoRow>
+              <UserInfoLabel>Joined:</UserInfoLabel>
+              <UserInfoValue>{selectedUser.joinDate}</UserInfoValue>
+            </UserInfoRow>
+          )}
+          
+          {selectedUser.emergencyContact && (
+            <UserInfoRow>
+              <UserInfoLabel>Emergency:</UserInfoLabel>
+              <UserInfoValue>{selectedUser.emergencyContact}</UserInfoValue>
+            </UserInfoRow>
+          )}
+          
+          {/* View Booking button */}
+          <button
+            onClick={() => {
+              setSelectedBooking(selectedUser.booking);
+              setShowDetailsModal(true);
+              setSelectedUser(null);
+            }}
+            style={{
+              backgroundColor: colors.pineGreen,
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '8px 12px',
+              marginTop: '15px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              width: '100%',
+              transition: 'background-color 0.2s'
+            }}
+          >
+            View Full Booking
+          </button>
+        </UserInfoPopup>
+      )}
+
+      {/* Booking Details Modal */}
+      {showDetailsModal && selectedBooking && (
+        <ModalWrapper>
+          <h3>Booking Details</h3>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '25px' }}>
+            <div>
+              <h4 style={{ fontSize: '18px', margin: '0 0 5px 0', color: colors.darkGray }}>
+                {selectedBooking.bikeName || 'Unknown Bike'}
+              </h4>
+              <BookingTypeTag isHourly={selectedBooking.isHourly} style={{ marginTop: '5px' }}>
+                {selectedBooking.isHourly ? 'Hourly Rental' : 'Daily Rental'}
+              </BookingTypeTag>
+            </div>
+            
+            <div>
+              <BookingInfoLabel>Bike ID</BookingInfoLabel>
+              <BookingInfoValue>{selectedBooking.bikeId || 'N/A'}</BookingInfoValue>
+            </div>
+            
+            <div>
+              <BookingInfoLabel>Bike Type</BookingInfoLabel>
+              <BookingInfoValue>{selectedBooking.bikeType || 'N/A'}</BookingInfoValue>
+            </div>
+          </div>
+          
+          <div style={{ marginBottom: '10px' }}>
+            <BookingInfoLabel>Name</BookingInfoLabel>
+            <BookingInfoValue bold>
+              {selectedBooking.fullName || selectedBooking.userName || 'Unknown User'}
+            </BookingInfoValue>
+          </div>
+          
+          <div style={{ marginBottom: '10px' }}>
+            <BookingInfoLabel>User ID</BookingInfoLabel>
+            <BookingInfoValue>{selectedBooking.userId || 'N/A'}</BookingInfoValue>
+          </div>
+          
+          <div style={{ marginBottom: '10px' }}>
+            <BookingInfoLabel>Email</BookingInfoLabel>
+            <BookingInfoValue>{selectedBooking.userEmail || 'N/A'}</BookingInfoValue>
+          </div>
+          
+          <div style={{ marginBottom: '10px' }}>
+            <BookingInfoLabel>Phone</BookingInfoLabel>
+            <BookingInfoValue>{selectedBooking.userPhone || 'N/A'}</BookingInfoValue>
+          </div>
+          
+          <div style={{ 
+            background: colors.lightGray, 
+            padding: '20px', 
+            borderRadius: '8px',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: '20px',
+            marginBottom: '25px'
+          }}>
+            <div>
+              <BookingInfoLabel>Booking Status</BookingInfoLabel>
+              <StatusBadge status={selectedBooking.status} style={{ marginTop: '8px' }}>
+                {selectedBooking.status}
+              </StatusBadge>
+            </div>
+            
+            <div>
+              <BookingInfoLabel>Payment Status</BookingInfoLabel>
+              <PaymentBadge status={selectedBooking.paymentStatus} style={{ marginTop: '8px' }}>
+                {selectedBooking.paymentStatus || 'unpaid'}
+              </PaymentBadge>
+            </div>
+            
+            <div>
+              <BookingInfoLabel>Total Amount</BookingInfoLabel>
+              <BookingPrice style={{ marginTop: '8px', fontSize: '18px' }}>
+                ₱{parseFloat(selectedBooking.totalPrice).toFixed(2)}
+              </BookingPrice>
+            </div>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
+            <div>
+              <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                Booking Period
+              </h3>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Date</BookingInfoLabel>
+                <BookingInfoValue>
+                  {selectedBooking.startDate ? format(selectedBooking.startDate, 'MMMM d, yyyy') : 'N/A'}
+                </BookingInfoValue>
+              </div>
+              
+              {selectedBooking.isHourly && (
+                <div style={{ marginBottom: '10px' }}>
+                  <BookingInfoLabel>Time</BookingInfoLabel>
+                  <BookingInfoValue>
+                    {selectedBooking.startDate && format(selectedBooking.startDate, 'h:mm a')} - 
+                    {selectedBooking.endDate && format(selectedBooking.endDate, 'h:mm a')}
+                  </BookingInfoValue>
+                </div>
+              )}
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Duration</BookingInfoLabel>
+                <BookingDuration style={{ marginTop: '5px' }}>
+                  {calculateBookingDuration(selectedBooking)}
+                </BookingDuration>
+              </div>
+            </div>
+            
+            <div>
+              <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                Additional Information
+              </h3>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Booking ID</BookingInfoLabel>
+                <BookingInfoValue>{selectedBooking.id || 'N/A'}</BookingInfoValue>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Created At</BookingInfoLabel>
+                <BookingInfoValue>
+                  {selectedBooking.createdAt ? format(selectedBooking.createdAt, 'MMMM d, yyyy h:mm a') : 'N/A'}
+                </BookingInfoValue>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Additional Notes</BookingInfoLabel>
+                <BookingInfoValue>
+                  {selectedBooking.notes || 'No additional notes'}
+                </BookingInfoValue>
+              </div>
+            </div>
+          </div>
+          
+          {/* Actions */}
+          <div style={{ 
+            borderTop: '1px solid #eee',
+            paddingTop: '20px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px'
+          }}>
+            {selectedBooking.status === 'PENDING' && (
+              <ActionButton 
+                confirm
+                disabled={updating}
+                onClick={() => handleStatusChange(selectedBooking.id, 'CONFIRMED')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                Confirm Booking
+              </ActionButton>
+            )}
+            
+            {selectedBooking.status === 'CONFIRMED' && (
+              <ActionButton 
+                complete
+                disabled={updating}
+                onClick={() => handleStatusChange(selectedBooking.id, 'COMPLETED')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                Complete Booking
+              </ActionButton>
+            )}
+            
+            {(selectedBooking.status === 'PENDING' || selectedBooking.status === 'CONFIRMED') && (
+              <ActionButton 
+                cancel
+                disabled={updating}
+                onClick={() => handleStatusChange(selectedBooking.id, 'CANCELLED')}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+                Cancel Booking
+              </ActionButton>
+            )}
+            
+            <button
+              onClick={() => setShowDetailsModal(false)}
+              style={{
+                padding: '10px 15px',
+                border: '1px solid #ddd',
+                borderRadius: '8px',
+                background: 'white',
+                color: colors.darkGray,
+                cursor: 'pointer',
+                fontWeight: '500',
+                fontSize: '14px'
+              }}
             >
-              <option value="startTime">Start Date</option>
-              <option value="createdAt">Creation Date</option>
-              <option value="price">Price</option>
-              <option value="duration">Duration</option>
-              <option value="bikeName">Bike Name</option>
-              <option value="userName">User Name</option>
-            </FilterSelect>
-            <FilterSelect
-              value={sortDirection}
-              onChange={(e) => setSortDirection(e.target.value)}
-            >
-              <option value="asc">Ascending</option>
-              <option value="desc">Descending</option>
-            </FilterSelect>
-          </SortContainer>
-        </FilterActions>
-      </FilterPanel>
-      
-      {/* Bookings Table */}
-      <BookingsTable>
-        <TableHeader>
-          <div>Bike</div>
-          <div>User</div>
-          <div>Booking Period</div>
-          <div>Duration</div>
-          <div>Total Price</div>
-          <div>Status</div>
-          <div>Created</div>
-          <div>Actions</div>
-        </TableHeader>
-        
-        {currentBookings.length === 0 ? (
-          <EmptyState>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              Close
+            </button>
+          </div>
+        </ModalWrapper>
+      )}
+
+      {/* Notification */}
+      {notification && (
+        <Notification type={notification.type}>
+          {notification.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="12" y1="8" x2="12" y2="12"></line>
               <line x1="12" y1="16" x2="12.01" y2="16"></line>
             </svg>
-            <EmptyStateMessage>No bookings found</EmptyStateMessage>
-            <EmptyStateSubtext>
-              {activeFilters.length > 0 
-                ? 'Try changing or clearing your filters to see more results.' 
-                : 'There are no bookings in the system yet.'}
-            </EmptyStateSubtext>
-          </EmptyState>
-        ) : (
-          currentBookings.map(booking => (
-            <TableRow key={booking.id} status={booking.status}>
-              <TableCell label="Bike:">
-                <BikeNameDisplay>
-                  {booking.bikeImageUrl && (
-                    <BikeImage src={booking.bikeImageUrl} alt={booking.bikeName} />
-                  )}
-                  <div>
-                    <BookingInfoValue bold>{booking.bikeName || 'Unknown Bike'}</BookingInfoValue>
-                    <BookingTypeTag isHourly={booking.isHourly}>
-                      {booking.isHourly ? 'Hourly' : 'Daily'}
-                    </BookingTypeTag>
-                  </div>
-                </BikeNameDisplay>
-              </TableCell>
-              
-              <TableCell label="User:">
-                <BookingInfoCard>
-                  <BookingInfoLabel>Customer</BookingInfoLabel>
-                  <BookingInfoValue bold>{booking.userName || 'Unknown User'}</BookingInfoValue>
-                </BookingInfoCard>
-              </TableCell>
-              
-              <TableCell label="Booking Period:">
-                <BookingInfoCard>
-                  <BookingInfoLabel>Dates</BookingInfoLabel>
-                  <BookingInfoValue>
-                    {booking.startTime ? (
-                      <>
-                        {format(booking.startTime, 'MMM d, yyyy')}
-                        {booking.isHourly && (
-                          <>
-                            <br />
-                            {format(booking.startTime, 'h:mm a')} - 
-                            {booking.endTime && format(booking.endTime, 'h:mm a')}
-                          </>
-                        )}
-                      </>
-                    ) : 'N/A'}
-                  </BookingInfoValue>
-                  <BookingDuration>
-                    {calculateBookingDuration(booking)}
-                  </BookingDuration>
-                </BookingInfoCard>
-              </TableCell>
-              
-              <TableCell label="Duration:">
-                <BookingInfoCard>
-                  <BookingInfoLabel>Duration</BookingInfoLabel>
-                  <BookingDuration>
-                    {calculateBookingDuration(booking)}
-                  </BookingDuration>
-                </BookingInfoCard>
-              </TableCell>
-              
-              <TableCell label="Total Price:">
-                <BookingInfoCard>
-                  <BookingInfoLabel>Price</BookingInfoLabel>
-                  <BookingPrice>₱{parseFloat(booking.totalPrice).toFixed(2)}</BookingPrice>
-                </BookingInfoCard>
-              </TableCell>
-              
-              <TableCell label="Status:">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <StatusBadge status={booking.status}>
-                    {booking.status}
-                  </StatusBadge>
-                  <PaymentBadge status={booking.paymentStatus}>
-                    {booking.paymentStatus}
-                  </PaymentBadge>
-                </div>
-              </TableCell>
-              
-              <TableCell label="Created:">
-                {booking.createdAt ? format(booking.createdAt, 'MMM d, yyyy') : 'N/A'}
-              </TableCell>
-              
-              <TableCell label="Actions:">
-                <ButtonGroup>
-                  <ViewDetailsButton onClick={() => handleViewDetails(booking)}>
-                    Details
-                  </ViewDetailsButton>
-                  
-                  {booking.status === 'PENDING' && (
-                    <ActionButton 
-                      confirm
-                      disabled={updating}
-                      onClick={() => handleStatusChange(booking.id, 'CONFIRMED')}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                      Confirm
-                    </ActionButton>
-                  )}
-                  
-                  {(booking.status === 'PENDING' || booking.status === 'CONFIRMED') && (
-                    <ActionButton 
-                      cancel
-                      disabled={updating}
-                      onClick={() => handleStatusChange(booking.id, 'CANCELLED')}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
-                      Cancel
-                    </ActionButton>
-                  )}
-                  
-                  {booking.status === 'CONFIRMED' && (
-                    <ActionButton 
-                      complete
-                      disabled={updating}
-                      onClick={() => handleStatusChange(booking.id, 'COMPLETED')}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                      </svg>
-                      Complete
-                    </ActionButton>
-                  )}
-                  
-                  {booking.paymentStatus === 'unpaid' && (
-                    <ActionButton 
-                      disabled={updating}
-                      onClick={() => handlePaymentStatusChange(booking.id, 'paid')}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-                        <line x1="12" y1="16" x2="12" y2="16.01"></line>
-                        <path d="M17 10 L7 10"></path>
-                        <path d="M12 7 L12 13"></path>
-                      </svg>
-                      Pay
-                    </ActionButton>
-                  )}
-                </ButtonGroup>
-              </TableCell>
-            </TableRow>
-          ))
-        )}
-      </BookingsTable>
-      
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <PaginationContainer>
-          <PageInfo>
-            Showing {indexOfFirstBooking + 1}-{Math.min(indexOfLastBooking, filteredBookings.length)} of {filteredBookings.length} bookings
-          </PageInfo>
-          
-          <PaginationButton
-            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-            disabled={currentPage === 1}
-          >
-            Previous
-          </PaginationButton>
-          
-          {[...Array(totalPages)].map((_, index) => {
-            // Only show a few page numbers around the current page
-            if (
-              index === 0 || 
-              index === totalPages - 1 || 
-              (index >= currentPage - 2 && index <= currentPage + 1)
-            ) {
-              return (
-                <PaginationButton
-                  key={index}
-                  active={currentPage === index + 1}
-                  onClick={() => setCurrentPage(index + 1)}
-                >
-                  {index + 1}
-                </PaginationButton>
-              );
-            } else if (
-              index === currentPage - 3 || 
-              index === currentPage + 2
-            ) {
-              return <span key={index}>...</span>;
-            }
-            return null;
-          })}
-          
-          <PaginationButton
-            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-            disabled={currentPage === totalPages}
-          >
-            Next
-          </PaginationButton>
-        </PaginationContainer>
-      )}
-      
-      {/* Booking Details Modal */}
-      {showDetailsModal && selectedBooking && (
-        <ModalOverlay onClick={() => setShowDetailsModal(false)}>
-          <ModalContent onClick={e => e.stopPropagation()}>
-            <ModalHeader>
-              <ModalTitle>Booking Details</ModalTitle>
-              <CloseButton onClick={() => setShowDetailsModal(false)}>×</CloseButton>
-            </ModalHeader>
-            
-            {/* Tabs for organizing booking details */}
-            <TabsContainer>
-              <TabButton 
-                active={activeTab === 'details'} 
-                onClick={() => setActiveTab('details')}
-              >
-                Booking Details
-              </TabButton>
-              <TabButton 
-                active={activeTab === 'bike'} 
-                onClick={() => setActiveTab('bike')}
-              >
-                Bike Information
-              </TabButton>
-              <TabButton 
-                active={activeTab === 'user'} 
-                onClick={() => setActiveTab('user')}
-              >
-                User Information
-              </TabButton>
-            </TabsContainer>
-            
-            {activeTab === 'details' && (
-              <>
-                {/* Status and quick actions */}
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center', 
-                  marginBottom: '20px',
-                  backgroundColor: selectedBooking.status === 'PENDING' ? colors.lightAmber :
-                                selectedBooking.status === 'CONFIRMED' ? colors.lightGreen :
-                                selectedBooking.status === 'CANCELLED' ? colors.lightRed :
-                                colors.lightBlue,
-                  padding: '15px',
-                  borderRadius: '10px'
-                }}>
-                  <div>
-                    <span style={{ fontWeight: 600 }}>Status: </span>
-                    <StatusBadge status={selectedBooking.status}>
-                      {selectedBooking.status}
-                    </StatusBadge>
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: 600 }}>Payment: </span>
-                    <PaymentBadge status={selectedBooking.paymentStatus}>
-                      {selectedBooking.paymentStatus}
-                    </PaymentBadge>
-                  </div>
-                </div>
-                
-                {/* Key Booking Information Card */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '20px',
-                  marginBottom: '30px',
-                  backgroundColor: colors.lightGray,
-                  padding: '20px',
-                  borderRadius: '12px'
-                }}>
-                  <div>
-                    <DetailLabel>Customer</DetailLabel>
-                    <DetailValue bold style={{ fontSize: '18px', marginTop: '5px' }}>
-                      {selectedBooking.userName || 'Unknown User'}
-                    </DetailValue>
-                  </div>
-                  
-                  <div>
-                    <DetailLabel>Bike</DetailLabel>
-                    <DetailValue bold style={{ fontSize: '18px', marginTop: '5px' }}>
-                      {selectedBooking.bikeName || 'Unknown Bike'}
-                    </DetailValue>
-                  </div>
-                  
-                  <div>
-                    <DetailLabel>Duration</DetailLabel>
-                    <DetailValue style={{ marginTop: '5px' }}>
-                      <BookingDuration style={{ fontSize: '16px', padding: '6px 12px' }}>
-                        {calculateBookingDuration(selectedBooking)}
-                      </BookingDuration>
-                    </DetailValue>
-                  </div>
-                  
-                  <div>
-                    <DetailLabel>Total Price</DetailLabel>
-                    <DetailValue style={{ fontSize: '20px', color: colors.pineGreen, fontWeight: 'bold', marginTop: '5px' }}>
-                      ₱{parseFloat(selectedBooking.totalPrice).toFixed(2)}
-                    </DetailValue>
-                  </div>
-                </div>
-                
-                <DetailsGrid>
-                  {/* Booking Information */}
-                  <DetailSection>
-                    <DetailSectionTitle>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                      </svg>
-                      Booking Information
-                    </DetailSectionTitle>
-                    
-                    <DetailItem>
-                      <DetailLabel>Booking ID</DetailLabel>
-                      <DetailValue bold>{selectedBooking.id}</DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>Booking Type</DetailLabel>
-                      <DetailValue>
-                        {selectedBooking.isHourly ? 'Hourly Rental' : 'Daily Rental'}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>Created At</DetailLabel>
-                      <DetailValue>
-                        {selectedBooking.createdAt 
-                          ? format(selectedBooking.createdAt, 'MMM d, yyyy h:mm a') 
-                          : 'N/A'}
-                      </DetailValue>
-                    </DetailItem>
-                  </DetailSection>
-                  
-                  {/* Time and Duration */}
-                  <DetailSection>
-                    <DetailSectionTitle>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12 6 12 12 16 14"></polyline>
-                      </svg>
-                      Time and Duration
-                    </DetailSectionTitle>
-                    
-                    <DetailItem>
-                      <DetailLabel>Start Time</DetailLabel>
-                      <DetailValue>
-                        {selectedBooking.startTime 
-                          ? format(selectedBooking.startTime, 'MMM d, yyyy h:mm a')
-                          : 'N/A'}
-                      </DetailValue>
-                    </DetailItem>
-                    
-                    <DetailItem>
-                      <DetailLabel>End Time</DetailLabel>
-                      <DetailValue>
-                        {selectedBooking.endTime 
-                          ? format(selectedBooking.endTime, 'MMM d, yyyy h:mm a')
-                          : 'N/A'}
-                      </DetailValue>
-                    </DetailItem>
-                  </DetailSection>
-                </DetailsGrid>
-              </>
-            )}
-            
-            {activeTab === 'bike' && (
-              <>
-                {/* Bike Details */}
-                <BikeDetailCard>
-                  {selectedBooking.bikeImageUrl && (
-                    <BikeDetailImage 
-                      src={selectedBooking.bikeImageUrl} 
-                      alt={selectedBooking.bikeName} 
-                    />
-                  )}
-                  <BikeDetailInfo>
-                    <BikeDetailName>{selectedBooking.bikeName}</BikeDetailName>
-                    <BikeDetailType>{selectedBooking.bikeType}</BikeDetailType>
-                    <BikeDetailPrice>₱{parseFloat(selectedBooking.totalPrice).toFixed(2)}</BikeDetailPrice>
-                  </BikeDetailInfo>
-                </BikeDetailCard>
-                
-                <DetailSection>
-                  <DetailSectionTitle>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <circle cx="12" cy="12" r="3"></circle>
-                    </svg>
-                    Bike Location
-                  </DetailSectionTitle>
-                  
-                  <DetailItem>
-                    <DetailLabel>Location</DetailLabel>
-                    <DetailValue>{selectedBooking.location || 'No location data available'}</DetailValue>
-                  </DetailItem>
-                </DetailSection>
-              </>
-            )}
-            
-            {activeTab === 'user' && (
-              <DetailSection>
-                <DetailSectionTitle>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                  </svg>
-                  User Information
-                </DetailSectionTitle>
-                
-                <DetailItem>
-                  <DetailLabel>User Name</DetailLabel>
-                  <DetailValue bold>{selectedBooking.userName}</DetailValue>
-                </DetailItem>
-                
-                <DetailItem>
-                  <DetailLabel>User ID</DetailLabel>
-                  <DetailValue>{selectedBooking.userId}</DetailValue>
-                </DetailItem>
-                
-                {selectedBooking.notes && (
-                  <DetailItem>
-                    <DetailLabel>Notes</DetailLabel>
-                    <DetailValue>{selectedBooking.notes}</DetailValue>
-                  </DetailItem>
-                )}
-              </DetailSection>
-            )}
-            
-            {/* Modal Actions */}
-            <ActionButtonsContainer>
-              {selectedBooking.status === 'PENDING' && (
-                <ActionButton 
-                  confirm
-                  disabled={updating}
-                  onClick={() => handleStatusChange(selectedBooking.id, 'CONFIRMED')}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                  </svg>
-                  Confirm Booking
-                </ActionButton>
-              )}
-              
-              {(selectedBooking.status === 'PENDING' || selectedBooking.status === 'CONFIRMED') && (
-                <ActionButton 
-                  cancel
-                  disabled={updating}
-                  onClick={() => handleStatusChange(selectedBooking.id, 'CANCELLED')}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                  Cancel Booking
-                </ActionButton>
-              )}
-              
-              {selectedBooking.status === 'CONFIRMED' && (
-                <ActionButton 
-                  complete
-                  disabled={updating}
-                  onClick={() => handleStatusChange(selectedBooking.id, 'COMPLETED')}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                  </svg>
-                  Mark Completed
-                </ActionButton>
-              )}
-              
-              {selectedBooking.paymentStatus === 'unpaid' && (
-                <ActionButton 
-                  disabled={updating}
-                  onClick={() => handlePaymentStatusChange(selectedBooking.id, 'paid')}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="2" y="4" width="20" height="16" rx="2"></rect>
-                    <line x1="12" y1="16" x2="12" y2="16.01"></line>
-                    <path d="M17 10 L7 10"></path>
-                    <path d="M12 7 L12 13"></path>
-                  </svg>
-                  Mark as Paid
-                </ActionButton>
-              )}
-              
-              <ActionButton 
-                cancel
-                disabled={updating}
-                onClick={() => handleDeleteBooking(selectedBooking.id)}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  <line x1="10" y1="11" x2="10" y2="17"></line>
-                  <line x1="14" y1="11" x2="14" y2="17"></line>
-                </svg>
-                Delete Booking
-              </ActionButton>
-            </ActionButtonsContainer>
-          </ModalContent>
-        </ModalOverlay>
+          )}
+          <span>{notification.message}</span>
+        </Notification>
       )}
     </Container>
+  );
+};
+
+// Custom calendar toolbar component
+const CalendarToolbar = (toolbar) => {
+  const goToBack = () => {
+    toolbar.onNavigate('PREV');
+  };
+  
+  const goToNext = () => {
+    toolbar.onNavigate('NEXT');
+  };
+  
+  const goToCurrent = () => {
+    toolbar.onNavigate('TODAY');
+  };
+
+  const label = () => {
+    const date = toolbar.date;
+    return format(date, 'MMMM yyyy');
+  };
+
+  const viewButtons = () => {
+    const views = toolbar.views;
+    const view = toolbar.view;
+    
+    return (
+      <div style={{ display: 'flex', gap: '8px' }}>
+        {views.map(name => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => toolbar.onView(name)}
+            style={{
+              padding: '8px 12px',
+              backgroundColor: view === name ? colors.pineGreen : 'white',
+              color: view === name ? 'white' : colors.darkGray,
+              border: `1px solid ${view === name ? colors.pineGreen : '#ddd'}`,
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: view === name ? '600' : '400',
+              fontSize: '13px'
+            }}
+          >
+            {name.charAt(0).toUpperCase() + name.slice(1)}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      justifyContent: 'space-between', 
+      alignItems: 'center',
+      marginBottom: '25px',
+      flexWrap: 'wrap',
+      gap: '15px'
+    }}>
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <ViewToggleButton 
+          onClick={goToCurrent}
+          style={{ padding: '8px 15px', fontSize: '13px' }}
+        >
+          Today
+        </ViewToggleButton>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <ViewToggleButton 
+            onClick={goToBack}
+            style={{ padding: '8px 12px', minWidth: '40px' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+          </ViewToggleButton>
+          <ViewToggleButton 
+            onClick={goToNext}
+            style={{ padding: '8px 12px', minWidth: '40px' }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          </ViewToggleButton>
+        </div>
+      </div>
+      
+      <div style={{ 
+        fontSize: '20px', 
+        fontWeight: '600',
+        color: colors.darkGray,
+        padding: '0 15px'
+      }}>
+        {label()}
+      </div>
+      
+      {viewButtons()}
+    </div>
   );
 };
 

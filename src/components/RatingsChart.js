@@ -182,10 +182,6 @@ const RatingsChart = ({ data = { reviews: [] } }) => {
   
   // Process chart data based on the selected chart type
   const processChartData = (reviews, type) => {
-    if (!reviews || reviews.length === 0) {
-      return [];
-    }
-    
     const today = new Date();
     const dataMap = new Map();
     
@@ -198,21 +194,23 @@ const RatingsChart = ({ data = { reviews: [] } }) => {
         dataMap.set(dayStr, { totalRating: 0, count: 0, date });
       }
       
-      // Aggregate ratings per day
-      reviews.forEach(review => {
-        if (!review.timestamp) return;
-        
-        const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
-        // Only count if within the last 7 days
-        if ((today - reviewDate) / (1000 * 60 * 60 * 24) <= 7) {
-          const dayStr = reviewDate.toLocaleDateString('en-US', { weekday: 'short' });
-          if (dataMap.has(dayStr)) {
-            const dayData = dataMap.get(dayStr);
-            dayData.totalRating += review.rating;
-            dayData.count += 1;
+      // Aggregate ratings per day (only if we have reviews)
+      if (reviews && reviews.length > 0) {
+        reviews.forEach(review => {
+          if (!review.timestamp) return;
+          
+          const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
+          // Only count if within the last 7 days
+          if ((today - reviewDate) / (1000 * 60 * 60 * 24) <= 7) {
+            const dayStr = reviewDate.toLocaleDateString('en-US', { weekday: 'short' });
+            if (dataMap.has(dayStr)) {
+              const dayData = dataMap.get(dayStr);
+              dayData.totalRating += review.rating;
+              dayData.count += 1;
+            }
           }
-        }
-      });
+        });
+      }
       
       // Convert map to array and calculate average ratings
       return Array.from(dataMap.entries())
@@ -231,23 +229,25 @@ const RatingsChart = ({ data = { reviews: [] } }) => {
         dataMap.set(monthStr, { totalRating: 0, count: 0, date });
       }
       
-      // Aggregate ratings per month
-      reviews.forEach(review => {
-        if (!review.timestamp) return;
-        
-        const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
-        const monthsAgo = (today.getFullYear() - reviewDate.getFullYear()) * 12 + 
-                          today.getMonth() - reviewDate.getMonth();
-        
-        if (monthsAgo <= 5 && monthsAgo >= 0) {
-          const monthStr = reviewDate.toLocaleDateString('en-US', { month: 'short' });
-          if (dataMap.has(monthStr)) {
-            const monthData = dataMap.get(monthStr);
-            monthData.totalRating += review.rating;
-            monthData.count += 1;
+      // Aggregate ratings per month (only if we have reviews)
+      if (reviews && reviews.length > 0) {
+        reviews.forEach(review => {
+          if (!review.timestamp) return;
+          
+          const reviewDate = review.timestamp.toDate ? review.timestamp.toDate() : new Date(review.timestamp);
+          const monthsAgo = (today.getFullYear() - reviewDate.getFullYear()) * 12 + 
+                            today.getMonth() - reviewDate.getMonth();
+          
+          if (monthsAgo <= 5 && monthsAgo >= 0) {
+            const monthStr = reviewDate.toLocaleDateString('en-US', { month: 'short' });
+            if (dataMap.has(monthStr)) {
+              const monthData = dataMap.get(monthStr);
+              monthData.totalRating += review.rating;
+              monthData.count += 1;
+            }
           }
-        }
-      });
+        });
+      }
       
       // Convert map to array and calculate average ratings
       return Array.from(dataMap.entries())
@@ -279,21 +279,19 @@ const RatingsChart = ({ data = { reviews: [] } }) => {
     );
   }
   
-  const hasData = chartData.some(item => item.rating !== null);
-  
   return (
     <ChartContainer>
       <ChartTitle>Rating Trends {chartType === 'weekly' ? '(Last 7 Days)' : '(Last 6 Months)'}</ChartTitle>
       
       {averageRating > 0 && (
         <AverageIndicator>
-          Overall Average: 
-          <span><span className="star">★</span> {averageRating.toFixed(1)}</span>
-          {totalReviewCount > 0 && (
-            <span style={{ marginLeft: '10px', fontSize: '12px', color: colors.mediumGray }}>
-              ({totalReviewCount} {totalReviewCount === 1 ? 'review' : 'reviews'})
-            </span>
-          )}
+          Average Rating: 
+          <span>
+            <span className="star">★</span> {averageRating.toFixed(1)}
+          </span>
+          <span style={{ fontSize: '13px', marginLeft: '8px', fontWeight: 'normal', color: colors.mediumGray }}>
+            ({totalReviewCount} reviews)
+          </span>
         </AverageIndicator>
       )}
       
@@ -314,65 +312,69 @@ const RatingsChart = ({ data = { reviews: [] } }) => {
         </ToggleButton>
       </ChartToggle>
       
-      {!hasData ? (
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart
+          data={chartData}
+          margin={{ top: 10, right: 30, left: 0, bottom: 5 }}
+          animationDuration={1000}
+          animationEasing="ease-out"
+        >
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+          <XAxis dataKey="name" tick={{ fill: colors.darkGray }} axisLine={{ stroke: colors.mediumGray }} />
+          <YAxis 
+            domain={[0, 5]} 
+            ticks={[0, 1, 2, 3, 4, 5]}
+            tick={{ fill: colors.darkGray }} 
+            axisLine={{ stroke: colors.mediumGray }} 
+          />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend wrapperStyle={{ marginTop: 10 }} />
+          
+          {averageRating > 0 && (
+            <ReferenceLine 
+              y={averageRating} 
+              stroke={colors.averageLine} 
+              strokeDasharray="3 3" 
+              strokeWidth={1}
+              label={{ 
+                value: `Average: ${averageRating.toFixed(1)}`, 
+                position: 'right', 
+                fill: colors.averageLine,
+                fontSize: 12
+              }} 
+            />
+          )}
+          
+          <Line
+            type="monotone"
+            dataKey="rating"
+            name="Rating"
+            stroke={colors.lineColor}
+            dot={{ r: 4, strokeWidth: 2, stroke: colors.white }}
+            activeDot={{ r: 6, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
+            strokeWidth={2}
+            connectNulls={true}
+            isAnimationActive={true}
+          />
+          
+          <Line
+            type="monotone"
+            dataKey="count"
+            name="Reviews"
+            stroke={colors.accent}
+            strokeDasharray="3 3"
+            dot={{ r: 3, strokeWidth: 2, stroke: colors.white }}
+            activeDot={{ r: 5, fill: colors.accent, stroke: colors.white, strokeWidth: 2 }}
+            strokeWidth={1.5}
+            connectNulls={true}
+            isAnimationActive={true}
+            hide={!chartData.some(d => d.count > 0)}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+      
+      {!chartData.some(data => data.rating !== null) && (
         <NoDataMessage>No rating data available</NoDataMessage>
-      ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart 
-            data={chartData} 
-            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-            animationDuration={1000}
-            animationEasing="ease-out"
-          >
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-            <XAxis 
-              dataKey="name" 
-              tick={{ fill: colors.darkGray }} 
-              axisLine={{ stroke: colors.mediumGray }} 
-            />
-            <YAxis 
-              domain={[0, 5]} 
-              ticks={[0, 1, 2, 3, 4, 5]} 
-              tick={{ fill: colors.darkGray }} 
-              axisLine={{ stroke: colors.mediumGray }}
-            />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend wrapperStyle={{ marginTop: 10 }} />
-            {averageRating > 0 && (
-              <ReferenceLine 
-                y={averageRating} 
-                stroke={colors.averageLine} 
-                strokeDasharray="3 3"
-                label={{ 
-                  value: `Avg: ${averageRating.toFixed(1)}`, 
-                  fill: colors.darkGray,
-                  position: 'right'
-                }}
-              />
-            )}
-            <Line 
-              type="monotone" 
-              dataKey="rating" 
-              name="Average Rating" 
-              stroke={colors.lineColor}
-              strokeWidth={2}
-              activeDot={{ r: 6, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
-              dot={{ r: 4, fill: colors.pineGreen, stroke: colors.white, strokeWidth: 2 }}
-              connectNulls={true}
-            />
-            <Line 
-              type="monotone" 
-              dataKey="count" 
-              name="Review Count" 
-              stroke="#F44336"
-              strokeWidth={1.5}
-              strokeDasharray="5 5"
-              activeDot={{ r: 5, fill: "#F44336", stroke: colors.white, strokeWidth: 2 }}
-              dot={{ r: 3, fill: "#F44336", stroke: colors.white, strokeWidth: 1 }}
-              connectNulls={true}
-            />
-          </LineChart>
-        </ResponsiveContainer>
       )}
     </ChartContainer>
   );

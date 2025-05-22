@@ -212,14 +212,14 @@ const Analytics = () => {
         
         // Set recent rentals
         const recentRides = data.rides
-          .sort((a, b) => (b.startTime?.seconds || 0) - (a.startTime?.seconds || 0))
+          .sort((a, b) => (b.startDate?.seconds || 0) - (a.startDate?.seconds || 0))
           .slice(0, 5)
           .map(ride => ({
             id: ride.id,
             bikeId: ride.bikeId,
             userId: ride.userId,
             status: ride.isActive ? 'active' : 'completed',
-            createdAt: ride.startTime?.toDate() || new Date()
+            createdAt: ride.startDate?.toDate() || new Date()
           }));
         
         setRecentRentals(recentRides);
@@ -239,14 +239,14 @@ const Analytics = () => {
       
       // Set recent rentals
       const recentRides = data.rides
-        .sort((a, b) => (b.startTime?.seconds || 0) - (a.startTime?.seconds || 0))
+        .sort((a, b) => (b.startDate?.seconds || 0) - (a.startDate?.seconds || 0))
         .slice(0, 5)
         .map(ride => ({
           id: ride.id,
           bikeId: ride.bikeId,
           userId: ride.userId,
           status: ride.isActive ? 'active' : 'completed',
-          createdAt: ride.startTime?.toDate() || new Date()
+          createdAt: ride.startDate?.toDate() || new Date()
         }));
       
       setRecentRentals(recentRides);

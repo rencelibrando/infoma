@@ -203,7 +203,7 @@ export const getAnalyticsData = async () => {
       // Prioritize active rides and recent ones
       const ridesQuery = query(
         collection(db, 'rides'), 
-        orderBy('startTime', 'desc'), 
+        orderBy('startDate', 'desc'), 
         limit(100)
       );
       const ridesSnapshot = await getDocs(ridesQuery);
@@ -446,7 +446,7 @@ export const subscribeToAnalytics = (callback) => {
         console.log('Fetching fresh rides data');
         const ridesQuery = query(
           collection(db, 'rides'), 
-          orderBy('startTime', 'desc'), 
+          orderBy('startDate', 'desc'), 
           limit(100)
         );
         const ridesSnapshot = await getDocs(ridesQuery);
