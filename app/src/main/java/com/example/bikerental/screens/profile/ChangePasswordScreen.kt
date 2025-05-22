@@ -27,12 +27,13 @@ import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import com.example.bikerental.navigation.ProfileBackHandler
 import com.example.bikerental.navigation.popBackToProfileTab
+import androidx.hilt.navigation.compose.hiltViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChangePasswordScreen(
     navController: NavController,
-    viewModel: AuthViewModel = viewModel()
+    viewModel: AuthViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()

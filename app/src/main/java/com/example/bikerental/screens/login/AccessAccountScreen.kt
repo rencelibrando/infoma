@@ -38,7 +38,7 @@ import com.google.firebase.auth.FirebaseAuth
 @Composable
 fun AccessAccountScreen(
     navController: NavController,
-    viewModel: AuthViewModel = viewModel()
+    viewModel: AuthViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -67,23 +67,28 @@ fun AccessAccountScreen(
             return@LaunchedEffect
         }
         
-        // Skip re-processing of the same auth state
-        if (authStateProcessed && !(authState is AuthState.Error)) {
+        // Always process error states, regardless of previous processed status
+        if (authState is AuthState.Error) {
+            Log.e("AccessAccountScreen", "Auth Error: ${(authState as AuthState.Error).message}")
+            Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
+            authStateProcessed = false // Allow reprocessing after error
+            return@LaunchedEffect
+        }
+        
+        // Skip re-processing of the same auth state except for Authenticated state
+        // This ensures authentication is always processed for navigation
+        if (authStateProcessed && !(authState is AuthState.Authenticated)) {
             Log.d("AccessAccountScreen", "Ignoring already processed auth state: $authState")
             return@LaunchedEffect
         }
         
         when (val currentState = authState) {
             is AuthState.Authenticated -> {
-                Log.d("AccessAccountScreen", "Auth state is Authenticated. Navigation handled by MainActivity.")
-                // Ensure flags are potentially reset if needed, although MainActivity now drives navigation
+                Log.d("AccessAccountScreen", "Auth state is Authenticated. Navigating to Home.")
+                // Force navigation here for login screen
+                NavigationUtils.navigateToHome(navController)
                 authStateProcessed = true // Mark as processed to avoid loops if state reappears
-                hasNavigatedToHome = true // Assume navigation will happen
-            }
-            is AuthState.Error -> {
-                Log.e("AccessAccountScreen", "Auth Error: ${currentState.message}")
-                Toast.makeText(context, currentState.message, Toast.LENGTH_LONG).show()
-                authStateProcessed = false // Allow reprocessing after error
+                hasNavigatedToHome = true
             }
             is AuthState.NeedsAdditionalInfo -> {
                 Log.d("AccessAccountScreen", "Auth state: NeedsAdditionalInfo")

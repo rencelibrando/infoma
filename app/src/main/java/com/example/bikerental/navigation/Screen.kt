@@ -31,7 +31,11 @@ sealed class Screen(val route: String) {
     object BikeUpload : Screen("bikeUpload")
     
     // Booking related screens
-    object Bookings : Screen("bookings")
+    object Bookings : Screen("bookings?bikeId={bikeId}") {
+        fun createRoute(bikeId: String? = null): String {
+            return if (bikeId != null) "bookings?bikeId=$bikeId" else "bookings?bikeId="
+        }
+    }
     object BookingDetails : Screen("bookingDetails/{bookingId}") {
         fun createRoute(bookingId: String) = "bookingDetails/$bookingId"
     }

@@ -26,77 +26,85 @@ import kotlinx.coroutines.delay
 fun SplashScreen(onSplashComplete: () -> Unit) {
     var startAnimation by remember { mutableStateOf(false) }
     
-    // Logo animations
-    val logoScale = animateFloatAsState(
+    // Logo animations - optimized for better performance
+    val logoScale by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0.5f,
         animationSpec = tween(
-            durationMillis = 800,
-            easing = EaseOutBack
-        )
+            durationMillis = 700,
+            easing = EaseOutQuad
+        ), 
+        label = "logoScale"
     )
     
-    val logoRotation = animateFloatAsState(
+    val logoRotation by animateFloatAsState(
         targetValue = if (startAnimation) 0f else -45f,
         animationSpec = tween(
-            durationMillis = 1000,
-            easing = EaseOutQuart
-        )
+            durationMillis = 800,
+            easing = EaseOutQuad
+        ),
+        label = "logoRotation"
     )
     
-    val logoAlpha = animateFloatAsState(
+    val logoAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 800
-        )
+            durationMillis = 700
+        ),
+        label = "logoAlpha"
     )
     
     // First text animations
-    val titleAlpha = animateFloatAsState(
+    val titleAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 800,
-            delayMillis = 400
-        )
+            durationMillis = 700,
+            delayMillis = 300
+        ),
+        label = "titleAlpha"
     )
     
-    val titleSlide = animateFloatAsState(
+    val titleSlide by animateFloatAsState(
         targetValue = if (startAnimation) 0f else -100f,
         animationSpec = tween(
-            durationMillis = 1000,
-            delayMillis = 400,
-            easing = EaseOutQuint
-        )
+            durationMillis = 800,
+            delayMillis = 300,
+            easing = EaseOutQuad
+        ),
+        label = "titleSlide"
     )
     
     // Second text animations
-    val subtitleAlpha = animateFloatAsState(
+    val subtitleAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 800,
-            delayMillis = 600
-        )
+            durationMillis = 700,
+            delayMillis = 500
+        ),
+        label = "subtitleAlpha"
     )
     
-    val subtitleSlide = animateFloatAsState(
+    val subtitleSlide by animateFloatAsState(
         targetValue = if (startAnimation) 0f else 100f,
         animationSpec = tween(
-            durationMillis = 1000,
-            delayMillis = 600,
-            easing = EaseOutQuint
-        )
+            durationMillis = 800,
+            delayMillis = 500,
+            easing = EaseOutQuad
+        ),
+        label = "subtitleSlide"
     )
     
-    // Startup and completion
+    // Startup and completion - shortened duration
     LaunchedEffect(key1 = true) {
         startAnimation = true
-        delay(2500) // Slightly longer to allow animations to complete
+        delay(1000) // Shorter duration to complete faster
         onSplashComplete()
     }
 
+    // Simplified background - use MaterialTheme instead of hardcoded color
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.LightGray),
+            .background(MaterialTheme.colorScheme.background),
         contentAlignment = Alignment.Center
     ) {
         Column(
@@ -112,9 +120,9 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
                 contentDescription = "Bambike Logo",
                 modifier = Modifier
                     .size(120.dp)
-                    .scale(logoScale.value)
-                    .rotate(logoRotation.value)
-                    .alpha(logoAlpha.value)
+                    .scale(logoScale)
+                    .rotate(logoRotation)
+                    .alpha(logoAlpha)
             )
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -122,13 +130,13 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
             // Main title with slide and fade animations
             Text(
                 text = "Bambike",
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .alpha(titleAlpha.value)
-                    .offset(x = titleSlide.value.dp)
+                    .alpha(titleAlpha)
+                    .offset(x = titleSlide.dp)
                     .fillMaxWidth()
             )
             
@@ -137,13 +145,13 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
             // Subtitle with slide and fade animations (from opposite direction)
             Text(
                 text = "REVOLUTION CYCLES",
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .alpha(subtitleAlpha.value)
-                    .offset(x = subtitleSlide.value.dp)
+                    .alpha(subtitleAlpha)
+                    .offset(x = subtitleSlide.dp)
                     .fillMaxWidth()
             )
         }

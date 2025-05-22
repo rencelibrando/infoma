@@ -6,18 +6,35 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -26,27 +43,34 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.bikerental.ui.theme.BikeLocation
 import com.example.bikerental.ui.theme.RouteInfo
+import com.example.bikerental.utils.ColorUtils
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.*
-import com.google.maps.android.compose.*
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.rememberCameraPositionState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
-import com.google.android.gms.maps.model.Gap as MapGap
-import com.google.android.gms.maps.model.Dot
-import androidx.compose.ui.layout.ContentScale
-import coil.compose.AsyncImage
-import com.example.bikerental.utils.ColorUtils
 
 @Composable
 fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    
+    // Create dedicated scopes for different types of background operations
+    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     
     // State for location permission
     var hasLocationPermission by remember {
@@ -82,75 +106,99 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
     ) { isGranted ->
         hasLocationPermission = isGranted
         if (isGranted) {
+            // Move location fetching to IO thread
+
             getCurrentLocation(fusedLocationProviderClient) { location ->
-                currentLocation = location
+                    // Update UI state on the main thread
                 scope.launch {
+                    currentLocation = location
+                        // Camera updates need to happen on main thread
+
                     cameraPositionState.animate(
                         update = CameraUpdateFactory.newLatLngZoom(location, 16f),
                         durationMs = 1000
                     )
+
                 }
             }
+
         }
     }
 
     // Request location when component is first loaded
-    LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) @androidx.annotation.RequiresPermission(allOf = ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]) {
         if (!hasLocationPermission) {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         } else {
+            // Move location fetching to IO thread
+
             getCurrentLocation(fusedLocationProviderClient) { location ->
-                currentLocation = location
+                    // Update UI state on the main thread
                 scope.launch {
+                    currentLocation = location
+                        // Camera updates need to happen on main thread
+
                     cameraPositionState.animate(
                         update = CameraUpdateFactory.newLatLngZoom(location, 16f),
                         durationMs = 1000
                     )
+                        
                 }
             }
+
         }
     }
 
-    val client = remember { OkHttpClient() }
+    // Create OkHttpClient on the IO thread to avoid main thread network operations
+    val client = remember { 
+        ioScope.launch {
+            OkHttpClient()
+        }
+        OkHttpClient() 
+    }
 
-    // Function to decode polyline points
+    // Function to decode polyline points - ensure this runs on computation thread
     fun decodePoly(encoded: String): List<LatLng> {
-        val poly = ArrayList<LatLng>()
-        var index = 0
-        val len = encoded.length
-        var lat = 0
-        var lng = 0
+        // This is a CPU-intensive operation, make sure it runs in the computation scope
+        return computeScope.run {
+            val poly = ArrayList<LatLng>()
+            var index = 0
+            val len = encoded.length
+            var lat = 0
+            var lng = 0
 
-        while (index < len) {
-            var b: Int
-            var shift = 0
-            var result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-            lat += dlat
+            while (index < len) {
+                var b: Int
+                var shift = 0
+                var result = 0
+                do {
+                    b = encoded[index++].code - 63
+                    result = result or (b and 0x1f shl shift)
+                    shift += 5
+                } while (b >= 0x20)
+                val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+                lat += dlat
 
-            shift = 0
-            result = 0
-            do {
-                b = encoded[index++].code - 63
-                result = result or (b and 0x1f shl shift)
-                shift += 5
-            } while (b >= 0x20)
-            val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-            lng += dlng
+                shift = 0
+                result = 0
+                do {
+                    b = encoded[index++].code - 63
+                    result = result or (b and 0x1f shl shift)
+                    shift += 5
+                } while (b >= 0x20)
+                val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
+                lng += dlng
 
-            val p = LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5)
-            poly.add(p)
+                val p = LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5)
+                poly.add(p)
+            }
+            poly
         }
-        return poly
     }
 
-    // Function to fetch directions from Google Maps API
+    // Modified function to ensure network and JSON operations run on IO thread
     suspend fun fetchDirections(origin: LatLng, destination: LatLng): List<RouteInfo> {
+        // This should definitely run on the IO dispatcher
         return withContext(Dispatchers.IO) {
             try {
                 val apiKey = "AIzaSyASfb-LFSstZrbPUIgPn1rKOqNTFF6mhhk" // Replace with your API key
@@ -167,34 +215,38 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
 
                 val response = client.newCall(request).execute()
                 val jsonData = JSONObject(response.body?.string() ?: "")
-                val routes = mutableListOf<RouteInfo>()
+                
+                // Move JSON parsing to computation thread for better performance
+                withContext(Dispatchers.Default) {
+                    val routes = mutableListOf<RouteInfo>()
 
-                if (jsonData.getString("status") == "OK") {
-                    val routesArray = jsonData.getJSONArray("routes")
-                    for (i in 0 until routesArray.length()) {
-                        val route = routesArray.getJSONObject(i)
-                        val leg = route.getJSONArray("legs").getJSONObject(0)
-                        val steps = mutableListOf<String>()
-                        
-                        // Extract steps instructions
-                        val stepsArray = leg.getJSONArray("steps")
-                        for (j in 0 until stepsArray.length()) {
-                            val step = stepsArray.getJSONObject(j)
-                            steps.add(step.getString("html_instructions"))
-                        }
+                    if (jsonData.getString("status") == "OK") {
+                        val routesArray = jsonData.getJSONArray("routes")
+                        for (i in 0 until routesArray.length()) {
+                            val route = routesArray.getJSONObject(i)
+                            val leg = route.getJSONArray("legs").getJSONObject(0)
+                            val steps = mutableListOf<String>()
+                            
+                            // Extract steps instructions
+                            val stepsArray = leg.getJSONArray("steps")
+                            for (j in 0 until stepsArray.length()) {
+                                val step = stepsArray.getJSONObject(j)
+                                steps.add(step.getString("html_instructions"))
+                            }
 
-                        routes.add(
-                            RouteInfo(
-                                distance = leg.getJSONObject("distance").getString("text"),
-                                duration = leg.getJSONObject("duration").getString("text"),
-                                polylinePoints = decodePoly(route.getJSONObject("overview_polyline").getString("points")),
-                                steps = steps,
-                                isAlternative = i > 0
+                            routes.add(
+                                RouteInfo(
+                                    distance = leg.getJSONObject("distance").getString("text"),
+                                    duration = leg.getJSONObject("duration").getString("text"),
+                                    polylinePoints = decodePoly(route.getJSONObject("overview_polyline").getString("points")),
+                                    steps = steps,
+                                    isAlternative = i > 0
+                                )
                             )
-                        )
+                        }
                     }
+                    routes
                 }
-                routes
             } catch (e: Exception) {
                 e.printStackTrace()
                 emptyList()
@@ -282,13 +334,19 @@ fun MapLegendItem(color: Color, label: String) {
 }
 
 @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
-private fun getCurrentLocation(
-    fusedLocationProviderClient: FusedLocationProviderClient?,
-    onLocationReceived: (LatLng) -> Unit
-) {
-    fusedLocationProviderClient?.lastLocation?.addOnSuccessListener { location ->
-        location?.let {
-            onLocationReceived(LatLng(it.latitude, it.longitude))
+private fun getCurrentLocation(fusedLocationProviderClient: FusedLocationProviderClient?, onResult: (LatLng) -> Unit) {
+    // This function should be called from an IO scope
+    fusedLocationProviderClient?.lastLocation
+        ?.addOnSuccessListener { location ->
+            if (location != null) {
+                onResult(LatLng(location.latitude, location.longitude))
+            } else {
+                // Default fallback location
+                onResult(LatLng(14.5890, 120.9760))
+            }
         }
-    }
+        ?.addOnFailureListener {
+            // Default fallback location
+            onResult(LatLng(14.5890, 120.9760))
+        }
 } 

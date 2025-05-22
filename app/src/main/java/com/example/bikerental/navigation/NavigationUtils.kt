@@ -112,8 +112,8 @@ object NavigationUtils {
     /**
      * Navigate to bookings screen
      */
-    fun navigateToBookings(navController: NavController) {
-        navController.navigate(Screen.Bookings.route)
+    fun navigateToBookings(navController: NavController, bikeId: String? = null) {
+        navController.navigate(Screen.Bookings.createRoute(bikeId))
     }
     
     /**

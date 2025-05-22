@@ -21,12 +21,21 @@ import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 fun RideHistoryTab() {
     // Initialize the ViewModel
     val viewModel: RideHistoryViewModel = viewModel()
+    
+    // Create dedicated scope for background operations
+    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     
     // Collect state from ViewModel
     val rideHistory by viewModel.rideHistory.collectAsState()
@@ -36,8 +45,19 @@ fun RideHistoryTab() {
     // Pull to refresh functionality
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isLoading,
-        onRefresh = { viewModel.fetchUserRideHistory() }
+        onRefresh = { 
+            ioScope.launch {
+                viewModel.fetchUserRideHistory()
+            }
+        }
     )
+    
+    // Fetch ride history when component is loaded
+    LaunchedEffect(Unit) {
+        ioScope.launch {
+            viewModel.fetchUserRideHistory()
+        }
+    }
     
     Box(
         modifier = Modifier
@@ -180,17 +200,34 @@ private fun RideHistoryItem(
     ride: BikeRide,
     textColor: Color
 ) {
-    val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+    // Use remember and launched effect to format dates in background
+    val coroutineScope = rememberCoroutineScope()
+    var formattedStartDate by remember { mutableStateOf("") }
+    var formattedStartTime by remember { mutableStateOf("") }
+    var durationText by remember { mutableStateOf("") }
     
-    // Format the date and time
-    val startDate = dateFormat.format(Date(ride.startTime))
-    val startTime = timeFormat.format(Date(ride.startTime))
-    
-    // Calculate duration
-    val durationMillis = if (ride.endTime > 0) ride.endTime - ride.startTime else 0
-    val durationMinutes = durationMillis / (1000 * 60)
-    val durationText = "$durationMinutes minutes"
+    // Process date formatting in background
+    LaunchedEffect(ride) {
+        coroutineScope.launch(Dispatchers.Default) {
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            
+            val startDateStr = dateFormat.format(Date(ride.startTime))
+            val startTimeStr = timeFormat.format(Date(ride.startTime))
+            
+            // Calculate duration
+            val durationMillis = if (ride.endTime > 0) ride.endTime - ride.startTime else 0
+            val durationMinutes = durationMillis / (1000 * 60)
+            val formattedDuration = "$durationMinutes minutes"
+            
+            // Update UI state on main thread
+            withContext(Dispatchers.Main) {
+                formattedStartDate = startDateStr
+                formattedStartTime = startTimeStr
+                durationText = formattedDuration
+            }
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -207,7 +244,7 @@ private fun RideHistoryItem(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "$startDate at $startTime",
+                text = "$formattedStartDate at $formattedStartTime",
                 style = MaterialTheme.typography.bodyMedium,
                 color = textColor
             )

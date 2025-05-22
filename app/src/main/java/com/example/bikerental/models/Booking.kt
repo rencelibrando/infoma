@@ -13,6 +13,7 @@ data class Booking(
     val id: String = UUID.randomUUID().toString(),
     val bikeId: String = "",
     val userId: String = "",
+    val userName: String = "",
     val startDate: Date = Date(),
     val endDate: Date = Date(),
     val status: BookingStatus = BookingStatus.PENDING,
@@ -27,6 +28,7 @@ data class Booking(
             "id" to id,
             "bikeId" to bikeId,
             "userId" to userId,
+            "userName" to userName,
             "startDate" to startDate,
             "endDate" to endDate,
             "status" to status.name,
@@ -43,6 +45,7 @@ data class Booking(
         fun createDaily(
             bikeId: String,
             userId: String,
+            userName: String = "",
             startDate: Date,
             endDate: Date,
             pricePerHour: Double
@@ -54,6 +57,7 @@ data class Booking(
             return Booking(
                 bikeId = bikeId,
                 userId = userId,
+                userName = userName,
                 startDate = startDate,
                 endDate = endDate,
                 status = BookingStatus.PENDING,
@@ -68,6 +72,7 @@ data class Booking(
         fun createHourly(
             bikeId: String,
             userId: String,
+            userName: String = "",
             startDate: Date,
             endDate: Date,
             pricePerHour: Double
@@ -79,6 +84,7 @@ data class Booking(
             return Booking(
                 bikeId = bikeId,
                 userId = userId,
+                userName = userName,
                 startDate = startDate,
                 endDate = endDate,
                 status = BookingStatus.PENDING,

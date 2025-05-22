@@ -1,23 +1,43 @@
 package com.example.bikerental.screens.login
-import android.app.Activity
 import android.util.Patterns
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -29,40 +49,47 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.rememberNavController
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.bikerental.models.AuthState
-import com.example.bikerental.viewmodels.AuthViewModel
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
 import com.example.bikerental.navigation.Screen
+import com.example.bikerental.viewmodels.AuthViewModel
 
 /**
  * Formats a Philippine phone number to the international format (+63)
  */
 fun formatPhilippinePhoneNumber(phoneNumber: String): String {
-    val digitsOnly = phoneNumber.replace(Regex("[^0-9]"), "")
-    
-    return when {
-        // If it already starts with +63, return as is
-        phoneNumber.startsWith("+63") -> phoneNumber
+    try {
+        // Basic validation before formatting
+        if (phoneNumber.isBlank()) return phoneNumber
         
-        // If it starts with 0, replace with +63
-        digitsOnly.startsWith("0") && digitsOnly.length >= 11 -> {
-            "+63${digitsOnly.substring(1)}"
+        val digitsOnly = phoneNumber.replace(Regex("[^0-9]"), "")
+        if (digitsOnly.isEmpty()) return phoneNumber
+        
+        return when {
+            // If it already starts with +63, return as is
+            phoneNumber.startsWith("+63") -> phoneNumber
+            
+            // If it starts with 0, replace with +63
+            digitsOnly.startsWith("0") && digitsOnly.length >= 10 -> {
+                "+63${digitsOnly.substring(1)}"
+            }
+            
+            // If it's just the 9-digit number (without 0 or +63)
+            digitsOnly.startsWith("9") && digitsOnly.length >= 9 -> {
+                "+63$digitsOnly"
+            }
+            
+            // If it starts with 63 (without +)
+            digitsOnly.startsWith("63") && digitsOnly.length >= 11 -> {
+                "+$digitsOnly"
+            }
+            
+            // Otherwise, don't modify (will fail validation)
+            else -> phoneNumber
         }
-        
-        // If it's just the 9-digit number (without 0 or +63)
-        digitsOnly.length >= 9 && !digitsOnly.startsWith("0") && !digitsOnly.startsWith("63") -> {
-            "+63$digitsOnly"
-        }
-        
-        // If it starts with 63 (without +)
-        digitsOnly.startsWith("63") && digitsOnly.length >= 12 -> {
-            "+$digitsOnly"
-        }
-        
-        // Otherwise, don't modify (will fail validation)
-        else -> phoneNumber
+    } catch (e: Exception) {
+        android.util.Log.e("SignUpScreen", "Phone formatting error: ${e.message}")
+        // Return original on error
+        return phoneNumber
     }
 }
 
@@ -70,18 +97,50 @@ fun formatPhilippinePhoneNumber(phoneNumber: String): String {
  * Validates if the input is a valid Philippine phone number
  */
 fun isValidPhilippinePhoneNumber(phoneNumber: String): Boolean {
-    val trimmedPhone = phoneNumber.trim()
-    
-    // Check if it matches the pattern of a Philippine phone number
-    // Valid formats: +639XXXXXXXXX, 09XXXXXXXXX, 9XXXXXXXXX, 639XXXXXXXXX
-    return trimmedPhone.matches(Regex("^(\\+63|0|)9\\d{9}$")) || 
-           trimmedPhone.matches(Regex("^63\\d{10}$"))
+    try {
+        val trimmedPhone = phoneNumber.trim()
+        if (trimmedPhone.isEmpty()) return false
+        
+        // Check basic length and pattern before regex
+        val digitsOnly = trimmedPhone.replace(Regex("[^0-9+]"), "")
+        
+        // Basic validation without complex regex
+        val isValid = when {
+            // +639XXXXXXXXX format
+            trimmedPhone.startsWith("+639") && digitsOnly.length == 13 -> true
+            // 09XXXXXXXXX format
+            trimmedPhone.startsWith("09") && digitsOnly.length == 11 -> true
+            // 9XXXXXXXXX format (just numbers)
+            trimmedPhone.startsWith("9") && digitsOnly.length == 10 -> true
+            // 639XXXXXXXXX format
+            trimmedPhone.startsWith("639") && digitsOnly.length == 12 -> true
+            // Any other format is invalid
+            else -> false
+        }
+        
+        return isValid
+    } catch (e: Exception) {
+        android.util.Log.e("SignUpScreen", "Phone validation error: ${e.message}")
+        return false
+    }
+}
+
+/**
+ * Safely formats a phone number, handling any exceptions internally
+ */
+fun safeFormatPhoneNumber(phoneNumber: String): String {
+    return try {
+        formatPhilippinePhoneNumber(phoneNumber)
+    } catch (e: Exception) {
+        android.util.Log.e("SignUpScreen", "Error formatting phone: ${e.message}")
+        phoneNumber // Return original on error
+    }
 }
 
 @Composable
 fun SignUpScreen(
     navController: NavController,
-    viewModel: AuthViewModel = viewModel()
+    viewModel: AuthViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 ) {
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -152,7 +211,7 @@ fun SignUpScreen(
         val trimmedConfirmPassword = confirmPassword.trim()
         
         // Format phone number before validation
-        formattedPhoneNumber = formatPhilippinePhoneNumber(phone.trim())
+        formattedPhoneNumber = safeFormatPhoneNumber(phone.trim())
         
         return when {
             trimmedFullName.isBlank() -> {
@@ -317,19 +376,25 @@ fun SignUpScreen(
             ResponsiveTextField(
                 value = phone,
                 onValueChange = { 
-                    // Store raw input
+                    // Store raw input without immediate validation
                     phone = it
                     
-                    // Show formatted preview if valid
-                    if (isValidPhilippinePhoneNumber(it.trim())) {
-                        formattedPhoneNumber = formatPhilippinePhoneNumber(it.trim())
+                    // Only format if the input is not empty and roughly matches a phone pattern
+                    if (it.trim().isNotEmpty() && it.trim().length >= 9) {
+                        // Basic pattern checking instead of regex for better performance
+                        val digitsOnly = it.replace(Regex("[^0-9]"), "")
+                        if (digitsOnly.length >= 9) {
+                            formattedPhoneNumber = safeFormatPhoneNumber(it.trim())
+                        }
                     }
                 },
                 label = "Phone Number (e.g., 09123456789)",
                 leadingIcon = { Icon(Icons.Default.Phone, "Phone") },
                 supportingText = {
-                    if (phone.isNotEmpty() && isValidPhilippinePhoneNumber(phone.trim())) {
-                        Text("Will be saved as: $formattedPhoneNumber")
+                    if (phone.isNotEmpty()) {
+                        if (isValidPhilippinePhoneNumber(phone.trim())) {
+                            Text("Will be saved as: $formattedPhoneNumber")
+                        }
                     }
                 }
             )

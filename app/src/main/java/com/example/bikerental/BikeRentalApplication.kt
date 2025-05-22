@@ -1,61 +1,101 @@
 package com.example.bikerental
 
 import android.app.Application
-import android.util.Log
+import android.os.Build
+import android.os.StrictMode
+import com.example.bikerental.utils.LogManager
+import com.google.firebase.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import dagger.hilt.android.HiltAndroidApp
 
+@HiltAndroidApp
 class BikeRentalApplication : Application() {
     
     private val TAG = "AppCheck"
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     
-    // Track App Check initialization
-    private val _appCheckInitialized = MutableStateFlow(false)
-    val appCheckInitialized: StateFlow<Boolean> = _appCheckInitialized
+    private var appCheckInitialized = false
     
     override fun onCreate() {
         super.onCreate()
         
-        // Initialize Firebase first
+        initializeLogging()
+        
         FirebaseApp.initializeApp(this)
         
-        // Initialize App Check - do this synchronously to avoid race conditions
         initializeAppCheck()
+        
+        if (BuildConfig.DEBUG) {
+            setupStrictMode()
+        }
+        
+        val settings = FirebaseFirestoreSettings.Builder()
+            .setCacheSizeBytes(FirebaseFirestoreSettings.CACHE_SIZE_UNLIMITED)
+            .build()
+        
+        FirebaseFirestore.getInstance().firestoreSettings = settings
+    }
+    
+    private fun initializeLogging() {
+        val logLevel = if (BuildConfig.DEBUG) {
+            LogManager.LogLevel.DEBUG
+        } else {
+            LogManager.LogLevel.INFO
+        }
+        
+        LogManager.configure(logLevel)
+        
+        LogManager.i(TAG, "Application starting, logging system initialized")
     }
     
     private fun initializeAppCheck() {
         try {
             val appCheck = FirebaseAppCheck.getInstance()
             
-            // Configure caching to reduce token requests
             appCheck.setTokenAutoRefreshEnabled(true)
             
-            // Configure limited debug token if needed
-            // appCheck.installAppCheckDebugProvider("YOUR-DEBUG-TOKEN")
-            
-            // Use Play Integrity
             appCheck.installAppCheckProviderFactory(
                 PlayIntegrityAppCheckProviderFactory.getInstance()
             )
-            Log.d(TAG, "Play Integrity App Check initialized with token caching")
+            LogManager.d(TAG, "Play Integrity App Check initialized with token caching")
             
-            // Mark as initialized
-            _appCheckInitialized.value = true
+            appCheckInitialized = true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize App Check", e)
-            // Still mark as initialized to prevent blocking app functionality
-            _appCheckInitialized.value = true
+            LogManager.e(TAG, "Failed to initialize App Check", e)
+            appCheckInitialized = true
         }
+    }
+    
+    private fun setupStrictMode() {
+        LogManager.d(TAG, "Setting up StrictMode to detect main thread violations")
+        
+        StrictMode.setThreadPolicy(
+            StrictMode.ThreadPolicy.Builder()
+                .detectAll()
+                .penaltyLog() 
+            .build()
+        )
+        
+        StrictMode.setVmPolicy(
+            StrictMode.VmPolicy.Builder()
+                .detectLeakedSqlLiteObjects()
+                .detectLeakedClosableObjects()
+                .detectActivityLeaks()
+                .detectCleartextNetwork()
+                .apply {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        detectNonSdkApiUsage()
+                    }
+                }
+                .penaltyLog()
+                .build()
+        )
     }
 } 

@@ -12,12 +12,13 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -49,419 +50,425 @@ class BookingViewModel : ViewModel() {
     // Thread-safety mechanisms
     private val bookingsLock = ReentrantLock()
     private val activeBookingOperations = ConcurrentHashMap<String, Boolean>()
-    
+
+    init {
+        fetchUserBookings()
+    }
+
     /**
-     * Create a new booking with thread-safety considerations
+     * Fetch all bookings for the current user
      */
-    fun createBooking(
-        bikeId: String,
-        startDate: Date,
-        endDate: Date,
-        isHourly: Boolean = false,
-        onSuccess: (Booking) -> Unit,
-        onError: (String) -> Unit
-    ) {
-        // Generate a stable booking ID
-        val bookingId = UUID.randomUUID().toString()
+    fun fetchUserBookings() {
+        // Safety check
+        val userId = auth.currentUser?.uid ?: return
         
-        // Check if this operation is already in progress
-        if (activeBookingOperations.putIfAbsent(bookingId, true) != null) {
-            Log.w(TAG, "Booking operation already in progress")
-            onError("Another booking operation is in progress")
-            return
-        }
+        _isLoading.value = true
+        _error.value = null
         
-        viewModelScope.launch {
+        // Cancel any existing listener
+        bookingsListener?.remove()
+        
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                _isLoading.value = true
+                Log.d(TAG, "Fetching bookings for user: $userId")
                 
-                Log.d(TAG, "Creating ${if (isHourly) "hourly" else "daily"} booking for bike: $bikeId, from $startDate to $endDate")
-                
-                // Get current user
-                val currentUser = auth.currentUser
-                    ?: throw Exception("User must be logged in to create a booking")
-                
-                Log.d(TAG, "Creating booking as user: ${currentUser.uid}")
-                
-                // Get bike details for pricing
-                val bikeDoc = withContext(Dispatchers.IO) {
-                    db.collection("bikes").document(bikeId).get().await()
-                }
-                
-                val bike = bikeDoc.toObject(Bike::class.java)
-                    ?: throw Exception("Bike not found")
-                
-                // Check bike availability
-                if (!bike.isAvailable || bike.isInUse) {
-                    Log.e(TAG, "Bike is not available: isAvailable=${bike.isAvailable}, isInUse=${bike.isInUse}")
-                    throw Exception("This bike is not available for booking")
-                }
-                
-                // Verify that the requested dates are not already booked
-                Log.d(TAG, "Checking existing bookings for $bikeId between $startDate and $endDate")
-                val existingBookings = withContext(Dispatchers.IO) {
-                    db.collection("bookings")
-                        .whereEqualTo("bikeId", bikeId)
-                        .whereGreaterThanOrEqualTo("endDate", startDate)
-                        .whereLessThanOrEqualTo("startDate", endDate)
-                        .get()
-                        .await()
-                }
-                
-                if (!existingBookings.isEmpty) {
-                    Log.e(TAG, "Bike is already booked: Found ${existingBookings.size()} conflicting bookings")
-                    throw Exception("This bike is already booked for the selected dates/times")
-                }
-                
-                // Create the booking record
-                val booking = if (isHourly) {
-                    Booking.createHourly(
-                        bikeId = bikeId,
-                        userId = currentUser.uid,
-                        startDate = startDate,
-                        endDate = endDate,
-                        pricePerHour = bike.priceValue
-                    )
-                } else {
-                    Booking.createDaily(
-                        bikeId = bikeId,
-                        userId = currentUser.uid,
-                        startDate = startDate,
-                        endDate = endDate,
-                        pricePerHour = bike.priceValue
-                    )
-                }
-                
-                // Store booking in Firestore with a transaction for atomicity
-                Log.d(TAG, "Executing Firestore transaction to create booking: ${booking.id}")
-                withContext(Dispatchers.IO) {
-                    db.runTransaction { transaction ->
-                        // Update the bike's availability status
-                        val bikeRef = db.collection("bikes").document(bikeId)
-                        
-                        // Check if the bike is still available in the transaction
-                        val currentBike = transaction.get(bikeRef).toObject(Bike::class.java)
-                        if (currentBike == null || !currentBike.isAvailable || currentBike.isInUse) {
-                            Log.e(TAG, "Bike availability changed during transaction")
-                            throw Exception("This bike is no longer available")
+                // Set up a real-time listener for bookings
+                bookingsListener = db.collectionGroup("bookings")
+                    .whereEqualTo("userId", userId)
+                    .orderBy("startDate", Query.Direction.DESCENDING)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error != null) {
+                            Log.e(TAG, "Error fetching bookings (Ask Gemini)", error)
+                            _error.value = if (error.message?.contains("requires an index", ignoreCase = true) == true) {
+                                "Firebase index error. Please create the required index by following the link in the logs."
+                            } else {
+                                "Failed to load bookings: ${error.message}"
+                            }
+                            _isLoading.value = false
+                            return@addSnapshotListener
                         }
-                        
-                        // Main booking document
-                        val bookingRef = db.collection("bookings").document(booking.id)
-                        transaction.set(bookingRef, booking.toMap())
-                        
-                        // User's bookings collection
-                        val userBookingRef = db.collection("users")
-                            .document(currentUser.uid)
-                            .collection("bookings")
-                            .document(booking.id)
-                        transaction.set(userBookingRef, booking.toMap())
-                        
-                        // Bike's bookings collection
-                        val bikeBookingRef = db.collection("bikes")
-                            .document(bikeId)
-                            .collection("bookings")
-                            .document(booking.id)
-                        transaction.set(bikeBookingRef, booking.toMap())
-                        
-                        // Mark bike as in use or update availability
-                        transaction.update(bikeRef, "isInUse", true)
-                    }.await()
-                }
-                
-                // Call refreshBookings() which now handles its own locking correctly
-                Log.d(TAG, "Booking created successfully, refreshing bookings")
-                refreshBookings()
-                
-                onSuccess(booking)
+
+                        // Process snapshot on background thread
+                        viewModelScope.launch(Dispatchers.IO) {
+                            if (snapshot == null || snapshot.isEmpty) {
+                                Log.d(TAG, "No bookings found for user")
+                                _bookings.value = emptyList()
+                                _isLoading.value = false
+                                return@launch
+                            }
+
+                            Log.d(TAG, "Received ${snapshot.documents.size} booking documents")
+                            
+                            // Create bookings list
+                            val bookingsWithBikes = mutableListOf<BookingWithBikeDetails>()
+                            val tempBookingMap = ConcurrentHashMap<String, Booking>()
+                            
+                            // Process booking documents
+                            for (document in snapshot.documents) {
+                                try {
+                                    val booking = document.toObject(Booking::class.java)
+                                    if (booking != null && booking.bikeId.isNotEmpty()) {
+                                        // Set the ID from the document if not already set
+                                        val bookingWithId = if (booking.id.isEmpty()) 
+                                            booking.copy(id = document.id) 
+                                        else 
+                                            booking
+                                        tempBookingMap[bookingWithId.id] = bookingWithId
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error parsing booking: ${document.id}", e)
+                                }
+                            }
+                            
+                            // Fetch bike details for each booking
+                            val bikeDetailsJobs = tempBookingMap.values.map { booking ->
+                                viewModelScope.async(Dispatchers.IO) {
+                                    try {
+                                        val bikeDoc = db.collection("bikes").document(booking.bikeId).get().await()
+                                        val bike = bikeDoc.toObject(Bike::class.java)
+                                        if (bike != null) {
+                                            // Use the first image URL or default to empty string
+                                            val imageUrl = if (bike.imageUrls.isNotEmpty()) {
+                                                bike.imageUrls.first()
+                                            } else {
+                                                bike.imageUrl.ifEmpty { "" }
+                                            }
+                                            
+                                            bookingsWithBikes.add(
+                                                BookingWithBikeDetails(
+                                                    booking = booking,
+                                                    bikeName = bike.name,
+                                                    bikeImage = imageUrl,
+                                                    bikeType = bike.type,
+                                                    bikePricePerHour = bike.priceValue
+                                                )
+                                            )
+                                        } else {
+                                            // Create a placeholder if bike not found
+                                            bookingsWithBikes.add(
+                                                BookingWithBikeDetails(
+                                                    booking = booking,
+                                                    bikeName = "Unknown Bike",
+                                                    bikeImage = "",
+                                                    bikeType = "Unknown",
+                                                    bikePricePerHour = 0.0
+                                                )
+                                            )
+                                            Log.w(TAG, "Bike not found for booking: ${booking.id}")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Error fetching bike for booking: ${booking.id}", e)
+                                        // Add placeholder with error
+                                        bookingsWithBikes.add(
+                                            BookingWithBikeDetails(
+                                                booking = booking,
+                                                bikeName = "Error loading bike",
+                                                bikeImage = "",
+                                                bikeType = "Unknown",
+                                                bikePricePerHour = 0.0
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            // Wait for all bike details to be loaded
+                            bikeDetailsJobs.awaitAll()
+                            
+                            // Filter out any null entries and sort by start date (newest first)
+                            val filteredBookings = bookingsWithBikes.filterNotNull()
+                            val sortedBookings = filteredBookings.filter { it.startDate != null }
+                                .sortedByDescending { it.startDate }
+                            
+                            // Update state
+                            _bookings.value = sortedBookings
+                            _isLoading.value = false
+                            
+                            Log.d(TAG, "Successfully loaded ${sortedBookings.size} bookings with bike details")
+                        }
+                    }
             } catch (e: Exception) {
-                Log.e(TAG, "Error creating booking", e)
-                _error.value = e.message
-                onError("Booking failed: ${e.message ?: "Unknown error"}")
-            } finally {
+                Log.e(TAG, "Error setting up bookings listener", e)
+                _error.value = "Failed to load bookings: ${e.message}"
                 _isLoading.value = false
-                activeBookingOperations.remove(bookingId)
             }
         }
     }
-    
+
     /**
-     * Calculate booking price based on duration
+     * Cancel a booking
      */
-    private fun calculatePrice(startDate: Date, endDate: Date, pricePerHour: Double, isHourly: Boolean): Double {
-        val durationInMillis = endDate.time - startDate.time
-        
-        return if (isHourly) {
-            // Hourly rate - calculate exact hours
-            val durationInHours = durationInMillis / (1000 * 60 * 60.0)
-            durationInHours * pricePerHour
-        } else {
-            // Daily rate - calculate days and multiply by 24 hour rate
-            val durationInDays = (durationInMillis / (1000 * 60 * 60 * 24.0)).toInt() + 1
-            durationInDays * pricePerHour * 24
-        }
-    }
-    
-    /**
-     * Refresh bookings from Firestore with thread safety
-     */
-    fun refreshBookings() {
-        viewModelScope.launch {
+    fun cancelBooking(bookingId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val userId = auth.currentUser?.uid
-                if (userId == null) {
-                    _error.value = "You must be logged in to view bookings"
+                _isLoading.value = true
+                
+                // Get current user ID
+                val userId = auth.currentUser?.uid ?: run {
                     _isLoading.value = false
-                    Log.e(TAG, "Cannot load bookings: User not logged in")
+                    onError("You must be logged in to cancel a booking")
                     return@launch
                 }
                 
-                _isLoading.value = true
-                _error.value = null
-                
-                Log.d(TAG, "Started loading bookings for user: $userId")
+                // Mark operation as active for this booking
+                val alreadyProcessing = activeBookingOperations.putIfAbsent(bookingId, true) ?: false
+                if (alreadyProcessing) {
+                    Log.w(TAG, "Cancellation already in progress for booking: $bookingId")
+                    _isLoading.value = false
+                    onError("Cancellation already in progress")
+                    return@launch
+                }
                 
                 try {
-                    // Perform Firestore operations outside the lock
-                    val bookingsSnapshot = withContext(Dispatchers.IO) {
-                        Log.d(TAG, "Querying 'bookings' collection for userId: $userId")
-                        db.collection("bookings")
-                            .whereEqualTo("userId", userId)
-                            .get()
-                            .await()
+                    Log.d(TAG, "Starting cancellation for booking: $bookingId")
+                    
+                    // Try to get the booking from both locations
+                    var booking: Booking? = null
+                    
+                    // First try the user's collection
+                    val userBookingDoc = db.collection("users").document(userId)
+                        .collection("bookings").document(bookingId).get().await()
+                    
+                    if (userBookingDoc.exists()) {
+                        booking = userBookingDoc.toObject(Booking::class.java)
+                        Log.d(TAG, "Found booking in user's collection")
                     }
                     
-                    Log.d(TAG, "Retrieved ${bookingsSnapshot.documents.size} booking documents")
+                    // If not found, try the main bookings collection
+                    if (booking == null) {
+                        val bookingDoc = db.collection("bookings").document(bookingId).get().await()
+                        booking = bookingDoc.toObject(Booking::class.java)
+                        Log.d(TAG, "Found booking in main bookings collection")
+                    }
                     
-                    // Process bookings and fetch bike details
-                    val bookingsWithDetails = mutableListOf<BookingWithBikeDetails>()
+                    if (booking == null) {
+                        _isLoading.value = false
+                        activeBookingOperations.remove(bookingId)
+                        onError("Booking not found")
+                        return@launch
+                    }
                     
-                    for (bookingDoc in bookingsSnapshot.documents) {
-                        try {
-                            val booking = bookingDoc.toObject(Booking::class.java)
-                            
-                            if (booking != null) {
-                                Log.d(TAG, "Processing booking: ${bookingDoc.id} for bike: ${booking.bikeId}")
-                                
-                                // Create a copy with the ID from Firestore instead of reassigning
-                                val bookingWithId = booking.copy(id = bookingDoc.id)
-                                
-                                // Get bike details - outside of the lock
-                                try {
-                                    val bikeDoc = withContext(Dispatchers.IO) {
-                                        db.collection("bikes")
-                                            .document(bookingWithId.bikeId)
-                                            .get()
-                                            .await()
-                                    }
-                                    
-                                    val bike = bikeDoc.toObject(Bike::class.java)
-                                    
-                                    if (bike != null) {
-                                        // Create booking with bike details
-                                        val bookingWithDetails = BookingWithBikeDetails(
-                                            id = bookingWithId.id,
-                                            userId = bookingWithId.userId,
-                                            bikeId = bookingWithId.bikeId,
-                                            startDate = bookingWithId.startDate,
-                                            endDate = bookingWithId.endDate,
-                                            status = bookingWithId.status.name,
-                                            totalPrice = String.format("$%.2f", bookingWithId.totalPrice),
-                                            location = "${bike.latitude},${bike.longitude}",
-                                            bikeName = bike.name,
-                                            bikeType = bike.type,
-                                            bikeImageUrl = bike.imageUrl,
-                                            isHourly = bookingWithId.isHourly
-                                        )
-                                        
-                                        bookingsWithDetails.add(bookingWithDetails)
-                                        Log.d(TAG, "Added booking with bike details for ${bike.name}")
-                                    } else {
-                                        Log.e(TAG, "Bike details missing for ID: ${bookingWithId.bikeId}")
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Error fetching bike details for ID ${bookingWithId.bikeId}: ${e.message}", e)
-                                }
-                            } else {
-                                Log.e(TAG, "Failed to parse booking document: ${bookingDoc.id}")
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error processing booking doc ${bookingDoc.id}: ${e.message}", e)
+                    // Security check - only allow users to cancel their own bookings
+                    if (booking.userId != userId) {
+                        _isLoading.value = false
+                        activeBookingOperations.remove(bookingId)
+                        onError("You can only cancel your own bookings")
+                        return@launch
+                    }
+                    
+                    // Check if booking is already cancelled
+                    if (booking.status == BookingStatus.CANCELLED) {
+                        _isLoading.value = false
+                        activeBookingOperations.remove(bookingId)
+                        onError("Booking is already cancelled")
+                        return@launch
+                    }
+                    
+                    // Check if booking is completed
+                    if (booking.status == BookingStatus.COMPLETED) {
+                        _isLoading.value = false
+                        activeBookingOperations.remove(bookingId)
+                        onError("Cannot cancel a completed booking")
+                        return@launch
+                    }
+                    
+                    // Create a batched write to update all booking references atomically
+                    val batch = db.batch()
+                    
+                    // Update booking in the main bookings collection
+                    val mainBookingRef = db.collection("bookings").document(bookingId)
+                    batch.update(mainBookingRef, "status", BookingStatus.CANCELLED.name)
+                    
+                    // Update booking in the user's bookings collection
+                    val userBookingRef = db.collection("users").document(userId)
+                        .collection("bookings").document(bookingId)
+                    batch.update(userBookingRef, "status", BookingStatus.CANCELLED.name)
+                    
+                    // Update booking in the bike's bookings collection if it exists
+                    try {
+                        // Check if the booking exists in the bike's collection
+                        val bikeBookingDoc = db.collection("bikes").document(booking.bikeId)
+                            .collection("bookings").document(bookingId).get().await()
+                        
+                        if (bikeBookingDoc.exists()) {
+                            val bikeBookingRef = db.collection("bikes").document(booking.bikeId)
+                                .collection("bookings").document(bookingId)
+                            batch.update(bikeBookingRef, "status", BookingStatus.CANCELLED.name)
+                            Log.d(TAG, "Including bike booking in the batch update")
                         }
+                    } catch (e: Exception) {
+                        // If the bike booking doesn't exist, just log it and continue
+                        Log.w(TAG, "Bike booking reference not found, continuing with cancellation", e)
                     }
                     
-                    // Sort bookings by startDate (newest first) manually since we removed the orderBy from the query
-                    val sortedBookings = bookingsWithDetails.sortedByDescending { it.startDate }
+                    // Commit the batch
+                    batch.commit().await()
                     
-                    // Only lock when updating the shared state
-                    Log.d(TAG, "Updating bookings state with ${sortedBookings.size} bookings")
-                    bookingsLock.withLock {
-                        _bookings.value = sortedBookings
+                    Log.d(TAG, "Successfully cancelled booking: $bookingId")
+                    
+                    // Make bike available again if booking was confirmed
+                    try {
+                        db.collection("bikes").document(booking.bikeId)
+                            .update("isAvailable", true)
+                            .await()
+                        Log.d(TAG, "Made bike ${booking.bikeId} available again")
+                    } catch (e: Exception) {
+                        // If updating the bike fails, log it but consider the cancel operation successful
+                        Log.w(TAG, "Failed to update bike availability, but booking was cancelled", e)
+                    }
+                    
+                    // Refresh bookings to show the updated status
+                    fetchUserBookings()
+                    
+                    // Success operation completed
+                    withContext(Dispatchers.Main) {
+                        _isLoading.value = false
+                        onSuccess()
                     }
                 } catch (e: Exception) {
-                    val errorMsg = e.message ?: "Unknown error"
-                    if (errorMsg.contains("index")) {
-                        // This is a Firestore index error
-                        Log.e(TAG, "Firestore index error: $errorMsg", e)
-                        _error.value = "Firebase index required. Please contact the app administrator."
-                    } else {
-                        Log.e(TAG, "Error fetching bookings: $errorMsg", e)
-                        _error.value = "Error fetching bookings: $errorMsg"
+                    Log.e(TAG, "Error cancelling booking", e)
+                    withContext(Dispatchers.Main) {
+                        _isLoading.value = false
+                        onError("Failed to cancel booking: ${e.message ?: "Unknown error"}")
                     }
                 } finally {
+                    // Always remove active operation flag
+                    activeBookingOperations.remove(bookingId)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in cancelBooking outer block", e)
+                withContext(Dispatchers.Main) {
                     _isLoading.value = false
+                    onError("An unexpected error occurred: ${e.message ?: "Unknown error"}")
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Top level error in refreshBookings: ${e.message}", e)
-                _error.value = "Unexpected error: ${e.message}"
-                _isLoading.value = false
-            }
-        }
-    }
-    
-    /**
-     * Set up realtime updates for user bookings
-     */
-    fun setupBookingsRealtimeUpdates() {
-        try {
-            val userId = auth.currentUser?.uid
-            if (userId == null) {
-                Log.e(TAG, "Cannot setup realtime updates: User not logged in")
-                _error.value = "You must be logged in to view bookings"
-                return
-            }
-            
-            Log.d(TAG, "Setting up realtime updates for user bookings: $userId")
-            
-            // Remove any existing listener
-            bookingsListener?.remove()
-            
-            // Set up new listener with modified query to avoid index requirements
-            bookingsListener = db.collection("bookings")
-                .whereEqualTo("userId", userId)
-                .addSnapshotListener { snapshot, e ->
-                    if (e != null) {
-                        val errorMsg = e.message ?: "Unknown error"
-                        if (errorMsg.contains("index")) {
-                            // This is a Firestore index error
-                            Log.e(TAG, "Firestore index error: $errorMsg", e)
-                            _error.value = "Firebase index required. Please contact the app administrator."
-                        } else {
-                            Log.e(TAG, "Listen failed: $errorMsg", e)
-                            _error.value = "Failed to listen for updates: $errorMsg"
-                        }
-                        return@addSnapshotListener
-                    }
-                    
-                    if (snapshot != null) {
-                        Log.d(TAG, "Received booking update with ${snapshot.documents.size} documents")
-                        viewModelScope.launch {
-                            // Refresh all bookings to get the latest data with bike details
-                            refreshBookings()
-                        }
-                    } else {
-                        Log.d(TAG, "Received null snapshot for bookings")
-                    }
-                }
-            
-            Log.d(TAG, "Realtime updates listener setup complete")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting up realtime updates: ${e.message}", e)
-            _error.value = "Failed to setup updates: ${e.message}"
-        }
-    }
-    
-    /**
-     * Cancel a booking by ID with thread safety
-     */
-    fun cancelBooking(bookingId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        // Check if this operation is already in progress
-        if (activeBookingOperations.putIfAbsent(bookingId, true) != null) {
-            onError("Another operation is in progress for this booking")
-            return
-        }
-        
-        viewModelScope.launch {
-            try {
-                // Use a transaction to ensure atomicity - keep this outside the lock
-                withContext(Dispatchers.IO) {
-                    db.runTransaction { transaction ->
-                        // Get the booking document
-                        val bookingRef = db.collection("bookings").document(bookingId)
-                        val bookingDoc = transaction.get(bookingRef)
-                        val booking = bookingDoc.toObject(Booking::class.java)
-                            ?: throw Exception("Booking not found")
-                        
-                        // Update booking status
-                        transaction.update(bookingRef, "status", BookingStatus.CANCELLED.name)
-                        
-                        // Update user's booking copy
-                        val userBookingRef = db.collection("users")
-                            .document(booking.userId)
-                            .collection("bookings")
-                            .document(bookingId)
-                        transaction.update(userBookingRef, "status", BookingStatus.CANCELLED.name)
-                        
-                        // Update bike's booking copy
-                        val bikeBookingRef = db.collection("bikes")
-                            .document(booking.bikeId)
-                            .collection("bookings")
-                            .document(bookingId)
-                        transaction.update(bikeBookingRef, "status", BookingStatus.CANCELLED.name)
-                        
-                        // Mark the bike as available
-                        val bikeRef = db.collection("bikes").document(booking.bikeId)
-                        transaction.update(bikeRef, "isInUse", false)
-                    }.await()
-                }
-                
-                onSuccess()
-                
-                // Call refreshBookings() which now handles its own locking correctly
-                refreshBookings()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error cancelling booking: ${e.message}", e)
-                onError("Failed to cancel booking: ${e.message}")
-            } finally {
                 activeBookingOperations.remove(bookingId)
             }
         }
     }
-    
+
     /**
-     * Check if a specific date range is available for a bike
+     * Verify if a booking exists in Firestore
+     * This is a diagnostic function to help with debugging
      */
-    fun checkBikeAvailability(
-        bikeId: String,
-        startDate: Date,
-        endDate: Date,
-        onAvailable: () -> Unit,
-        onUnavailable: (String) -> Unit
-    ) {
-        viewModelScope.launch {
+    fun verifyBookingExists(bookingId: String, onResult: (exists: Boolean, path: String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val existingBookings = withContext(Dispatchers.IO) {
-                    db.collection("bookings")
-                        .whereEqualTo("bikeId", bikeId)
-                        .whereEqualTo("status", BookingStatus.PENDING.name)
-                        .whereGreaterThanOrEqualTo("endDate", startDate)
-                        .whereLessThanOrEqualTo("startDate", endDate)
-                        .get()
-                        .await()
+                Log.d(TAG, "Verifying if booking exists: $bookingId")
+                val userId = auth.currentUser?.uid
+                
+                if (userId == null) {
+                    Log.e(TAG, "Cannot verify booking: User not logged in")
+                    withContext(Dispatchers.Main) {
+                        onResult(false, null)
+                    }
+                    return@launch
                 }
                 
-                if (existingBookings.isEmpty) {
-                    onAvailable()
+                // First check in user's bookings
+                val userBookingPath = "users/$userId/bookings/$bookingId"
+                Log.d(TAG, "Checking user booking path: $userBookingPath")
+                val userBookingDoc = db.document(userBookingPath).get().await()
+                
+                if (userBookingDoc.exists()) {
+                    Log.d(TAG, "Booking found in user's bookings: $userBookingPath")
+                    withContext(Dispatchers.Main) {
+                        onResult(true, userBookingPath)
+                    }
+                    return@launch
+                }
+                
+                // If not found in user's bookings, try a collection group query
+                Log.d(TAG, "Booking not found in user path, trying collection group query")
+                val bookingsQuery = db.collectionGroup("bookings")
+                    .whereEqualTo("id", bookingId)
+                    .limit(1)
+                    .get()
+                    .await()
+                
+                if (!bookingsQuery.isEmpty) {
+                    val docPath = bookingsQuery.documents[0].reference.path
+                    Log.d(TAG, "Booking found via collection group query: $docPath")
+                    withContext(Dispatchers.Main) {
+                        onResult(true, docPath)
+                    }
                 } else {
-                    onUnavailable("This bike is already booked for the selected dates/times")
+                    Log.e(TAG, "Booking not found in Firestore: $bookingId")
+                    withContext(Dispatchers.Main) {
+                        onResult(false, null)
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking bike availability", e)
-                onUnavailable("Failed to check availability: ${e.message}")
+                Log.e(TAG, "Error verifying booking", e)
+                withContext(Dispatchers.Main) {
+                    onResult(false, null)
+                }
             }
         }
     }
-    
+
+    /**
+     * Create a new booking
+     */
+    fun createBooking(booking: Booking, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _isLoading.value = true
+                
+                // Get current user ID
+                val userId = auth.currentUser?.uid ?: run {
+                    _isLoading.value = false
+                    onError("You must be logged in to create a booking")
+                    return@launch
+                }
+                
+                Log.d(TAG, "Creating booking for bike: ${booking.bikeId}")
+                
+                // Security check - ensure booking belongs to current user
+                val secureBooking = if (booking.userId != userId) {
+                    booking.copy(userId = userId)
+                } else {
+                    booking
+                }
+                
+                // Save booking to Firestore
+                val bookingRef = db.collection("bookings").document(secureBooking.id)
+                bookingRef.set(secureBooking).await()
+                
+                // Also save to user's bookings collection for easier querying
+                db.collection("users")
+                    .document(userId)
+                    .collection("bookings")
+                    .document(secureBooking.id)
+                    .set(secureBooking)
+                    .await()
+                
+                // Update bike availability status
+                db.collection("bikes")
+                    .document(secureBooking.bikeId)
+                    .update("isAvailable", false)
+                    .await()
+                
+                Log.d(TAG, "Successfully created booking: ${secureBooking.id}")
+                
+                // Success operation completed
+                withContext(Dispatchers.Main) {
+                    _isLoading.value = false
+                    onSuccess()
+                }
+                
+                // Refresh bookings list
+                fetchUserBookings()
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating booking", e)
+                withContext(Dispatchers.Main) {
+                    _isLoading.value = false
+                    onError("Failed to create booking: ${e.message}")
+                }
+            }
+        }
+    }
+
     /**
      * Clean up resources when ViewModel is cleared
      */

@@ -293,9 +293,10 @@ fun ProfileScreen(
     LaunchedEffect(Unit) {
         user = FirebaseAuth.getInstance().currentUser
         if (user == null) {
-            navController.navigate(Screen.SignIn.route) {
-                popUpTo(Screen.Home.route) { inclusive = true }
-            }
+            // Instead of direct navigation that might conflict with other navControllers,
+            // use a proper callback approach or let the parent handle navigation
+            Log.d("ProfileTab", "No user logged in, authentication required")
+            // Don't navigate directly - let MainActivity handle authentication
             return@LaunchedEffect
         }
         
@@ -312,12 +313,9 @@ fun ProfileScreen(
                 Log.d("ProfileTab", "User signing out")
                 viewModel.signOut()
                 
-                // Navigate to sign in screen after sign out
-                navController.navigate(Screen.SignIn.route) {
-                    popUpTo(0) { inclusive = true } // Clear the entire back stack
-                }
-                
-                Log.d("ProfileTab", "Sign out completed, navigated to sign in")
+                // Let MainActivity's AuthState observer handle navigation after signOut
+                // Instead of navigating directly here
+                Log.d("ProfileTab", "Sign out completed, waiting for auth state to update")
             } catch (e: Exception) {
                 Log.e("ProfileTab", "Error during sign out: ${e.message}")
             }

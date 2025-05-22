@@ -19,6 +19,8 @@ data class Bike(
     // Support both types of image references
     val imageUrl: String = "",
     val imageRes: Int = 0,
+    // Support for multiple images
+    val imageUrls: List<String> = emptyList(),
     // Location can be stored as separate coordinates or as LatLng
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
@@ -43,6 +45,7 @@ data class Bike(
             "priceValue" to priceValue,
             "imageUrl" to imageUrl,
             "imageRes" to imageRes,
+            "imageUrls" to imageUrls,
             "latitude" to latitude,
             "longitude" to longitude,
             "rating" to rating,
@@ -80,6 +83,7 @@ data class Bike(
                 price = "₱${price}/hr",
                 priceValue = price,
                 imageUrl = imageUrl,
+                imageUrls = listOf(imageUrl),
                 latitude = location.latitude,
                 longitude = location.longitude,
                 isAvailable = true,

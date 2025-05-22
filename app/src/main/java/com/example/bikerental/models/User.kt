@@ -1,5 +1,6 @@
 package com.example.bikerental.models
 
+import com.google.firebase.Timestamp
 import com.google.firebase.database.IgnoreExtraProperties
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.Exclude
@@ -35,11 +36,13 @@ data class User(
     val verificationSentAt: Long? = null,
     val verificationToken: String? = null,
     val hasCompletedAppVerification: Boolean = false,
-    val lastUpdated: Long = 0,
+    val lastUpdated: Timestamp = Timestamp.now(),
     val street: String? = null,
     val barangay: String? = null,
     val city: String? = null,
-    val verificationMethod: String? = null
+    val verificationMethod: String? = null,
+    val isPhoneVerified: Boolean = false,
+    val authProvider: String? = null
 ) {
     /**
      * Convert user to a map for Firestore updates
@@ -69,7 +72,9 @@ data class User(
             "street" to street,
             "barangay" to barangay,
             "city" to city,
-            "verificationMethod" to verificationMethod
+            "verificationMethod" to verificationMethod,
+            "isPhoneVerified" to isPhoneVerified,
+            "authProvider" to authProvider
         )
     }
 } 

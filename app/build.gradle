@@ -5,7 +5,7 @@ plugins {
     id 'com.google.gms.google-services'
     id 'kotlin-kapt'
     id 'dagger.hilt.android.plugin'
-
+    id 'com.google.firebase.crashlytics'
 }
 
 android {
@@ -29,8 +29,25 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            firebaseCrashlytics {
+                // Enable Crashlytics for this build type
+                nativeSymbolUploadEnabled true
+                // Include the mapping file for deobfuscation
+                mappingFileUploadEnabled true
+                unstrippedNativeLibsDir = new File("${project.buildDir}/intermediates/merged_native_libs/release/out/lib")
+            }
+        }
+        debug {
+            minifyEnabled false
+            firebaseCrashlytics {
+                // Disable Crashlytics for debug builds to speed up build time
+                mappingFileUploadEnabled false
+                nativeSymbolUploadEnabled false
+                unstrippedNativeLibsDir = new File("${project.buildDir}/intermediates/merged_native_libs/debug/out/lib")
+            }
         }
     }
+    
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -40,6 +57,7 @@ android {
     }
     buildFeatures {
         compose true
+        buildConfig true
     }
     composeOptions {
         kotlinCompilerExtensionVersion '1.5.8'
@@ -97,6 +115,9 @@ dependencies {
     implementation libs.firebase.auth.ktx
     implementation libs.firebase.firestore.ktx
     implementation libs.firebase.database
+    // Add Crashlytics using the BOM
+    implementation libs.firebase.crashlytics
+    implementation libs.firebase.crashlytics.ktx
     implementation libs.play.services.safetynet
     implementation libs.recaptcha
     // Image Loading
@@ -114,12 +135,25 @@ dependencies {
     androidTestImplementation libs.ui.test.junit4
     debugImplementation libs.ui.tooling
     debugImplementation libs.ui.test.manifest
+    // Coroutines
+    implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.coroutines.play.services)
 
+    // Lifecycle components with coroutines
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx.v270)
+    implementation(libs.androidx.lifecycle.livedata.ktx)
     // Add Google Accompanist for SwipeRefresh
-    implementation "com.google.accompanist:accompanist-swiperefresh:0.32.0"
+    implementation libs.accompanist.swiperefresh
 
     // Required for pull-to-refresh
-    implementation 'androidx.compose.material:material:1.5.4'
+    implementation libs.androidx.material.v154
+
+    // Dependency Injection with Hilt
+    implementation libs.hilt.android
+    kapt libs.hilt.compiler
+    implementation libs.androidx.hilt.navigation.compose.v120
 }
 kapt {
     correctErrorTypes true

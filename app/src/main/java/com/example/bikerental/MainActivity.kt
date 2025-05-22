@@ -68,35 +68,41 @@ import kotlinx.coroutines.launch
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
 import com.example.bikerental.screens.BikeDetailScreen
+import com.example.bikerental.screens.tabs.BikesTab
+import com.example.bikerental.screens.tabs.BookingsTab
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import dagger.hilt.android.AndroidEntryPoint
 
 @OptIn(ExperimentalMaterial3Api::class)
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationCallback: LocationCallback
-    private var isLoading by mutableStateOf(true)
+    private val TAG = "MainActivity"
+    
+    // ViewModel injection using Hilt
+    private val authViewModel: AuthViewModel by viewModels()
     private val phoneAuthViewModel: PhoneAuthViewModel by viewModels()
     
-    // Auth state
-    private var isLoggedIn by mutableStateOf(false)
-    private var isLoginScreenActive by mutableStateOf(false)
-    private var showSplash by mutableStateOf(true)
+    // Location services
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationCallback: LocationCallback
+    
+    // Auth state listener
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
     
-    companion object {
-        private const val TAG = "MainActivity"
-        
-        // Configure logging to reduce warnings
-        init {
-            // Configure java.util.logging to be less verbose
-            Logger.getLogger("com.google.android.gms").level = Level.WARNING
-            
-            // Attempt to configure Flogger logging early
-            try {
-                System.setProperty("flogger.backend_factory", 
-                    "com.google.android.gms.flogger.backend.log4j.Log4jBackendFactory#getInstance")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to configure Flogger: ${e.message}")
-            }
+    // Dedicated scope for background initialization tasks
+    private val mainActivityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    
+    init {
+        // Logging setup
+        try {
+            Logger.getLogger("com.example.bikerental").level = Level.ALL
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to configure logging: ${e.message}")
         }
     }
     
@@ -104,64 +110,83 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Initialize services on a background thread
-        lifecycleScope.launch(Dispatchers.IO) {
+        // Use a dedicated scope for initialization to prevent blocking main thread
+        mainActivityScope.launch {
             try {
-                // Configure Google API logging early
                 Log.d(TAG, "Initializing Google API services on background thread")
                 
-                // Initialize on background thread then switch to main thread when needed
-                withContext(Dispatchers.Main) {
-                    // Initialize location services (must be on main thread)
-                    fusedLocationClient = LocationServices.getFusedLocationProviderClient(this@MainActivity)
-                    
-                    // Create location callback
-                    locationCallback = object : LocationCallback() {
-                        override fun onLocationResult(locationResult: LocationResult) {
-                            // Handle location updates
+                // Only initialize location services on the main thread
+                fusedLocationClient = LocationServices.getFusedLocationProviderClient(this@MainActivity)
+                
+                locationCallback = object : LocationCallback() {
+                    override fun onLocationResult(locationResult: LocationResult) {
+                        // Handle location updates on a background thread
+                        mainActivityScope.launch {
+                            // Process location updates here
                         }
                     }
                 }
+                
+                // Check email verification in the background
+                authViewModel.checkEmailVerification()
             } catch (e: Exception) {
                 Log.w(TAG, "Error during background initialization: ${e.message}")
             }
         }
-        
-        // Set up auth state listener
-        authStateListener = FirebaseAuth.AuthStateListener { auth ->
-            val user = auth.currentUser
-            isLoggedIn = user != null
-            Log.d("MainActivity", "Auth state changed: ${if (isLoggedIn) "logged in" else "logged out"}")
-            isLoading = false
-        }
-        
-        // Register auth state listener
-        FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
 
         setContent {
             BikerentalTheme {
-                // Fixed splash screen logic - use a timer instead of depending on login state
-                var splashScreenComplete by remember { mutableStateOf(false) }
+                val navController = rememberNavController()
+                var showSplash by remember { mutableStateOf(true) }
+                val authState by authViewModel.authState.collectAsStateWithLifecycle()
                 
-                // Show splash screen for a fixed time
                 LaunchedEffect(Unit) {
-                    kotlinx.coroutines.delay(1500) // 1.5 seconds splash screen
-                    splashScreenComplete = true
-                    isLoading = false
+                    launch {
+                        kotlinx.coroutines.delay(1000)
+                        showSplash = false
+                    }
                 }
-
-                if (!splashScreenComplete) {
-                    // Show splash screen
-                    SplashScreen(onSplashComplete = { splashScreenComplete = true })
+                
+                LaunchedEffect(showSplash, authState) {
+                    if (!showSplash) {
+                        when (authState) {
+                            is AuthState.Authenticated -> {
+                                Log.d(TAG, "User authenticated, navigating to Home")
+                                navController.navigate(Screen.Home.route) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
+                            is AuthState.NeedsEmailVerification -> {
+                                Log.d(TAG, "User needs email verification")
+                                navController.navigate(Screen.EmailVerification.route) {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
+                            is AuthState.Initial, is AuthState.Error -> {
+                                if (navController.currentDestination?.route != Screen.Initial.route) {
+                                    Log.d(TAG, "User not authenticated, navigating to initial login")
+                                    navController.navigate(Screen.Initial.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            }
+                            else -> {
+                                // Keep current screen for other states
+                            }
+                        }
+                    }
+                }
+                
+                if (showSplash) {
+                    SplashScreen(onSplashComplete = { /* Ignore manual completion, using timer */ })
                 } else {
-                    // Normal app content after splash screen
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.background
                     ) {
-                        // Set callback to update parent's state from child navigation route
-                        MainNavigation(
-                            onLoginScreenChange = { isActive -> isLoginScreenActive = isActive },
+                        AppNavigation(
+                            navController = navController,
+                            authViewModel = authViewModel,
                             fusedLocationClient = fusedLocationClient
                         )
                     }
@@ -169,15 +194,46 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    
+    override fun onStart() {
+        super.onStart()
+        
+        // Set up auth state listener if needed
+        if (authStateListener == null) {
+            authStateListener = FirebaseAuth.AuthStateListener { auth ->
+                // Handle auth state changes in a background thread
+                mainActivityScope.launch {
+                    val user = auth.currentUser
+                    Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
+                    
+                    // Additional auth state processing can be done here
+                }
+            }
+            FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
+        }
+    }
+    
+    override fun onStop() {
+        super.onStop()
+        
+        // Remove location updates to save battery
+        if (::locationCallback.isInitialized) {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
+        // Clean up location callbacks
         if (::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
         
         // Remove auth state listener
         authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
+        
+        // Cancel all coroutines from our scope
+        mainActivityScope.cancel()
     }
 }
 
@@ -192,167 +248,52 @@ private fun LoadingScreen() {
 }
 
 @Composable
-fun MainNavigation(
-    onLoginScreenChange: (Boolean) -> Unit,
+fun AppNavigation(
+    navController: NavHostController,
+    authViewModel: AuthViewModel,
     fusedLocationClient: FusedLocationProviderClient
 ) {
-    val navController = rememberNavController()
-    val authViewModel: AuthViewModel = viewModel()
     val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
-    // Remember last navigation event to prevent losing tab state
-    var lastNavigationEvent by remember { mutableStateOf("") }
-    var handlingInternalNav by remember { mutableStateOf(false) }
-
-    LaunchedEffect(authState) {
-        val isAuthScreen = when (authState) {
-            is AuthState.Initial,
-            is AuthState.Loading,
-            is AuthState.NeedsEmailVerification,
-            is AuthState.Error -> true
-            is AuthState.Authenticated -> false
-            else -> !navController.currentDestination?.route.equals(Screen.Home.route, ignoreCase = true)
+    NavHost(
+        navController = navController,
+        startDestination = Screen.Initial.route,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Auth routes
+        composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
+        composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
+        composable(Screen.SignUp.route) { SignUpScreen(navController) }
+        composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
+        
+        // Main app routes
+        composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
+        composable(Screen.EditProfile.route) { EditProfileScreen(navController) }
+        composable(Screen.ChangePassword.route) { ChangePasswordScreen(navController, authViewModel) }
+        
+        // Add missing routes
+        composable(Screen.BikeList.route) { BikesTab(fusedLocationClient) }
+        composable(Screen.Bookings.route) { BookingsTab() }
+        
+        // Bike detail route
+        composable(
+            route = Screen.BikeDetails.route,
+            arguments = listOf(navArgument("bikeId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val bikeId = backStackEntry.arguments?.getString("bikeId") ?: ""
+            BikeDetailScreen(bikeId = bikeId, navController = navController)
         }
-        onLoginScreenChange(isAuthScreen)
-        Log.d("MainNavigation", "Auth State: ${authState::class.simpleName}, LoginScreenActive: $isAuthScreen")
-    }
-
-    // Track current back stack entry changes
-    val currentBackStackEntry by rememberUpdatedState(navController.currentBackStackEntry)
-    
-    // Handle tab navigation and returnToProfileTab flag - with safety checks
-    LaunchedEffect(currentBackStackEntry) {
-        try {
-            // Only proceed if we have a valid entry that's not destroyed
-            val entry = currentBackStackEntry ?: return@LaunchedEffect
-            val lifecycle = entry.lifecycle
-            
-            // Only access savedStateHandle if entry is active
-            if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.CREATED)) {
-                val returnToProfileTab = entry.savedStateHandle.get<Boolean>("returnToProfileTab") ?: false
-                if (returnToProfileTab && !handlingInternalNav) {
-                    handlingInternalNav = true
-                    // Record we're handling profile navigation
-                    lastNavigationEvent = "profile"
-                    // Clear flag after handling
-                    entry.savedStateHandle.remove<Boolean>("returnToProfileTab")
-                    handlingInternalNav = false
-                }
-            }
-        } catch (e: Exception) {
-            // Log error but don't crash the app
-            Log.e("MainNavigation", "Error handling navigation state: ${e.message}")
-        }
-    }
-
-    // Fix force navigation to initial screen
-    LaunchedEffect(authState, navController.currentDestination) {
-        // Only attempt navigation when we have a valid destination (graph is set)
-        if (navController.currentDestination != null) {
-            if (authState is AuthState.Initial || authState is AuthState.Loading) {
-                if (navController.currentDestination?.route != Screen.Initial.route && 
-                    navController.currentDestination?.route != Screen.SignIn.route) {
-                    navController.navigate(Screen.Initial.route) {
-                        // Use a safer approach to clear the back stack
-                        popUpTo(0) { inclusive = true }
-                    }
-                }
-            }
-        }
-    }
-
-    when (authState) {
-        is AuthState.Loading -> {
-            LoadingScreen()
-        }
-        is AuthState.Initial -> {
-            // Wrap login screen in a NavHost to properly set up navigation graph
-            NavHost(
-                navController = navController,
-                startDestination = Screen.Initial.route,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
-                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
-                composable(Screen.SignUp.route) { SignUpScreen(navController) }
-                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
-            }
-        }
-        is AuthState.Authenticated -> {
-            Log.d("MainNavigation", "Rendering NavHost for Authenticated state, starting at Home")
-            NavHost(
-                navController = navController,
-                startDestination = Screen.Home.route,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
-                composable(Screen.EditProfile.route) { EditProfileScreen(navController) }
-                composable(Screen.ChangePassword.route) { ChangePasswordScreen(navController, authViewModel) }
-                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
-                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
-                composable(Screen.SignUp.route) { SignUpScreen(navController) }
-                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
-                
-                // Add BikeDetailScreen route
-                composable(
-                    route = Screen.BikeDetails.route,
-                    arguments = listOf(navArgument("bikeId") { type = NavType.StringType })
-                ) { backStackEntry ->
-                    val bikeId = backStackEntry.arguments?.getString("bikeId") ?: ""
-                    BikeDetailScreen(bikeId = bikeId, navController = navController)
-                }
-            }
-        }
-        is AuthState.NeedsEmailVerification -> {
-            Log.d("MainNavigation", "Rendering NavHost for NeedsEmailVerification state")
-            // Force navigation to email verification screen if we're not already there
-            LaunchedEffect(Unit) {
-                if (navController.currentDestination?.route != Screen.EmailVerification.route) {
-                    Log.d("MainNavigation", "Forcing navigation to EmailVerification from ${navController.currentDestination?.route}")
-                    navController.navigate(Screen.EmailVerification.route) {
-                        popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                    }
-                }
-            }
-            
-            NavHost(
-                navController = navController,
-                startDestination = Screen.EmailVerification.route,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
-                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
-                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
-                composable(Screen.SignUp.route) { SignUpScreen(navController) }
-                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
-            }
-        }
-        is AuthState.NeedsAppVerification -> {
-            // Redirect to email verification instead
-            Log.d("MainNavigation", "Redirecting app verification to email verification")
-            NavHost(
-                navController = navController,
-                startDestination = Screen.EmailVerification.route,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
-                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
-                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
-                composable(Screen.SignUp.route) { SignUpScreen(navController) }
-            }
-        }
-        else -> {
-            Log.d("MainNavigation", "Rendering NavHost for Unauthenticated state (State: ${authState::class.simpleName})")
-            NavHost(
-                navController = navController,
-                startDestination = Screen.Initial.route,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                composable(Screen.Initial.route) { GearTickLoginScreen(navController) }
-                composable(Screen.SignIn.route) { AccessAccountScreen(navController) }
-                composable(Screen.SignUp.route) { SignUpScreen(navController) }
-                composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
-                composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
+        
+        // Booking detail route
+        composable(
+            route = Screen.BookingDetails.route,
+            arguments = listOf(navArgument("bookingId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val bookingId = backStackEntry.arguments?.getString("bookingId") ?: ""
+            // BookingDetailScreen(bookingId = bookingId, navController = navController)
+            // Placeholder until you implement the booking detail screen
+            Box(modifier = Modifier.fillMaxSize()) {
+                CircularProgressIndicator()
             }
         }
     }
