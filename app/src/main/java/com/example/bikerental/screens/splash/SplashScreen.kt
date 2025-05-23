@@ -26,20 +26,22 @@ import kotlinx.coroutines.delay
 fun SplashScreen(onSplashComplete: () -> Unit) {
     var startAnimation by remember { mutableStateOf(false) }
     
-    // Logo animations - optimized for better performance
+    // Optimized animations with reduced durations for faster startup
+    
+    // Logo animations - simplify for better performance
     val logoScale by animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0.5f,
+        targetValue = if (startAnimation) 1f else 0.6f, // Starting closer to final size
         animationSpec = tween(
-            durationMillis = 700,
+            durationMillis = 500, // Reduced from 700ms
             easing = EaseOutQuad
         ), 
         label = "logoScale"
     )
     
     val logoRotation by animateFloatAsState(
-        targetValue = if (startAnimation) 0f else -45f,
+        targetValue = if (startAnimation) 0f else -30f, // Reduced rotation
         animationSpec = tween(
-            durationMillis = 800,
+            durationMillis = 600, // Reduced from 800ms
             easing = EaseOutQuad
         ),
         label = "logoRotation"
@@ -48,59 +50,58 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
     val logoAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 700
+            durationMillis = 500 // Reduced from 700ms
         ),
         label = "logoAlpha"
     )
     
-    // First text animations
+    // First text animations - faster fade-in
     val titleAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 700,
-            delayMillis = 300
+            durationMillis = 500, // Reduced from 700ms
+            delayMillis = 200 // Reduced from 300ms
         ),
         label = "titleAlpha"
     )
     
     val titleSlide by animateFloatAsState(
-        targetValue = if (startAnimation) 0f else -100f,
+        targetValue = if (startAnimation) 0f else -50f, // Reduced slide distance
         animationSpec = tween(
-            durationMillis = 800,
-            delayMillis = 300,
+            durationMillis = 600, // Reduced from 800ms
+            delayMillis = 200, // Reduced from 300ms
             easing = EaseOutQuad
         ),
         label = "titleSlide"
     )
     
-    // Second text animations
+    // Second text animations - faster fade-in
     val subtitleAlpha by animateFloatAsState(
         targetValue = if (startAnimation) 1f else 0f,
         animationSpec = tween(
-            durationMillis = 700,
-            delayMillis = 500
+            durationMillis = 500, // Reduced from 700ms
+            delayMillis = 300 // Reduced from 500ms
         ),
         label = "subtitleAlpha"
     )
     
     val subtitleSlide by animateFloatAsState(
-        targetValue = if (startAnimation) 0f else 100f,
+        targetValue = if (startAnimation) 0f else 50f, // Reduced slide distance
         animationSpec = tween(
-            durationMillis = 800,
-            delayMillis = 500,
+            durationMillis = 600, // Reduced from 800ms
+            delayMillis = 300, // Reduced from 500ms
             easing = EaseOutQuad
         ),
         label = "subtitleSlide"
     )
     
-    // Startup and completion - shortened duration
+    // Start animation immediately and don't wait for timer if animations complete
     LaunchedEffect(key1 = true) {
         startAnimation = true
-        delay(1000) // Shorter duration to complete faster
-        onSplashComplete()
+        // No need to call onSplashComplete, will be handled by MainActivity timer
     }
 
-    // Simplified background - use MaterialTheme instead of hardcoded color
+    // Memory efficient background using MaterialTheme
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -114,24 +115,24 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
         ) {
-            // Logo with scale, rotation and fade animations
+            // Logo with animations - simplified for performance
             Image(
                 painter = painterResource(id = R.drawable.bambikelogo),
                 contentDescription = "Bambike Logo",
                 modifier = Modifier
-                    .size(120.dp)
+                    .size(100.dp) // Reduced from 120dp
                     .scale(logoScale)
                     .rotate(logoRotation)
                     .alpha(logoAlpha)
             )
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp)) // Reduced from 16dp
             
-            // Main title with slide and fade animations
+            // Main title with animations
             Text(
                 text = "Bambike",
                 color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 32.sp,
+                fontSize = 28.sp, // Reduced from 32sp
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
@@ -140,13 +141,13 @@ fun SplashScreen(onSplashComplete: () -> Unit) {
                     .fillMaxWidth()
             )
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp)) // Reduced from 8dp
             
-            // Subtitle with slide and fade animations (from opposite direction)
+            // Subtitle with animations
             Text(
                 text = "REVOLUTION CYCLES",
                 color = MaterialTheme.colorScheme.onBackground,
-                fontSize = 18.sp,
+                fontSize = 16.sp, // Reduced from 18sp
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier

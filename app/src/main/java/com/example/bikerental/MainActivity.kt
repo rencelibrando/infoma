@@ -77,6 +77,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @AndroidEntryPoint
@@ -94,59 +99,67 @@ class MainActivity : ComponentActivity() {
     // Auth state listener
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
     
-    // Dedicated scope for background initialization tasks
+    // Dedicated scopes for background tasks
     private val mainActivityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val computeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    
+    // Initialization state
+    private val _initializationComplete = MutableStateFlow(false)
+    val initializationComplete: StateFlow<Boolean> = _initializationComplete.asStateFlow()
     
     init {
-        // Logging setup
-        try {
-            Logger.getLogger("com.example.bikerental").level = Level.ALL
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to configure logging: ${e.message}")
+        // Logging setup - moved to background to avoid blocking main thread initialization
+        mainActivityScope.launch {
+            try {
+                Logger.getLogger("com.example.bikerental").level = Level.ALL
+                Log.d(TAG, "Logging configuration complete")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to configure logging: ${e.message}")
+            }
         }
     }
     
+    @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Use a dedicated scope for initialization to prevent blocking main thread
-        mainActivityScope.launch {
-            try {
-                Log.d(TAG, "Initializing Google API services on background thread")
-                
-                // Only initialize location services on the main thread
-                fusedLocationClient = LocationServices.getFusedLocationProviderClient(this@MainActivity)
-                
-                locationCallback = object : LocationCallback() {
-                    override fun onLocationResult(locationResult: LocationResult) {
-                        // Handle location updates on a background thread
-                        mainActivityScope.launch {
-                            // Process location updates here
-                        }
-                    }
+        // Initiate background initialization immediately so it can run concurrently with UI setup
+        GlobalScope.launch(Dispatchers.IO) {
+            initializeBackgroundComponents()
+        }
+        
+        // Initialize location services - create the client reference but defer actual initialization
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        // Create location callback - just the definition, not the registration
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                // Handle location updates on a background thread
+                mainActivityScope.launch {
+                    // Process location updates here
                 }
-                
-                // Check email verification in the background
-                authViewModel.checkEmailVerification()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error during background initialization: ${e.message}")
             }
         }
-
+        
+        // Set up UI immediately for better perceived performance
         setContent {
             BikerentalTheme {
                 val navController = rememberNavController()
                 var showSplash by remember { mutableStateOf(true) }
                 val authState by authViewModel.authState.collectAsStateWithLifecycle()
                 
+                // Shortened splash screen duration for faster startup
                 LaunchedEffect(Unit) {
-                    launch {
-                        kotlinx.coroutines.delay(1000)
-                        showSplash = false
+                    launch(Dispatchers.Default) {
+                        kotlinx.coroutines.delay(800) // Reduced from 1000ms to 800ms
+                        withContext(Dispatchers.Main) {
+                            showSplash = false
+                        }
                     }
                 }
                 
+                // Navigation logic only runs after splash screen is dismissed
                 LaunchedEffect(showSplash, authState) {
                     if (!showSplash) {
                         when (authState) {
@@ -195,45 +208,103 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // Moved background initialization to a dedicated function
+    private suspend fun initializeBackgroundComponents() {
+        try {
+            Log.d(TAG, "Starting background initialization")
+            
+            // Check email verification in the background
+            authViewModel.checkEmailVerification()
+            
+            // Pre-fetch any common data
+            withContext(Dispatchers.IO) {
+                try {
+                    // Firebase connection priming - using an optimized read to establish connection
+                    FirebaseFirestore.getInstance()
+                        .collection("app_config")
+                        .document("startup")
+                        .get(com.google.firebase.firestore.Source.CACHE)
+                        .addOnCompleteListener { task ->
+                            if (task.isSuccessful) {
+                                Log.d(TAG, "Firebase connection initialized")
+                            }
+                        }
+                } catch (e: Exception) {
+                    // Non-critical, can continue
+                    Log.w(TAG, "Firebase priming failed: ${e.message}")
+                }
+            }
+            
+            // Any other background initialization tasks
+            // ...
+            
+            Log.d(TAG, "Background initialization complete")
+            _initializationComplete.value = true
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during background initialization: ${e.message}")
+            // Even on error, mark as complete to not block the app
+            _initializationComplete.value = true
+        }
+    }
+    
     override fun onStart() {
         super.onStart()
         
-        // Set up auth state listener if needed
-        if (authStateListener == null) {
-            authStateListener = FirebaseAuth.AuthStateListener { auth ->
-                // Handle auth state changes in a background thread
-                mainActivityScope.launch {
-                    val user = auth.currentUser
-                    Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
-                    
-                    // Additional auth state processing can be done here
+        // Set up auth state listener in the background
+        mainActivityScope.launch {
+            // Set up auth state listener if needed
+            if (authStateListener == null) {
+                authStateListener = FirebaseAuth.AuthStateListener { auth ->
+                    // Handle auth state changes in a background thread
+                    mainActivityScope.launch {
+                        val user = auth.currentUser
+                        Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
+                        
+                        // Additional auth state processing can be done here
+                    }
                 }
+                FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
             }
-            FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
         }
     }
     
     override fun onStop() {
         super.onStop()
         
-        // Remove location updates to save battery
-        if (::locationCallback.isInitialized) {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
+        // Remove location updates to save battery - defer to background
+        mainActivityScope.launch {
+            if (::locationCallback.isInitialized) {
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+                    .addOnCompleteListener { task ->
+                        Log.d(TAG, "Location updates removed: ${task.isSuccessful}")
+                    }
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Clean up location callbacks
-        if (::locationCallback.isInitialized) {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
+        
+        // Clean up in the background to avoid blocking UI during teardown
+        mainActivityScope.launch {
+            try {
+                // Clean up location callbacks
+                if (::locationCallback.isInitialized) {
+                    fusedLocationClient.removeLocationUpdates(locationCallback)
+                }
+                
+                // Remove auth state listener
+                authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
+                
+                Log.d(TAG, "Resources successfully cleaned up")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error during cleanup: ${e.message}")
+            } finally {
+                // Cancel all coroutines from our scopes
+                computeScope.cancel()
+                mainActivityScope.cancel()
+            }
         }
-        
-        // Remove auth state listener
-        authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
-        
-        // Cancel all coroutines from our scope
-        mainActivityScope.cancel()
     }
 }
 

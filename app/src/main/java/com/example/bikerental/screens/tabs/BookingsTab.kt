@@ -1,22 +1,15 @@
 package com.example.bikerental.screens.tabs
 
 import android.widget.Toast
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -53,7 +46,6 @@ import androidx.compose.material.icons.outlined.Error
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,9 +76,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -157,18 +147,62 @@ fun BookingsTab(
     val isLoading by bookingViewModel.isLoading.collectAsState()
     val error by bookingViewModel.error.collectAsState()
     
+    // Category counts state
+    var allCount by remember { mutableStateOf(0) }
+    var completedCount by remember { mutableStateOf(0) }
+    var cancelledCount by remember { mutableStateOf(0) }
+    
     // Filter bookings based on search query and selected category
-    val filteredBookings by remember {
+    val filteredBookings by remember(bookings, searchQuery, selectedCategory) {
         derivedStateOf {
+            computeScope.launch {
+                // Calculate counts on a background thread
+                val filtered = bookings.filter { booking ->
+                    // First apply category filter
+                    val categoryMatch = when (selectedCategory) {
+                        BookingCategory.ALL -> true
+                        BookingCategory.COMPLETED -> booking.status == BookingStatus.COMPLETED.toString()
+                        BookingCategory.CANCELLED -> booking.status == BookingStatus.CANCELLED.toString()
+                    }
+                    
+                    // Then apply search filter if there's a query
+                    val searchMatch = if (searchQuery.isBlank()) {
+                        true
+                    } else {
+                        val query = searchQuery.lowercase()
+                        booking.bikeName.lowercase().contains(query) ||
+                                booking.userName.lowercase().contains(query) ||
+                                SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                                    .format(booking.startDate).lowercase().contains(query)
+                    }
+                    
+                    // Item must match both filters
+                    categoryMatch && searchMatch
+                }
+                
+                // Update counts
+                val newAllCount = bookings.size
+                val newCompletedCount = bookings.count { it.status == BookingStatus.COMPLETED.toString() }
+                val newCancelledCount = bookings.count { it.status == BookingStatus.CANCELLED.toString() }
+                
+                // Update UI on main thread
+                withContext(Dispatchers.Main) {
+                    allCount = newAllCount
+                    completedCount = newCompletedCount
+                    cancelledCount = newCancelledCount
+                }
+            }
+            
+            // Return filtered bookings
             bookings.filter { booking ->
-                // First apply category filter
+                // Apply category filter
                 val categoryMatch = when (selectedCategory) {
                     BookingCategory.ALL -> true
                     BookingCategory.COMPLETED -> booking.status == BookingStatus.COMPLETED.toString()
                     BookingCategory.CANCELLED -> booking.status == BookingStatus.CANCELLED.toString()
                 }
                 
-                // Then apply search filter if there's a query
+                // Apply search filter
                 val searchMatch = if (searchQuery.isBlank()) {
                     true
                 } else {
@@ -179,7 +213,7 @@ fun BookingsTab(
                                 .format(booking.startDate).lowercase().contains(query)
                 }
                 
-                // Item must match both filters
+                // Return combined result
                 categoryMatch && searchMatch
             }
         }
@@ -336,11 +370,6 @@ fun BookingsTab(
                             singleLine = true,
                             shape = RoundedCornerShape(8.dp)
                         )
-                        
-                        // Calculate counts for each category
-                        val allCount = filteredBookings.size
-                        val completedCount = filteredBookings.count { it.status == BookingStatus.COMPLETED.toString() }
-                        val cancelledCount = filteredBookings.count { it.status == BookingStatus.CANCELLED.toString() }
                         
                         // Category tabs with counts
                         LazyRow(
@@ -502,12 +531,14 @@ fun BookingForm(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     
     // State for bike selection
     val bikes by viewModel.bikes.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     var selectedBike by remember { mutableStateOf<Bike?>(null) }
+    var isCreatingBooking by remember { mutableStateOf(false) }
     
     // Date selection
     val currentMonth = remember { Calendar.getInstance() }
@@ -530,6 +561,26 @@ fun BookingForm(
         DurationOption("Full Day", "$60", 8)
     )}
     var selectedDuration by remember { mutableStateOf<DurationOption?>(null) }
+    
+    // Pre-computed price value
+    var estimatedPrice by remember { mutableStateOf("₱0.00") }
+    
+    // Calculate estimated price in a coroutine when inputs change
+    LaunchedEffect(selectedBike, selectedDuration) {
+        computeScope.launch {
+            val calculatedPrice = if (selectedBike != null && selectedDuration != null) {
+                val hourlyRate = selectedBike!!.priceValue
+                val hours = selectedDuration!!.hours
+                String.format("₱%.2f", hourlyRate * hours)
+            } else {
+                "₱0.00"
+            }
+            
+            withContext(Dispatchers.Main) {
+                estimatedPrice = calculatedPrice
+            }
+        }
+    }
 
     // Load bikes if needed
     LaunchedEffect(Unit) {
@@ -708,15 +759,6 @@ fun BookingForm(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Calculate estimated price
-        val estimatedPrice = if (selectedBike != null && selectedDuration != null) {
-            val hourlyRate = selectedBike!!.priceValue
-            val hours = selectedDuration!!.hours
-            String.format("₱%.2f", hourlyRate * hours)
-        } else {
-            "₱0.00"
-        }
-
         // Show estimated price
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -766,62 +808,96 @@ fun BookingForm(
             Button(
                 onClick = {
                     if (selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null) {
-                        scope.launch {
-                            // Parse the selected time
-                            val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                            val parsedTime = timeFormat.parse(selectedTime!!)
-                            
-                            // Combine date and time
-                            val calendar = Calendar.getInstance()
-                            calendar.time = selectedDate!!
-                            
-                            val timeCalendar = Calendar.getInstance()
-                            timeCalendar.time = parsedTime!!
-                            
-                            calendar.set(Calendar.HOUR_OF_DAY, timeCalendar.get(Calendar.HOUR_OF_DAY))
-                            calendar.set(Calendar.MINUTE, timeCalendar.get(Calendar.MINUTE))
-                            
-                            val startDateTime = calendar.time
-                            
-                            // Calculate end time based on duration
-                            val endCalendar = calendar.clone() as Calendar
-                            endCalendar.add(Calendar.HOUR, selectedDuration!!.hours)
-                            val endDateTime = endCalendar.time
-                            
-                            // Create booking in Firestore
-                            val userId = FirebaseAuth.getInstance().currentUser?.uid ?: return@launch
-                            val userName = FirebaseAuth.getInstance().currentUser?.displayName ?: "User"
-                            
-                            val booking = Booking.createHourly(
-                                bikeId = selectedBike!!.id,
-                                userId = userId,
-                                userName = userName,
-                                startDate = startDateTime,
-                                endDate = endDateTime,
-                                pricePerHour = selectedBike!!.priceValue
-                            )
-                            
-                            bookingViewModel.createBooking(
-                                booking = booking,
-                                onSuccess = {
-                                    Toast.makeText(context, "Booking confirmed!", Toast.LENGTH_SHORT).show()
-                                    onBookingComplete()
-                                },
-                                onError = { error ->
-                                    Toast.makeText(context, "Error: $error", Toast.LENGTH_LONG).show()
+                        isCreatingBooking = true
+                        
+                        // Run date processing and booking creation in IO thread
+                        ioScope.launch {
+                            try {
+                                // Parse the selected time
+                                val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                val parsedTime = timeFormat.parse(selectedTime!!)
+                                
+                                // Combine date and time
+                                val calendar = Calendar.getInstance()
+                                calendar.time = selectedDate!!
+                                
+                                val timeCalendar = Calendar.getInstance()
+                                timeCalendar.time = parsedTime!!
+                                
+                                calendar.set(Calendar.HOUR_OF_DAY, timeCalendar.get(Calendar.HOUR_OF_DAY))
+                                calendar.set(Calendar.MINUTE, timeCalendar.get(Calendar.MINUTE))
+                                
+                                val startDateTime = calendar.time
+                                
+                                // Calculate end time based on duration
+                                val endCalendar = calendar.clone() as Calendar
+                                endCalendar.add(Calendar.HOUR, selectedDuration!!.hours)
+                                val endDateTime = endCalendar.time
+                                
+                                // Get user information
+                                val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, "You must be logged in to make a booking", Toast.LENGTH_SHORT).show()
+                                        isCreatingBooking = false
+                                    }
+                                    return@launch
                                 }
-                            )
+                                
+                                val userName = FirebaseAuth.getInstance().currentUser?.displayName ?: "User"
+                                
+                                // Create the booking object
+                                val booking = Booking.createHourly(
+                                    bikeId = selectedBike!!.id,
+                                    userId = userId,
+                                    userName = userName,
+                                    startDate = startDateTime,
+                                    endDate = endDateTime,
+                                    pricePerHour = selectedBike!!.priceValue
+                                )
+                                
+                                // Create booking in Firestore (this is already handled in IO dispatcher by BookingViewModel)
+                                bookingViewModel.createBooking(
+                                    booking = booking,
+                                    onSuccess = {
+                                        // Run this callback on main thread directly without suspend call
+                                        Toast.makeText(context, "Booking confirmed!", Toast.LENGTH_SHORT).show()
+                                        isCreatingBooking = false
+                                        onBookingComplete()
+                                    },
+                                    onError = { error ->
+                                        // Run this callback on main thread directly without suspend call
+                                        Toast.makeText(context, "Error: $error", Toast.LENGTH_LONG).show()
+                                        isCreatingBooking = false
+                                    }
+                                )
+                            } catch (e: Exception) {
+                                // Use launch(Dispatchers.Main) instead of withContext since we're already in a coroutine
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Error creating booking: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    isCreatingBooking = false
+                                }
+                            }
                         }
                     } else {
                         Toast.makeText(context, "Please complete all booking details", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.weight(1f),
-                enabled = selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null,
+                enabled = selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null && !isCreatingBooking,
                 colors = ButtonDefaults.buttonColors(containerColor = DarkGreen),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Confirm Booking")
+                if (isCreatingBooking) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Creating...")
+                } else {
+                    Text("Confirm Booking")
+                }
             }
         }
     }
@@ -834,6 +910,15 @@ fun BikeSelectionCard(
     onSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Determine image model with memory and disk caching optimizations
+    val imageModel = ImageRequest.Builder(LocalContext.current)
+        .data(bike.imageUrl)
+        .crossfade(true)
+        .size(width = 112, height = 112) // Target size to save memory
+        .memoryCacheKey(bike.id + "_thumb")
+        .diskCacheKey(bike.id + "_thumb")
+        .build()
+    
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -854,22 +939,25 @@ fun BikeSelectionCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Bike image
+            // Bike image with optimized loading
             SubcomposeAsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(bike.imageUrl)
-                    .crossfade(true)
-                    .build(),
+                model = imageModel,
                 contentDescription = bike.name,
                 modifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,
                 loading = {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = DarkGreen
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = DarkGreen,
+                            strokeWidth = 1.5.dp
+                        )
+                    }
                 },
                 error = {
                     Box(
@@ -948,6 +1036,65 @@ fun CustomCalendar(
     onDateSelected: (Date) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val computeScope = rememberCoroutineScope()
+    var formattedMonth by remember { mutableStateOf("") }
+    var calendarDays by remember { mutableStateOf<List<CalendarDay>>(emptyList()) }
+    
+    // Calculate calendar days when the month changes
+    LaunchedEffect(currentMonth.time) {
+        computeScope.launch(Dispatchers.Default) {
+            val dateFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+            val formattedMonthText = dateFormat.format(currentMonth.time)
+            
+            // Calculate calendar days for the month
+            val cal = currentMonth.clone() as Calendar
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) - 1
+            val maxDays = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+            
+            val days = mutableListOf<CalendarDay>()
+            
+            // Add empty slots for beginning of month
+            for (i in 0 until firstDayOfWeek) {
+                days.add(CalendarDay(date = null, isInMonth = false))
+            }
+            
+            // Add actual days
+            for (i in 1..maxDays) {
+                cal.set(Calendar.DAY_OF_MONTH, i)
+                val date = cal.time
+                days.add(CalendarDay(date = date, isInMonth = true))
+            }
+            
+            withContext(Dispatchers.Main) {
+                formattedMonth = formattedMonthText
+                calendarDays = days
+            }
+        }
+    }
+    
+    // Update calendar days when the selected date changes
+    LaunchedEffect(selectedDate, calendarDays) {
+        if (selectedDate != null && calendarDays.isNotEmpty()) {
+            computeScope.launch(Dispatchers.Default) {
+                val selectedDay = Calendar.getInstance().apply { time = selectedDate }
+                
+                // Update calendar days with selection state
+                val updatedDays = calendarDays.map { day ->
+                    if (day.date != null && isSameDay(day.date, selectedDate)) {
+                        day.copy(isSelected = true)
+                    } else {
+                        day.copy(isSelected = false)
+                    }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    calendarDays = updatedDays
+                }
+            }
+        }
+    }
+
     Column(modifier = modifier.fillMaxWidth()) {
         // Month navigation
         Row(
@@ -957,10 +1104,8 @@ fun CustomCalendar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val dateFormat = remember { SimpleDateFormat("MMMM yyyy", Locale.getDefault()) }
-            
             Text(
-                text = dateFormat.format(currentMonth.time),
+                text = formattedMonth,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium
             )
@@ -1007,76 +1152,96 @@ fun CustomCalendar(
         }
         
         // Calendar grid
-        // This is simplified - in a real app you'd calculate the actual days
-        val daysInMonth = remember(currentMonth) {
-            val cal = currentMonth.clone() as Calendar
-            cal.set(Calendar.DAY_OF_MONTH, 1)
-            val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) - 1
-            val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-            
-            List(6 * 7) { index ->
-                val day = index - firstDayOfWeek + 1
-                if (day in 1..daysInMonth) {
-                    cal.set(Calendar.DAY_OF_MONTH, day)
-                    CalendarDay(date = cal.time, isInMonth = true)
-                } else {
-                    CalendarDay(date = null, isInMonth = false)
-                }
-            }
-        }
-        
-        // Display calendar grid
-        for (weekIndex in 0 until 6) {
+        GridCalendar(
+            days = calendarDays,
+            selectedDate = selectedDate,
+            onDateClicked = onDateSelected
+        )
+    }
+}
+
+@Composable
+private fun GridCalendar(
+    days: List<CalendarDay>,
+    selectedDate: Date?,
+    onDateClicked: (Date) -> Unit
+) {
+    // Create a grid layout with 7 columns (for days of week)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        for (week in 0 until 6) {  // 6 possible weeks in a month view
             Row(modifier = Modifier.fillMaxWidth()) {
-                for (dayIndex in 0 until 7) {
-                    val index = weekIndex * 7 + dayIndex
-                    val day = daysInMonth[index]
+                for (dayOfWeek in 0 until 7) {
+                    val index = week * 7 + dayOfWeek
                     
-                    if (index < daysInMonth.size) {
+                    if (index < days.size) {
+                        val day = days[index]
+                        DayCell(
+                            day = day, 
+                            isSelected = selectedDate != null && day.date != null && 
+                                isSameDay(day.date, selectedDate),
+                            onDateSelected = { 
+                                if (day.date != null && day.isInMonth) {
+                                    onDateClicked(day.date)
+                                }
+                            }
+                        )
+                    } else {
+                        // Empty cell for padding
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .aspectRatio(1f)
-                                .let {
-                                    if (day.date != null) {
-                                        it.clickable {
-                                            if (day.isInMonth) {
-                                                onDateSelected(day.date)
-                                            }
-                                        }
-                                    } else {
-                                        it
-                                    }
-                                }
-                                .background(
-                                    color = if (day.date != null && selectedDate != null && 
-                                                isSameDay(day.date, selectedDate)) {
-                                        DarkGreen
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (day.date != null && day.isInMonth) {
-                                val cal = Calendar.getInstance().apply { time = day.date }
-                                Text(
-                                    text = cal.get(Calendar.DAY_OF_MONTH).toString(),
-                                    color = if (selectedDate != null && isSameDay(day.date, selectedDate)) {
-                                        Color.White
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
-                                )
-                            }
-                        }
+                        )
                     }
                 }
             }
         }
     }
 }
+
+@Composable
+private fun RowScope.DayCell(
+    day: CalendarDay,
+    isSelected: Boolean,
+    onDateSelected: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .aspectRatio(1f)
+            .then(
+                if (day.date != null && day.isInMonth) {
+                    Modifier.clickable { onDateSelected() }
+                } else {
+                    Modifier
+                }
+            )
+            .background(
+                color = if (isSelected) DarkGreen else Color.Transparent,
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (day.date != null) {
+            val cal = Calendar.getInstance().apply { time = day.date }
+            Text(
+                text = cal.get(Calendar.DAY_OF_MONTH).toString(),
+                color = if (isSelected) {
+                    Color.White
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                }
+            )
+        }
+    }
+}
+
+// Updated CalendarDay class with isSelected property
+data class CalendarDay(
+    val date: Date?, 
+    val isInMonth: Boolean,
+    val isSelected: Boolean = false
+)
 
 @Composable
 fun TimeSlot(
@@ -1163,7 +1328,6 @@ fun isSameDay(date1: Date, date2: Date): Boolean {
 
 // Data classes for UI
 data class BikeOption(val name: String, val hourlyRate: Float, val iconRes: Int)
-data class CalendarDay(val date: Date?, val isInMonth: Boolean)
 data class DurationOption(val label: String, val price: String, val hours: Int)
 
 @Composable
@@ -1173,19 +1337,29 @@ private fun BookingCard(
     modifier: Modifier = Modifier
 ) {
     // Process dates in a coroutine
-    val coroutineScope = rememberCoroutineScope()
+    val computeScope = rememberCoroutineScope()
     var formattedStartDate by remember { mutableStateOf("Loading...") }
     var formattedEndDate by remember { mutableStateOf("Loading...") }
+    var timeRange by remember { mutableStateOf("") }
+    var formattedDuration by remember { mutableStateOf("") }
     
     LaunchedEffect(booking) {
-        coroutineScope.launch(Dispatchers.Default) {
+        computeScope.launch(Dispatchers.Default) {
             val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
             val startDateStr = dateFormat.format(booking.startDate)
             val endDateStr = dateFormat.format(booking.endDate)
             
+            // Pre-compute time range
+            val computedTimeRange = booking.getTimeRange()
+            
+            // Pre-compute duration
+            val computedDuration = booking.getFormattedDuration()
+            
             withContext(Dispatchers.Main) {
                 formattedStartDate = startDateStr
                 formattedEndDate = endDateStr
+                timeRange = computedTimeRange
+                formattedDuration = computedDuration
             }
         }
     }
@@ -1377,7 +1551,7 @@ private fun BookingCard(
                     }
                     
                     // Show time range for hourly bookings
-                    if (booking.isHourly) {
+                    if (booking.isHourly && timeRange.isNotEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1389,7 +1563,7 @@ private fun BookingCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = booking.getTimeRange(),
+                                text = timeRange,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1411,7 +1585,7 @@ private fun BookingCard(
                     
                     // Duration
                     Text(
-                        text = booking.getFormattedDuration(),
+                        text = formattedDuration,
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1434,14 +1608,33 @@ fun BookingDetailSheet(
     var isCancelling by remember { mutableStateOf(false) }
     var showCancelConfirmDialog by remember { mutableStateOf(false) }
     
-    val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
-    val startDateStr = dateFormat.format(booking.startDate)
-    val endDateStr = dateFormat.format(booking.endDate)
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    // Use remember states for formatted dates and time
+    var formattedStartDate by remember { mutableStateOf("") }
+    var formattedEndDate by remember { mutableStateOf("") }
+    var startTimeStr by remember { mutableStateOf("") }
+    var endTimeStr by remember { mutableStateOf("") }
     
-    // Get formatted time for hourly bookings
-    val startTimeStr = if (booking.isHourly) timeFormat.format(booking.startDate) else ""
-    val endTimeStr = if (booking.isHourly) timeFormat.format(booking.endDate) else ""
+    // Move date formatting to IO thread
+    LaunchedEffect(booking) {
+        withContext(Dispatchers.IO) {
+            val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
+            val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+            
+            val startDateStr = dateFormat.format(booking.startDate)
+            val endDateStr = dateFormat.format(booking.endDate)
+            
+            // Get formatted time for hourly bookings
+            val formattedStartTime = if (booking.isHourly) timeFormat.format(booking.startDate) else ""
+            val formattedEndTime = if (booking.isHourly) timeFormat.format(booking.endDate) else ""
+            
+            withContext(Dispatchers.Main) {
+                formattedStartDate = startDateStr
+                formattedEndDate = endDateStr
+                startTimeStr = formattedStartTime
+                endTimeStr = formattedEndTime
+            }
+        }
+    }
     
     if (showCancelConfirmDialog) {
         AlertDialog(
@@ -1667,7 +1860,7 @@ fun BookingDetailSheet(
                 
                 DetailItem(
                     title = "Date", 
-                    value = if (startDateStr == endDateStr) startDateStr else "$startDateStr - $endDateStr",
+                    value = if (formattedStartDate == formattedEndDate) formattedStartDate else "$formattedStartDate - $formattedEndDate",
                     icon = Icons.Default.DateRange
                 )
                 
