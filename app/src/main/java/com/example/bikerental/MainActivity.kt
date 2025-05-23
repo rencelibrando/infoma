@@ -82,6 +82,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.example.bikerental.screens.help.HelpSupportScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @AndroidEntryPoint
@@ -366,6 +367,11 @@ fun AppNavigation(
             Box(modifier = Modifier.fillMaxSize()) {
                 CircularProgressIndicator()
             }
+        }
+
+        // Add our new help screen route to the NavHost
+        composable("help") {
+            HelpSupportScreen(navController = navController)
         }
     }
 }
