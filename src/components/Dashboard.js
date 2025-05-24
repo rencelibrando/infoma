@@ -10,6 +10,7 @@ import Analytics from './Analytics';
 import BikesMap from './BikesMap';
 import BikeReviews from './BikeReviews';
 import BookingManagement from './BookingManagement';
+import CustomerSupportMessages from './CustomerSupportMessages';
 import { initializeBikesData } from '../services/bikeService';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
@@ -345,6 +346,12 @@ const Dashboard = () => {
             >
               Bike Reviews
             </MenuOption>
+            <MenuOption 
+              active={activeTab === 'customerSupport'}
+              onClick={() => handleMenuClick('customerSupport')}
+            >
+              Customer Support Messages
+            </MenuOption>
             <LogoutOption onClick={handleLogout}>
               Logout
             </LogoutOption>
@@ -383,6 +390,9 @@ const Dashboard = () => {
             )}
             {activeTab === 'reviews' && (
               <BikeReviews />
+            )}
+            {activeTab === 'customerSupport' && (
+              <CustomerSupportMessages />
             )}
           </ContentSection>
         </Content>
