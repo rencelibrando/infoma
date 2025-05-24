@@ -11,6 +11,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,17 +29,51 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.example.bikerental.models.FAQ
+import com.example.bikerental.models.SupportMessage
+import com.example.bikerental.viewmodels.SupportViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
-fun HelpSupportScreen(navController: NavController? = null) {
+fun HelpSupportScreen(
+    navController: NavController? = null,
+    viewModel: SupportViewModel = hiltViewModel()
+) {
     val scrollState = rememberScrollState()
-    val greenColor = Color(0xFF4CAF50)
+    val accentColor = Color(0xFF4CAF50)
+    val uiState by viewModel.uiState.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Show tabs for Contact Us and My Messages
+    var selectedTab by remember { mutableStateOf(0) }
+    val tabs = listOf("Contact Us", "My Messages")
+    
+    // Pull-to-refresh state
+    val isRefreshing = uiState.isLoading
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            coroutineScope.launch {
+                if (selectedTab == 0) {
+                    viewModel.loadFaqs()
+                } else {
+                    viewModel.loadUserMessages()
+                }
+            }
+        }
+    )
     
     Scaffold(
         topBar = {
@@ -57,13 +94,13 @@ fun HelpSupportScreen(navController: NavController? = null) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Back",
-                            tint = greenColor
+                            tint = accentColor
                         )
                     }
                 },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = Color(0xFFE0E0E0),
-                    titleContentColor = greenColor
+                    titleContentColor = accentColor
                 )
             )
         }
@@ -72,60 +109,254 @@ fun HelpSupportScreen(navController: NavController? = null) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp)
-                .verticalScroll(scrollState)
         ) {
-            // Contact Section
-            ContactSection(greenColor)
+            // Error message (if any)
+            uiState.errorMessage?.let { error ->
+                Snackbar(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    action = {
+                        TextButton(onClick = { viewModel.clearError() }) {
+                            Text("Dismiss")
+                        }
+                    }
+                ) {
+                    Text(error)
+                }
+            }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            // Tab selection
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = accentColor
+            ) {
+                tabs.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(title) }
+                    )
+                }
+            }
             
-            // Find Us Section
-            FindUsSection(greenColor)
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
-            // FAQ Section with interactive expandable items
-            Text(
-                text = "Frequently Asked Questions",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // FAQ Items
-            ExpandableFaqItem(
-                question = "How do I rent a bike?",
-                answer = "To rent a bike, navigate to the Bikes tab, select an available bike, and follow the booking process. You can pay using our supported payment methods.",
-                accentColor = greenColor
-            )
-            
-            ExpandableFaqItem(
-                question = "What are your operating hours?",
-                answer = "Our operating hours are 9AM to 6PM, seven days a week including holidays.",
-                accentColor = greenColor
-            )
-            
-            ExpandableFaqItem(
-                question = "How do I report a problem with my rental?",
-                answer = "If you encounter any issues with your rental, please contact our support team immediately through the contact form or call our customer service.",
-                accentColor = greenColor
-            )
-            
-            Spacer(modifier = Modifier.height(24.dp))
+            // Content based on selected tab, wrapped with pullRefresh
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pullRefresh(state = pullRefreshState)
+            ) {
+                when (selectedTab) {
+                    0 -> {
+                        // Contact Form Tab
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            item {
+                                // Contact Form
+                                ContactSection(
+                                    accentColor = accentColor,
+                                    onSubmit = { subject, message, phone ->
+                                        viewModel.submitSupportMessage(subject, message, phone)
+                                    },
+                                    isLoading = uiState.isLoading,
+                                    isMessageSent = uiState.isMessageSent,
+                                    resetMessageSent = { viewModel.resetMessageSent() }
+                                )
+                                
+                                Spacer(modifier = Modifier.height(24.dp))
+                                
+                                // Find Us Section
+                                FindUsSection(accentColor = accentColor)
+                                
+                                Spacer(modifier = Modifier.height(24.dp))
+                                
+                                // FAQ Section
+                                Text(
+                                    text = "Frequently Asked Questions",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                            
+                            // Show loading for FAQs
+                            if (uiState.isLoading && uiState.faqs.isEmpty()) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(32.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = accentColor)
+                                    }
+                                }
+                            } 
+                            // Show FAQs
+                            else if (uiState.faqs.isNotEmpty()) {
+                                items(uiState.faqs) { faq ->
+                                    ExpandableFaqItem(
+                                        question = faq.question,
+                                        answer = faq.answer,
+                                        accentColor = accentColor
+                                    )
+                                }
+                                
+                                item {
+                                    Spacer(modifier = Modifier.height(32.dp))
+                                }
+                            } 
+                            // No FAQs found
+                            else {
+                                item {
+                                    Text(
+                                        text = "No FAQs available at the moment.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(32.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    1 -> {
+                        // My Messages Tab
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            item {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "My Support Messages",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            
+                            // Show loading for messages
+                            if (uiState.isLoading) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(32.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = accentColor)
+                                    }
+                                }
+                            } 
+                            // Show messages
+                            else if (uiState.userMessages.isNotEmpty()) {
+                                items(uiState.userMessages) { message ->
+                                    MessageItem(
+                                        message = message,
+                                        accentColor = accentColor
+                                    )
+                                }
+                                
+                                item {
+                                    Spacer(modifier = Modifier.height(32.dp))
+                                }
+                            } 
+                            // No messages found
+                            else {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(32.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Message,
+                                                contentDescription = null,
+                                                tint = Color.Gray,
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Text(
+                                                text = "You haven't sent any support messages yet.",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                textAlign = TextAlign.Center,
+                                                color = Color.Gray
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Button(
+                                                onClick = { selectedTab = 0 },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = accentColor
+                                                )
+                                            ) {
+                                                Text("Contact Support")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Pull refresh indicator
+                PullRefreshIndicator(
+                    refreshing = isRefreshing,
+                    state = pullRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    backgroundColor = MaterialTheme.colorScheme.surface,
+                    contentColor = accentColor
+                )
+            }
+        }
+    }
+    
+    // Load initial data
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 0 && uiState.faqs.isEmpty()) {
+            viewModel.loadFaqs()
+        } else if (selectedTab == 1 && uiState.userMessages.isEmpty()) {
+            viewModel.loadUserMessages()
         }
     }
 }
 
 @Composable
-private fun ContactSection(accentColor: Color) {
+private fun ContactSection(
+    accentColor: Color,
+    onSubmit: (subject: String, message: String, phone: String) -> Unit,
+    isLoading: Boolean,
+    isMessageSent: Boolean,
+    resetMessageSent: () -> Unit
+) {
+    var subject by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phoneNumber by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
-    var isSubmitting by remember { mutableStateOf(false) }
-    var showSuccessMessage by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(isMessageSent) {
+        if (isMessageSent) {
+            // Clear form
+            subject = ""
+            fullName = ""
+            email = ""
+            phoneNumber = ""
+            message = ""
+        }
+    }
     
     Text(
         text = "Contact Us",
@@ -163,45 +394,21 @@ private fun ContactSection(accentColor: Color) {
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            // Full Name Field
+            // Subject Field
             Text(
-                text = "Full Name",
+                text = "Subject",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
             
             OutlinedTextField(
-                value = fullName,
-                onValueChange = { fullName = it },
-                placeholder = { Text("Your full name") },
+                value = subject,
+                onValueChange = { subject = it },
+                placeholder = { Text("Brief description of your issue") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp, bottom = 12.dp),
                 singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedBorderColor = Color.LightGray,
-                    focusedBorderColor = accentColor
-                )
-            )
-            
-            // Email Address Field
-            Text(
-                text = "Email Address",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
-            )
-            
-            OutlinedTextField(
-                value = email,
-                onValueChange = { email = it },
-                placeholder = { Text("Your email address") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 12.dp),
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = KeyboardType.Email
-                ),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedBorderColor = Color.LightGray,
                     focusedBorderColor = accentColor
@@ -246,7 +453,7 @@ private fun ContactSection(accentColor: Color) {
             OutlinedTextField(
                 value = message,
                 onValueChange = { message = it },
-                placeholder = { Text("Your message to admin...") },
+                placeholder = { Text("Describe your issue or question...") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(120.dp)
@@ -260,7 +467,7 @@ private fun ContactSection(accentColor: Color) {
             
             // Success message animation
             AnimatedVisibility(
-                visible = showSuccessMessage,
+                visible = isMessageSent,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
@@ -275,31 +482,16 @@ private fun ContactSection(accentColor: Color) {
             // Send Message Button with loading state
             Button(
                 onClick = { 
-                    // Simulate sending message
-                    isSubmitting = true
-                    // In a real app, this would call a viewModel function
-                    kotlinx.coroutines.MainScope().launch {
-                        kotlinx.coroutines.delay(1000)
-                        isSubmitting = false
-                        showSuccessMessage = true
-                        // Clear form
-                        fullName = ""
-                        email = ""
-                        phoneNumber = ""
-                        message = ""
-                        // Hide success message after some time
-                        kotlinx.coroutines.delay(3000)
-                        showSuccessMessage = false
-                    }
+                    onSubmit(subject, message, phoneNumber)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = accentColor
                 ),
                 shape = RoundedCornerShape(4.dp),
-                enabled = !isSubmitting && fullName.isNotEmpty() && email.isNotEmpty() && message.isNotEmpty()
+                enabled = !isLoading && subject.isNotEmpty() && message.isNotEmpty()
             ) {
-                if (isSubmitting) {
+                if (isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
                         color = Color.White,
@@ -308,12 +500,138 @@ private fun ContactSection(accentColor: Color) {
                     Spacer(modifier = Modifier.width(8.dp))
                 }
                 Text(
-                    text = if (isSubmitting) "Sending..." else "Send Message",
+                    text = if (isLoading) "Sending..." else "Send Message",
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             }
         }
+    }
+}
+
+@Composable
+fun MessageItem(
+    message: SupportMessage,
+    accentColor: Color
+) {
+    val dateFormatted = message.dateCreated?.toDate()?.let {
+        java.text.SimpleDateFormat("MMM d, yyyy HH:mm", java.util.Locale.getDefault()).format(it)
+    } ?: "Unknown date"
+    
+    var expanded by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .clickable { expanded = !expanded },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Message header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = message.subject,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                
+                // Status badge
+                StatusBadge(status = message.status, accentColor = accentColor)
+            }
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Text(
+                text = dateFormatted,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Preview of message
+            Text(
+                text = message.message,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = if (expanded) androidx.compose.ui.text.style.TextOverflow.Visible else androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            
+            // Show response if available and expanded
+            if (expanded && message.response != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Divider()
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Response from support:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = accentColor
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = message.response,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+            
+            // Show "View more/less" text
+            Text(
+                text = if (expanded) "Show less" else "View more",
+                style = MaterialTheme.typography.bodySmall,
+                color = accentColor,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .clickable { expanded = !expanded }
+            )
+        }
+    }
+}
+
+@Composable
+fun StatusBadge(status: String, accentColor: Color) {
+    val (backgroundColor, textColor) = when (status) {
+        "new" -> Color(0xFFFF5252).copy(alpha = 0.1f) to Color(0xFFFF5252)
+        "in-progress" -> Color(0xFFFFB300).copy(alpha = 0.1f) to Color(0xFFFFB300)
+        "resolved" -> accentColor.copy(alpha = 0.1f) to accentColor
+        else -> Color.Gray.copy(alpha = 0.1f) to Color.Gray
+    }
+    
+    val statusText = when (status) {
+        "new" -> "New"
+        "in-progress" -> "In Progress"
+        "resolved" -> "Resolved"
+        else -> status.replaceFirstChar { it.uppercase() }
+    }
+    
+    Surface(
+        color = backgroundColor,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = textColor,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
     }
 }
 

@@ -28,6 +28,15 @@ import com.example.bikerental.viewmodels.BikeViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.util.Locale
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
+import kotlin.math.roundToInt
 
 @Composable
 fun BikeMap(
@@ -38,6 +47,10 @@ fun BikeMap(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+
+    // Create dedicated scopes for different types of background operations
+    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
 
     // Intramuros location (center point)
     val intramurosLocation = remember { LatLng(14.5895, 120.9750) }
@@ -81,35 +94,34 @@ fun BikeMap(
     val activeRide by bikeViewModel.activeRide.collectAsState()
     val bikeLocation by bikeViewModel.bikeLocation.collectAsState()
 
-    // Function to calculate distance between two LatLng points
-    fun calculateDistance(start: LatLng, end: LatLng): Float {
-        val results = FloatArray(1)
-        Location.distanceBetween(
-            start.latitude, start.longitude,
-            end.latitude, end.longitude,
-            results
-        )
-        return results[0] // Distance in meters
-    }
+    // Flow for storing processed bike markers with distance calculations
+    // Use a StateFlow to handle bikesWithDistance that can be updated from background threads
+    val bikesWithDistanceFlow = remember { MutableStateFlow<List<BikeMapMarker>>(emptyList()) }
+    val bikesWithDistance by bikesWithDistanceFlow.collectAsState()
 
-    // Convert TrackableBike to BikeMapMarker
-    val bikesWithDistance = remember(availableBikes, userLocation) {
-        availableBikes.map { bike ->
-            BikeMapMarker(
-                id = bike.id,
-                name = bike.name,
-                type = bike.type,
-                price = bike.price,
-                position = LatLng(bike.latitude, bike.longitude),
-                imageRes = bike.imageRes,
-                distance = if (userLocation != null) {
-                    val distanceInMeters = calculateDistance(userLocation!!, bike.position)
-                    when {
-                        distanceInMeters < 1000 -> "${distanceInMeters.toInt()} m"
-                        else -> String.format(Locale.getDefault(), "%.1f km", distanceInMeters / 1000)
+    // Move distance calculation to background thread
+    LaunchedEffect(availableBikes, userLocation) {
+        computeScope.launch {
+            val processedBikes = availableBikes.map { bike ->
+                val distance = if (userLocation != null) {
+                    calculateDistanceSuspend(userLocation!!, bike.position)
+                } else null
+                
+                BikeMapMarker(
+                    id = bike.id,
+                    name = bike.name,
+                    type = bike.type,
+                    price = bike.price,
+                    position = LatLng(bike.latitude, bike.longitude),
+                    imageRes = bike.imageRes,
+                    distance = when {
+                        distance == null -> ""
+                        distance < 1000 -> "${distance.roundToInt()} m"
+                        else -> String.format(Locale.getDefault(), "%.1f km", distance / 1000)
                     }
-                } else ""
-            )
+                )
+            }
+            bikesWithDistanceFlow.value = processedBikes
         }
     }
 
@@ -125,7 +137,10 @@ fun BikeMap(
             // If user is currently riding, update bike location with user location periodically
             while (isActive && activeRide != null) {
                 userLocation?.let { location ->
-                    bikeViewModel.updateBikeLocation(bikeId, location)
+                    // Process location updates in IO thread
+                    ioScope.launch {
+                        bikeViewModel.updateBikeLocation(bikeId, location)
+                    }
                 }
                 delay(5000) // Update every 5 seconds
             }
@@ -135,7 +150,13 @@ fun BikeMap(
     // Update route points when bike location changes
     LaunchedEffect(bikeLocation) {
         bikeLocation?.let { location ->
-            routePoints = routePoints + location
+            // Append route points in computation thread to avoid UI jank
+            computeScope.launch {
+                val updatedRoute = routePoints + location
+                withContext(Dispatchers.Main) {
+                    routePoints = updatedRoute
+                }
+            }
         }
     }
 
@@ -147,20 +168,29 @@ fun BikeMap(
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            fusedLocationProviderClient.lastLocation.addOnSuccessListener { location ->
-                location?.let {
-                    val newUserLocation = LatLng(it.latitude, it.longitude)
-                    userLocation = newUserLocation
-
-                    coroutineScope.launch {
-                        cameraPositionState.animate(
-                            update = CameraUpdateFactory.newLatLngZoom(
-                                newUserLocation,
-                                16f
-                            ),
-                            durationMs = 1000
-                        )
+            // Move location retrieval to IO thread
+            ioScope.launch {
+                try {
+                    val locationTask = fusedLocationProviderClient.lastLocation
+                    val location = locationTask.await()
+                    
+                    if (location != null) {
+                        val newUserLocation = LatLng(location.latitude, location.longitude)
+                        
+                        // Update UI on main thread
+                        withContext(Dispatchers.Main) {
+                            userLocation = newUserLocation
+                            cameraPositionState.animate(
+                                update = CameraUpdateFactory.newLatLngZoom(
+                                    newUserLocation,
+                                    16f
+                                ),
+                                durationMs = 1000
+                            )
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("BikeMap", "Error getting location: ${e.message}")
                 }
             }
         }
@@ -169,15 +199,23 @@ fun BikeMap(
     // Function to start a ride
     fun startRide(bike: BikeMapMarker) {
         userLocation?.let { location ->
-            bikeViewModel.startRide(bike.id, location)
+            // Process ride start in background
+            ioScope.launch {
+                bikeViewModel.startRide(bike.id, location)
+            }
         }
     }
     
     // Function to end a ride
     fun endRide() {
         userLocation?.let { location ->
-            bikeViewModel.endRide(location)
-            routePoints = emptyList() // Clear route
+            // Process ride end in background
+            ioScope.launch {
+                bikeViewModel.endRide(location)
+                withContext(Dispatchers.Main) {
+                    routePoints = emptyList() // Clear route on UI thread
+                }
+            }
         }
     }
 
@@ -301,5 +339,18 @@ fun BikeMap(
             strokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
             strokeWidth = 3f
         )
+    }
+}
+
+// Convert distance calculation to a suspend function that runs off the main thread
+suspend fun calculateDistanceSuspend(start: LatLng, end: LatLng): Float {
+    return withContext(Dispatchers.Default) {
+        val results = FloatArray(1)
+        Location.distanceBetween(
+            start.latitude, start.longitude,
+            end.latitude, end.longitude,
+            results
+        )
+        results[0] // Distance in meters
     }
 }

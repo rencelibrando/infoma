@@ -61,6 +61,13 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.tasks.await
+import android.util.Log
+import android.annotation.SuppressLint
 
 @Composable
 fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
@@ -100,6 +107,10 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
         position = CameraPosition.fromLatLngZoom(defaultLocation, 14f)
     }
 
+    // Create OkHttpClient only once and properly in IO scope
+    // Store the client in LaunchedEffect to ensure it's created only once
+    val httpClient = remember { lazy { OkHttpClient() } }
+
     // Permission launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -107,54 +118,40 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
         hasLocationPermission = isGranted
         if (isGranted) {
             // Move location fetching to IO thread
-
-            getCurrentLocation(fusedLocationProviderClient) { location ->
-                    // Update UI state on the main thread
-                scope.launch {
+            ioScope.launch {
+                val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+                // Update UI state on the main thread
+                withContext(Dispatchers.Main) {
                     currentLocation = location
-                        // Camera updates need to happen on main thread
-
+                    // Camera updates need to happen on main thread
                     cameraPositionState.animate(
                         update = CameraUpdateFactory.newLatLngZoom(location, 16f),
                         durationMs = 1000
                     )
-
                 }
             }
-
         }
     }
 
     // Request location when component is first loaded
-    LaunchedEffect(Unit) @androidx.annotation.RequiresPermission(allOf = ["android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"]) {
+    LaunchedEffect(Unit) {
         if (!hasLocationPermission) {
             locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         } else {
             // Move location fetching to IO thread
-
-            getCurrentLocation(fusedLocationProviderClient) { location ->
-                    // Update UI state on the main thread
-                scope.launch {
+            ioScope.launch {
+                val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+                // Update UI state on the main thread
+                withContext(Dispatchers.Main) {
                     currentLocation = location
-                        // Camera updates need to happen on main thread
-
+                    // Camera updates need to happen on main thread
                     cameraPositionState.animate(
                         update = CameraUpdateFactory.newLatLngZoom(location, 16f),
                         durationMs = 1000
                     )
-                        
                 }
             }
-
         }
-    }
-
-    // Create OkHttpClient on the IO thread to avoid main thread network operations
-    val client = remember { 
-        ioScope.launch {
-            OkHttpClient()
-        }
-        OkHttpClient() 
     }
 
     // Function to decode polyline points - ensure this runs on computation thread
@@ -213,28 +210,31 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
                     .url(url)
                     .build()
 
-                val response = client.newCall(request).execute()
-                val jsonData = JSONObject(response.body?.string() ?: "")
+                val response = httpClient.value.newCall(request).execute()
+                val jsonData = response.body?.string() ?: ""
                 
                 // Move JSON parsing to computation thread for better performance
                 withContext(Dispatchers.Default) {
                     val routes = mutableListOf<RouteInfo>()
 
-                    if (jsonData.getString("status") == "OK") {
-                        val routesArray = jsonData.getJSONArray("routes")
-                        for (i in 0 until routesArray.length()) {
-                            val route = routesArray.getJSONObject(i)
-                            val leg = route.getJSONArray("legs").getJSONObject(0)
-                            val steps = mutableListOf<String>()
-                            
-                            // Extract steps instructions
-                            val stepsArray = leg.getJSONArray("steps")
-                            for (j in 0 until stepsArray.length()) {
-                                val step = stepsArray.getJSONObject(j)
-                                steps.add(step.getString("html_instructions"))
-                            }
+                    val jsonObject = JSONObject(jsonData)
+                    if (jsonObject.getString("status") == "OK") {
+                        val routesArray = jsonObject.getJSONArray("routes")
+                        
+                        // Process routes in parallel using async
+                        val deferredRoutes = (0 until routesArray.length()).map { i ->
+                            async {
+                                val route = routesArray.getJSONObject(i)
+                                val leg = route.getJSONArray("legs").getJSONObject(0)
+                                val steps = mutableListOf<String>()
+                                
+                                // Extract steps instructions
+                                val stepsArray = leg.getJSONArray("steps")
+                                for (j in 0 until stepsArray.length()) {
+                                    val step = stepsArray.getJSONObject(j)
+                                    steps.add(step.getString("html_instructions"))
+                                }
 
-                            routes.add(
                                 RouteInfo(
                                     distance = leg.getJSONObject("distance").getString("text"),
                                     duration = leg.getJSONObject("duration").getString("text"),
@@ -242,8 +242,11 @@ fun MapTab(fusedLocationProviderClient: FusedLocationProviderClient?) {
                                     steps = steps,
                                     isAlternative = i > 0
                                 )
-                            )
+                            }
                         }
+                        
+                        // Collect all processed routes
+                        routes.addAll(deferredRoutes.map { it.await() })
                     }
                     routes
                 }
@@ -333,6 +336,39 @@ fun MapLegendItem(color: Color, label: String) {
     }
 }
 
+// Convert the callback-based function to a suspend function for better coroutine integration
+@SuppressLint("MissingPermission")
+private suspend fun getCurrentLocationSuspend(fusedLocationProviderClient: FusedLocationProviderClient?): LatLng {
+    return withContext(Dispatchers.IO) {
+        try {
+            // If no client, return default location
+            if (fusedLocationProviderClient == null) {
+                return@withContext LatLng(14.5890, 120.9760)
+            }
+
+            // Since we're calling this from a composable context where permission is already checked,
+            // and we're using the SuppressLint annotation, we can proceed safely
+            val locationTask = fusedLocationProviderClient.lastLocation
+            val location = locationTask.await()
+            if (location != null) {
+                LatLng(location.latitude, location.longitude)
+            } else {
+                // Default fallback location
+                LatLng(14.5890, 120.9760)
+            }
+        } catch (e: SecurityException) {
+            // Handle security exception (permission denied)
+            Log.e("MapTab", "Location permission denied: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        } catch (e: Exception) {
+            // Default fallback location for other exceptions
+            Log.e("MapTab", "Error getting location: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        }
+    }
+}
+
+// Keep the old method for backward compatibility but delegate to the suspend function
 @RequiresPermission(allOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
 private fun getCurrentLocation(fusedLocationProviderClient: FusedLocationProviderClient?, onResult: (LatLng) -> Unit) {
     // This function should be called from an IO scope
