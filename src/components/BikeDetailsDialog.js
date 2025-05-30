@@ -208,6 +208,12 @@ const Button = styled.button`
   }
 `;
 
+const DetailRow = styled.div`
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+`;
+
 const BikeDetailsDialog = ({ 
   bike, 
   onClose, 
@@ -271,6 +277,10 @@ const BikeDetailsDialog = ({
             <DetailItem>
               <DetailLabel>Hardware ID</DetailLabel>
               <DetailValue>{bike.hardwareId || 'Not assigned'}</DetailValue>
+            </DetailItem>
+            <DetailItem>
+              <DetailLabel>QR Code</DetailLabel>
+              <DetailValue>{bike.qrCode || 'Not assigned'}</DetailValue>
             </DetailItem>
             <DetailItem>
               <DetailLabel>Created On</DetailLabel>

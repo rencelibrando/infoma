@@ -31,8 +31,8 @@ const IconFaq = () => (
 );
 
 const IconClock = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M11.99 2C6.47 2 2 6.48 2 12C2 17.52 6.47 22 11.99 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 11.99 2ZM12 20C7.58 20 4 16.42 4 12C4 7.58 7.58 4 12 4C16.42 4 20 7.58 20 12C20 16.42 16.42 20 12 20ZM12.5 7H11V13L16.25 16.15L17 14.92L12.5 12.25V7Z" fill="currentColor"/>
+  <svg viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"/>
   </svg>
 );
 
@@ -57,6 +57,12 @@ const IconDelete = () => (
 const IconSave = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M9 16.2L4.8 12L3.4 13.4L9 19L21 7L19.6 5.6L9 16.2Z" fill="currentColor"/>
+  </svg>
+);
+
+const IconReply = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor">
+    <path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/>
   </svg>
 );
 
@@ -332,6 +338,55 @@ const FullMessage = styled.div`
   line-height: 1.6;
   color: ${colors.darkGray};
   margin-bottom: 20px;
+`;
+
+const AdminResponseSection = styled.div`
+  margin-bottom: 20px;
+  border-left: 4px solid ${colors.pineGreen};
+  background-color: rgba(29, 60, 52, 0.05);
+`;
+
+const AdminResponseHeader = styled.div`
+  padding: 12px 15px 8px;
+  background-color: rgba(29, 60, 52, 0.1);
+  border-bottom: 1px solid rgba(29, 60, 52, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: ${colors.pineGreen};
+  font-size: 14px;
+`;
+
+const AdminResponseContent = styled.div`
+  padding: 15px;
+  line-height: 1.6;
+  color: ${colors.darkGray};
+`;
+
+const AdminResponseDate = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  font-weight: normal;
+  margin-left: auto;
+`;
+
+const ResponseIndicator = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(29, 60, 52, 0.1);
+  color: ${colors.pineGreen};
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+  
+  svg {
+    width: 12px;
+    height: 12px;
+  }
 `;
 
 const ResponseSection = styled.div`
@@ -663,6 +718,7 @@ const CustomerSupportMessages = () => {
       setLoading(true);
       try {
         const messagesData = await getMessages();
+        console.log('Fetched messages:', messagesData); // Debug log
         setMessages(messagesData);
         setFilteredMessages(messagesData);
       } catch (error) {
@@ -687,9 +743,12 @@ const CustomerSupportMessages = () => {
     
     fetchMessages();
     fetchFaqs();
-    
+  }, []);
+
+  // Initialize operating hours separately
+  useEffect(() => {
     // For now, we'll keep using mock operating hours
-    setOperatingHours([
+    const initialOperatingHours = [
       { day: 'Monday', open: '09:00', close: '18:00', closed: false },
       { day: 'Tuesday', open: '09:00', close: '18:00', closed: false },
       { day: 'Wednesday', open: '09:00', close: '18:00', closed: false },
@@ -697,12 +756,15 @@ const CustomerSupportMessages = () => {
       { day: 'Friday', open: '09:00', close: '20:00', closed: false },
       { day: 'Saturday', open: '10:00', close: '16:00', closed: false },
       { day: 'Sunday', open: '10:00', close: '14:00', closed: true }
-    ]);
-    setTempOperatingHours([...operatingHours]);
+    ];
+    
+    setOperatingHours(initialOperatingHours);
+    setTempOperatingHours(initialOperatingHours);
   }, []);
 
   // Filter messages based on search term and status
   useEffect(() => {
+    console.log('Filtering messages. Total messages:', messages.length); // Debug log
     let result = messages;
     
     if (searchTerm) {
@@ -718,6 +780,7 @@ const CustomerSupportMessages = () => {
       result = result.filter(message => message.status === statusFilter);
     }
     
+    console.log('Filtered messages:', result.length); // Debug log
     setFilteredMessages(result);
   }, [searchTerm, statusFilter, messages]);
 
@@ -932,30 +995,39 @@ const CustomerSupportMessages = () => {
                 </div>
               </EmptyState>
             ) : (
-              filteredMessages.map(message => (
-                <MessageItem key={message.id} onClick={() => handleMessageClick(message)}>
-                  <MessageAvatar>
-                    {message.userAvatar ? (
-                      <AvatarImage src={message.userAvatar} alt={message.userName} />
-                    ) : (
-                      getUserInitials(message.userName)
-                    )}
-                  </MessageAvatar>
-                  <MessageContent>
-                    <MessageHeader>
-                      <UserName>
-                        {message.userName}
-                        <StatusBadge status={message.status}>
-                          {message.status === 'in-progress' ? 'In Progress' : message.status}
-                        </StatusBadge>
-                      </UserName>
-                      <MessageDate>{format(message.dateCreated, 'MMM d, yyyy HH:mm')}</MessageDate>
-                    </MessageHeader>
-                    <div><strong>{message.subject}</strong></div>
-                    <MessagePreview>{message.message}</MessagePreview>
-                  </MessageContent>
-                </MessageItem>
-              ))
+              <>
+                {console.log('Rendering messages:', filteredMessages.length)}
+                {filteredMessages.map(message => (
+                  <MessageItem key={message.id} onClick={() => handleMessageClick(message)}>
+                    <MessageAvatar>
+                      {message.userAvatar ? (
+                        <AvatarImage src={message.userAvatar} alt={message.userName} />
+                      ) : (
+                        getUserInitials(message.userName)
+                      )}
+                    </MessageAvatar>
+                    <MessageContent>
+                      <MessageHeader>
+                        <UserName>
+                          {message.userName}
+                          <StatusBadge status={message.status}>
+                            {message.status === 'in-progress' ? 'In Progress' : message.status}
+                          </StatusBadge>
+                          {message.response && (
+                            <ResponseIndicator>
+                              <IconReply />
+                              Replied
+                            </ResponseIndicator>
+                          )}
+                        </UserName>
+                        <MessageDate>{format(message.dateCreated, 'MMM d, yyyy HH:mm')}</MessageDate>
+                      </MessageHeader>
+                      <div><strong>{message.subject}</strong></div>
+                      <MessagePreview>{message.message}</MessagePreview>
+                    </MessageContent>
+                  </MessageItem>
+                ))}
+              </>
             )}
           </MessagesContainer>
           
@@ -1008,20 +1080,38 @@ const CustomerSupportMessages = () => {
                     {selectedMessage.message}
                   </FullMessage>
                   
-                  <ResponseSection>
-                    <FormTitle>Reply to this message</FormTitle>
-                    <ResponseTextarea 
-                      value={responseText}
-                      onChange={(e) => setResponseText(e.target.value)}
-                      placeholder="Type your response here..."
-                    />
-                    <ButtonGroup>
-                      <Button secondary onClick={handleCloseModal}>Cancel</Button>
-                      <Button onClick={handleSubmitResponse}>
-                        <IconSave /> Send Response
-                      </Button>
-                    </ButtonGroup>
-                  </ResponseSection>
+                  {selectedMessage.response && (
+                    <AdminResponseSection>
+                      <AdminResponseHeader>
+                        <div>Admin Response</div>
+                        {selectedMessage.respondedAt && (
+                          <AdminResponseDate>
+                            {format(selectedMessage.respondedAt.toDate(), 'MMM d, yyyy HH:mm')}
+                          </AdminResponseDate>
+                        )}
+                      </AdminResponseHeader>
+                      <AdminResponseContent>
+                        {selectedMessage.response}
+                      </AdminResponseContent>
+                    </AdminResponseSection>
+                  )}
+                  
+                  {!selectedMessage.response && (
+                    <ResponseSection>
+                      <FormTitle>Reply to this message</FormTitle>
+                      <ResponseTextarea 
+                        value={responseText}
+                        onChange={(e) => setResponseText(e.target.value)}
+                        placeholder="Type your response here..."
+                      />
+                      <ButtonGroup>
+                        <Button secondary onClick={handleCloseModal}>Cancel</Button>
+                        <Button onClick={handleSubmitResponse}>
+                          <IconSave /> Send Response
+                        </Button>
+                      </ButtonGroup>
+                    </ResponseSection>
+                  )}
                 </MessageDetails>
               </ModalContent>
             </Modal>

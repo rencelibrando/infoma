@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { getBikes, deleteBike, updateBikesWithHardwareIds, toggleBikeLock, subscribeToBikes } from '../services/bikeService';
 import BikeQRCode from './BikeQRCode';
 import BikeDetailsDialog from './BikeDetailsDialog';
+import AddBike from './AddBike';
 import styled from 'styled-components';
 import { QRCodeSVG } from 'qrcode.react';
 import { useNavigate } from 'react-router-dom';
@@ -118,7 +119,18 @@ const SearchContainer = styled.div`
   display: flex;
   align-items: center;
   gap: 15px;
-  margin-bottom: 20px;
+  flex: 1;
+  min-width: 0;
+  
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
 `;
 
 const SearchInput = styled.input`
@@ -185,6 +197,14 @@ const ActionBar = styled.div`
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  gap: 20px;
+  flex-wrap: wrap;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 15px;
+  }
 `;
 
 const QRCodeIcon = styled.div`
@@ -263,13 +283,92 @@ const RefreshButton = styled.button`
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
   
   &:hover {
     opacity: 0.9;
+  }
+  
+  @media (max-width: 576px) {
+    justify-content: center;
+  }
+`;
+
+const AddNewBikeButton = styled.button`
+  padding: 12px 20px;
+  background-color: ${colors.success};
+  color: ${colors.white};
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  
+  &:hover {
+    background-color: #45a049;
+    transform: translateY(-1px);
+  }
+  
+  @media (max-width: 768px) {
+    justify-content: center;
+  }
+`;
+
+const AddBikeModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+`;
+
+const AddBikeModalContent = styled.div`
+  background-color: ${colors.white};
+  border-radius: 8px;
+  position: relative;
+  max-width: 800px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+`;
+
+const ModalCloseButton = styled.button`
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: ${colors.darkGray};
+  z-index: 1001;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background-color: ${colors.lightGray};
+    color: ${colors.danger};
   }
 `;
 
@@ -339,6 +438,7 @@ const BikesList = ({ onEditBike }) => {
   const [showBikeDetailsDialog, setShowBikeDetailsDialog] = useState(false);
   const [generatingIds, setGeneratingIds] = useState(false);
   const [processingBikeAction, setProcessingBikeAction] = useState(null);
+  const [showAddBikeModal, setShowAddBikeModal] = useState(false);
   const navigate = useNavigate();
 
   // Update available types from context
@@ -358,6 +458,7 @@ const BikesList = ({ onEditBike }) => {
         searchTerm === '' || 
         bike.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         bike.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (bike.qrCode && bike.qrCode.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (bike.hardwareId && bike.hardwareId.toLowerCase().includes(searchTerm.toLowerCase()));
         
       const matchesType = 
@@ -474,6 +575,19 @@ const BikesList = ({ onEditBike }) => {
     navigate(`/ride/${bike.id}`);
   };
 
+  const handleOpenAddBike = () => {
+    setShowAddBikeModal(true);
+  };
+
+  const handleCloseAddBike = () => {
+    setShowAddBikeModal(false);
+  };
+
+  const handleAddBikeSuccess = () => {
+    setShowAddBikeModal(false);
+    // The DataContext will automatically update the bikes list
+  };
+
   // Show loading state from context
   if (contextLoading && !bikes) {
     return <LoadingMessage>Loading bikes...</LoadingMessage>;
@@ -494,10 +608,14 @@ const BikesList = ({ onEditBike }) => {
       </LastUpdateTime>
       
       <ActionBar>
+        <AddNewBikeButton onClick={handleOpenAddBike}>
+          <span>+</span>
+          Add New Bike
+        </AddNewBikeButton>
         <SearchContainer>
           <SearchInput
             type="text"
-            placeholder="Search bikes by name, type, or hardware ID..."
+            placeholder="Search bikes by name, type, QR code, or hardware ID..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
@@ -602,6 +720,15 @@ const BikesList = ({ onEditBike }) => {
           onStartRide={handleStartRide}
           processingBikeAction={processingBikeAction}
         />
+      )}
+
+      {showAddBikeModal && (
+        <AddBikeModal onClick={handleCloseAddBike}>
+          <AddBikeModalContent onClick={e => e.stopPropagation()}>
+            <ModalCloseButton onClick={handleCloseAddBike}>×</ModalCloseButton>
+            <AddBike onSuccess={handleAddBikeSuccess} />
+          </AddBikeModalContent>
+        </AddBikeModal>
       )}
     </Container>
   );

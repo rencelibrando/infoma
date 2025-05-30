@@ -1,6 +1,7 @@
 // src/components/AddBike.js
 import React, { useState } from 'react';
 import { uploadBike } from '../services/bikeService';
+import { checkQRCodeCollisions } from '../services/migrationService';
 import styled from 'styled-components';
 
 const Container = styled.div`
@@ -187,12 +188,50 @@ const SuccessMessage = styled(Message)`
   }
 `;
 
+const ValidationMessage = styled.div`
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-top: 8px;
+  font-size: 14px;
+  
+  ${props => {
+    switch (props.type) {
+      case 'warning':
+        return `
+          background-color: #fff3e0;
+          color: #ef6c00;
+          border: 1px solid #ffb74d;
+        `;
+      case 'error':
+        return `
+          background-color: #ffebee;
+          color: #d32f2f;
+          border: 1px solid #ef5350;
+        `;
+      case 'success':
+        return `
+          background-color: #e8f5e9;
+          color: #2e7d32;
+          border: 1px solid #66bb6a;
+        `;
+      default:
+        return `
+          background-color: #e3f2fd;
+          color: #1565c0;
+          border: 1px solid #42a5f5;
+        `;
+    }
+  }}
+`;
+
 const AddBike = ({ onSuccess }) => {
   const [bike, setBike] = useState({
     name: '',
     type: '',
     price: '',
     description: '',
+    qrCode: '',
+    hardwareId: '',
     latitude: 0,
     longitude: 0
   });
@@ -201,12 +240,22 @@ const AddBike = ({ onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [qrCodeValidation, setQrCodeValidation] = useState({ status: '', message: '' });
+  const [hardwareIdValidation, setHardwareIdValidation] = useState({ status: '', message: '' });
 
   const handleChange = (e) => {
     setBike({
       ...bike,
       [e.target.name]: e.target.value
     });
+    
+    // Clear validation messages when field is empty
+    if (e.target.name === 'qrCode' && !e.target.value.trim()) {
+      setQrCodeValidation({ status: '', message: '' });
+    }
+    if (e.target.name === 'hardwareId' && !e.target.value.trim()) {
+      setHardwareIdValidation({ status: '', message: '' });
+    }
   };
 
   const handleImageChange = (e) => {
@@ -241,6 +290,68 @@ const AddBike = ({ onSuccess }) => {
     }
   };
 
+  const validateQRCode = async (qrCode) => {
+    if (!qrCode.trim()) {
+      setQrCodeValidation({ status: '', message: '' });
+      return;
+    }
+
+    try {
+      const collision = await checkQRCodeCollisions(qrCode);
+      if (collision.hasCollisions) {
+        setQrCodeValidation({
+          status: 'error',
+          message: `QR code "${qrCode}" is already in use by another bike.`
+        });
+      } else {
+        setQrCodeValidation({
+          status: 'success',
+          message: 'QR code is available.'
+        });
+      }
+    } catch (error) {
+      setQrCodeValidation({
+        status: 'error',
+        message: 'Error validating QR code.'
+      });
+    }
+  };
+
+  const validateHardwareId = async (hardwareId) => {
+    if (!hardwareId.trim()) {
+      setHardwareIdValidation({ status: '', message: '' });
+      return;
+    }
+
+    try {
+      const collision = await checkQRCodeCollisions(hardwareId);
+      if (collision.hasCollisions) {
+        setHardwareIdValidation({
+          status: 'error',
+          message: `Hardware ID "${hardwareId}" is already in use by another bike.`
+        });
+      } else {
+        setHardwareIdValidation({
+          status: 'success',
+          message: 'Hardware ID is available.'
+        });
+      }
+    } catch (error) {
+      setHardwareIdValidation({
+        status: 'error',
+        message: 'Error validating hardware ID.'
+      });
+    }
+  };
+
+  const handleQRCodeBlur = (e) => {
+    validateQRCode(e.target.value);
+  };
+
+  const handleHardwareIdBlur = (e) => {
+    validateHardwareId(e.target.value);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -259,11 +370,15 @@ const AddBike = ({ onSuccess }) => {
         type: '',
         price: '',
         description: '',
+        qrCode: '',
+        hardwareId: '',
         latitude: 0,
         longitude: 0
       });
       setImageFile(null);
       setImagePreview(null);
+      setQrCodeValidation({ status: '', message: '' });
+      setHardwareIdValidation({ status: '', message: '' });
       
       // Notify parent component of success
       if (onSuccess) {
@@ -299,6 +414,24 @@ const AddBike = ({ onSuccess }) => {
       setError("Location is required");
       return false;
     }
+    
+    // Validate QR code and hardware ID
+    if (!bike.qrCode.trim() && !bike.hardwareId.trim()) {
+      setError("Either QR Code or Hardware ID is required");
+      return false;
+    }
+    
+    // Check for validation errors
+    if (qrCodeValidation.status === 'error') {
+      setError("QR Code validation failed. Please fix the issue.");
+      return false;
+    }
+    
+    if (hardwareIdValidation.status === 'error') {
+      setError("Hardware ID validation failed. Please fix the issue.");
+      return false;
+    }
+    
     return true;
   };
 
@@ -344,6 +477,49 @@ const AddBike = ({ onSuccess }) => {
               placeholder="Price in Philippine Peso"
               step="0.01"
             />
+          </FormGroup>
+        </FormSection>
+
+        <FormSection>
+          <SectionTitle>Identification</SectionTitle>
+          <FormGroup>
+            <Label>QR Code *</Label>
+            <Input
+              type="text"
+              name="qrCode"
+              value={bike.qrCode}
+              onChange={handleChange}
+              onBlur={handleQRCodeBlur}
+              placeholder="Enter QR code (preferred identifier)"
+            />
+            {qrCodeValidation.message && (
+              <ValidationMessage type={qrCodeValidation.status}>
+                {qrCodeValidation.message}
+              </ValidationMessage>
+            )}
+          </FormGroup>
+          
+          <FormGroup>
+            <Label>Hardware ID (Legacy)</Label>
+            <Input
+              type="text"
+              name="hardwareId"
+              value={bike.hardwareId}
+              onChange={handleChange}
+              onBlur={handleHardwareIdBlur}
+              placeholder="Enter hardware ID (for backward compatibility)"
+            />
+            {hardwareIdValidation.message && (
+              <ValidationMessage type={hardwareIdValidation.status}>
+                {hardwareIdValidation.message}
+              </ValidationMessage>
+            )}
+            <ValidationMessage type="info">
+              <small>
+                * At least one identifier (QR Code or Hardware ID) is required.<br />
+                QR Code is the preferred identifier for new bikes.
+              </small>
+            </ValidationMessage>
           </FormGroup>
         </FormSection>
         

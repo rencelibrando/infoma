@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import { useNavigate, useLocation } from 'react-router-dom';
 import BikesList from './BikesList';
-import AddBike from './AddBike';
 import EditBike from './EditBike';
 import UsersList from './UsersList';
 import Analytics from './Analytics';
@@ -15,7 +14,6 @@ import { initializeBikesData } from '../services/bikeService';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
-import BikeActivityOverview from './BikeActivityOverview';
 
 // Pine green and gray theme colors
 const colors = {
@@ -305,12 +303,6 @@ const Dashboard = () => {
               Overview
             </MenuOption>
             <MenuOption 
-              active={activeTab === 'activity'}
-              onClick={() => handleMenuClick('activity')}
-            >
-              Ride Activity
-            </MenuOption>
-            <MenuOption 
               active={activeTab === 'bikes'}
               onClick={() => handleMenuClick('bikes')}
             >
@@ -327,12 +319,6 @@ const Dashboard = () => {
               onClick={() => handleMenuClick('map')}
             >
               Bikes Map
-            </MenuOption>
-            <MenuOption 
-              active={activeTab === 'add'}
-              onClick={() => handleMenuClick('add')}
-            >
-              Add New Bike
             </MenuOption>
             <MenuOption 
               active={activeTab === 'users'}
@@ -363,9 +349,6 @@ const Dashboard = () => {
             {activeTab === 'overview' && (
               <Analytics />
             )}
-            {activeTab === 'activity' && (
-              <BikeActivityOverview />
-            )}
             {activeTab === 'bikes' && (
               <BikesList onEditBike={handleEditBike} />
             )}
@@ -374,9 +357,6 @@ const Dashboard = () => {
             )}
             {activeTab === 'map' && (
               <BikesMap />
-            )}
-            {activeTab === 'add' && (
-              <AddBike onSuccess={() => setActiveTab('bikes')} />
             )}
             {activeTab === 'edit' && selectedBike && (
               <EditBike 

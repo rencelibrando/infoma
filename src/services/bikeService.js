@@ -1,20 +1,81 @@
 // src/services/bikeService.js
 import { db, storage } from '../firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { v4 as uuidv4 } from 'uuid';
 
 // Install uuid first: npm install uuid
 
-// Generate a hardware ID format: BIKE-XXXX where X is alphanumeric
-const generateHardwareId = () => {
-  // Generate a 4-character alphanumeric string
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = 'BIKE-';
-  for (let i = 0; i < 4; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length));
+// Secure characters for QR code generation (excluding confusing characters)
+const SECURE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/**
+ * Generate a cryptographically secure QR code
+ * Format: BIKE-XXXXXXXX where X is a secure random character
+ */
+const generateSecureQRCode = async () => {
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    // Generate a secure 8-character code
+    const code = Array.from({ length: 8 }, () => 
+      SECURE_CHARS[Math.floor(Math.random() * SECURE_CHARS.length)]
+    ).join('');
+    
+    const qrCode = `BIKE-${code}`;
+    
+    // Check for collisions in Firestore
+    const isUnique = await checkQRCodeUnique(qrCode);
+    if (isUnique) {
+      return qrCode;
+    }
+    
+    attempts++;
+    console.warn(`QR code collision detected: ${qrCode}, attempt ${attempts}`);
   }
-  return result;
+  
+  // Fallback to UUID-based generation if too many collisions
+  const fallbackCode = uuidv4().replace(/-/g, '').substring(0, 8).toUpperCase();
+  return `BIKE-${fallbackCode}`;
+};
+
+/**
+ * Check if a QR code is unique across all bikes
+ * @deprecated Use exported isQRCodeUnique instead
+ */
+const checkQRCodeUnique = async (qrCode, excludeBikeId = null) => {
+  try {
+    // Check qrCode field
+    const qrCodeQuery = query(
+      collection(db, "bikes"), 
+      where("qrCode", "==", qrCode),
+      ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
+    );
+    const qrCodeSnapshot = await getDocs(qrCodeQuery);
+    
+    // Check hardwareId field for backward compatibility
+    const hardwareIdQuery = query(
+      collection(db, "bikes"), 
+      where("hardwareId", "==", qrCode),
+      ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
+    );
+    const hardwareIdSnapshot = await getDocs(hardwareIdQuery);
+    
+    return qrCodeSnapshot.empty && hardwareIdSnapshot.empty;
+  } catch (error) {
+    console.error('Error checking QR code uniqueness:', error);
+    return false;
+  }
+};
+
+/**
+ * Generate hardware ID for backward compatibility
+ * @deprecated Use generateSecureQRCode instead
+ */
+const generateHardwareId = async () => {
+  console.warn('generateHardwareId is deprecated. Use generateSecureQRCode instead.');
+  return await generateSecureQRCode();
 };
 
 // Get all bikes
@@ -85,7 +146,43 @@ export const getBikeById = async (bikeId) => {
 // Upload a bike
 export const uploadBike = async (bike, imageFile) => {
   const id = uuidv4();
-  const hardwareId = generateHardwareId();
+  
+  // Handle QR code (primary field)
+  let qrCode;
+  if (bike.qrCode && bike.qrCode.trim()) {
+    // User provided QR code
+    qrCode = bike.qrCode.trim();
+    
+    // Validate uniqueness
+    const isUnique = await checkQRCodeUnique(qrCode);
+    if (!isUnique) {
+      throw new Error(`QR code "${qrCode}" is already in use by another bike`);
+    }
+  } else {
+    // Generate secure QR code
+    qrCode = await generateSecureQRCode();
+  }
+  
+  // Handle hardware ID (backward compatibility)
+  let hardwareId;
+  if (bike.hardwareId && bike.hardwareId.trim()) {
+    // User provided hardware ID
+    hardwareId = bike.hardwareId.trim();
+    
+    // Validate uniqueness
+    const isUnique = await checkQRCodeUnique(hardwareId);
+    if (!isUnique) {
+      throw new Error(`Hardware ID "${hardwareId}" is already in use by another bike`);
+    }
+  } else {
+    // Generate hardware ID for backward compatibility
+    hardwareId = await generateHardwareId();
+  }
+  
+  // Validation: Ensure at least one identifier exists
+  if (!qrCode && !hardwareId) {
+    throw new Error('At least one identifier (QR Code or Hardware ID) is required');
+  }
   
   // Upload image to Firebase Storage
   const storageRef = ref(storage, `bikes/${id}.jpg`);
@@ -97,10 +194,11 @@ export const uploadBike = async (bike, imageFile) => {
   const isInUse = false; // Not in use initially
   const isAvailable = isLocked && !isInUse; // Available if locked and not in use
   
-  // Create bike object (matching your Android structure)
+  // Create bike object (enhanced with both qrCode and hardwareId)
   const bikeData = {
     id,
-    hardwareId,
+    qrCode,              // Primary QR code field
+    hardwareId,          // Backward compatibility
     name: bike.name,
     type: bike.type,
     price: `₱${bike.price}/hr`,
@@ -112,10 +210,17 @@ export const uploadBike = async (bike, imageFile) => {
     isAvailable: isAvailable,
     isInUse: isInUse,
     isLocked: isLocked,
-    createdAt: new Date()
+    batteryLevel: 100,   // Default battery level
+    rating: 0,           // Default rating
+    totalRides: 0,       // Initialize ride counter
+    createdAt: new Date(),
+    lastUpdated: new Date()
   };
   
-  console.log('Creating new bike with status:', {
+  console.log('Creating new bike with enhanced data:', {
+    id: bikeData.id,
+    qrCode: bikeData.qrCode,
+    hardwareId: bikeData.hardwareId,
     isLocked: bikeData.isLocked,
     isAvailable: bikeData.isAvailable,
     isInUse: bikeData.isInUse
@@ -138,7 +243,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     const bikesRef = collection(db, 'bikes');
     const bikeRef = doc(bikesRef, bikeId);
     
-    // Get current bike data to check if it already has a hardware ID
+    // Get current bike data
     const currentBikeDoc = await getDoc(bikeRef);
     const currentBike = currentBikeDoc.exists() ? currentBikeDoc.data() : {};
     
@@ -175,13 +280,51 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
       isAvailable: isAvailable,
       isLocked: bikeData.isLocked !== undefined ? bikeData.isLocked : currentBike.isLocked,
       updatedAt: new Date(),
+      lastUpdated: new Date(),
       latitude: bikeData.latitude,
       longitude: bikeData.longitude
     };
 
-    // Generate hardware ID if not already present
-    if (!currentBike.hardwareId) {
-      updatedBike.hardwareId = generateHardwareId();
+    // Handle QR code field (primary identifier)
+    if (bikeData.qrCode !== undefined) {
+      if (bikeData.qrCode.trim()) {
+        // User provided a QR code
+        updatedBike.qrCode = bikeData.qrCode.trim();
+      } else {
+        // User cleared the QR code - only allowed if hardwareId exists
+        if (bikeData.hardwareId && bikeData.hardwareId.trim()) {
+          updatedBike.qrCode = null;
+        }
+      }
+    } else if (!currentBike.qrCode) {
+      // Generate QR code if not present and not provided by user
+      updatedBike.qrCode = await generateSecureQRCode();
+      console.log(`Generated new QR code for bike ${bikeId}: ${updatedBike.qrCode}`);
+    }
+
+    // Handle hardware ID field (legacy compatibility)
+    if (bikeData.hardwareId !== undefined) {
+      if (bikeData.hardwareId.trim()) {
+        // User provided a hardware ID
+        updatedBike.hardwareId = bikeData.hardwareId.trim();
+      } else {
+        // User cleared the hardware ID - only allowed if qrCode exists
+        if ((bikeData.qrCode && bikeData.qrCode.trim()) || currentBike.qrCode) {
+          updatedBike.hardwareId = null;
+        }
+      }
+    } else if (!currentBike.hardwareId) {
+      // Generate hardware ID if not present and not provided by user (backward compatibility)
+      updatedBike.hardwareId = await generateHardwareId();
+      console.log(`Generated new hardware ID for bike ${bikeId}: ${updatedBike.hardwareId}`);
+    }
+
+    // Validation: Ensure at least one identifier exists
+    const finalQrCode = updatedBike.qrCode !== undefined ? updatedBike.qrCode : currentBike.qrCode;
+    const finalHardwareId = updatedBike.hardwareId !== undefined ? updatedBike.hardwareId : currentBike.hardwareId;
+    
+    if (!finalQrCode && !finalHardwareId) {
+      throw new Error('At least one identifier (QR Code or Hardware ID) is required');
     }
 
     // Upload new image if provided
@@ -205,7 +348,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
   }
 };
 
-// Function to update or generate hardware IDs for existing bikes
+// Function to update or generate QR codes and hardware IDs for existing bikes
 export const updateBikesWithHardwareIds = async () => {
   try {
     const bikes = await getBikes();
@@ -215,9 +358,16 @@ export const updateBikesWithHardwareIds = async () => {
       const bikeRef = doc(db, "bikes", bike.id);
       const updateData = {};
       
-      // Check for missing hardware ID
+      // Check for missing QR code (primary field)
+      if (!bike.qrCode) {
+        updateData.qrCode = await generateSecureQRCode();
+        console.log(`Generated QR code for bike ${bike.id}: ${updateData.qrCode}`);
+      }
+      
+      // Check for missing hardware ID (backward compatibility)
       if (!bike.hardwareId) {
-        updateData.hardwareId = generateHardwareId();
+        updateData.hardwareId = await generateHardwareId();
+        console.log(`Generated hardware ID for bike ${bike.id}: ${updateData.hardwareId}`);
       }
       
       // Check for missing isLocked field - add it based on isAvailable
@@ -227,14 +377,38 @@ export const updateBikesWithHardwareIds = async () => {
         console.log(`Adding missing isLocked field to bike ${bike.id}, setting to ${updateData.isLocked}`);
       }
       
-      // Only update if we have changes
-      if (Object.keys(updateData).length > 0) {
-        updates.push(updateDoc(bikeRef, updateData));
+      // Add missing battery level
+      if (bike.batteryLevel === undefined) {
+        updateData.batteryLevel = 100;
+      }
+      
+      // Add missing rating
+      if (bike.rating === undefined) {
+        updateData.rating = 0;
+      }
+      
+      // Add missing total rides counter
+      if (bike.totalRides === undefined) {
+        updateData.totalRides = 0;
+      }
+      
+      // Add last updated timestamp
+      updateData.lastUpdated = new Date();
+      
+      // Only update if there are fields to update
+      if (Object.keys(updateData).length > 1) { // > 1 because lastUpdated is always added
+        await updateDoc(bikeRef, updateData);
+        updates.push({
+          id: bike.id,
+          updates: updateData
+        });
+        console.log(`Updated bike ${bike.id} with:`, updateData);
       }
     }
     
-    await Promise.all(updates);
-    return await getBikes();
+    console.log(`Updated ${updates.length} bikes with missing fields`);
+    return updates;
+    
   } catch (error) {
     console.error('Error updating bikes with hardware IDs:', error);
     throw error;
@@ -493,6 +667,82 @@ export const updateBikeStatus = async (bikeId, statusUpdate) => {
   } catch (error) {
     console.error('Error updating bike status:', error);
     throw error;
+  }
+};
+
+// QR Code and Hardware ID validation utilities
+export const validateBikeIdentifiers = async (qrCode, hardwareId, excludeBikeId = null) => {
+  const errors = [];
+  
+  // Ensure at least one identifier exists
+  if (!qrCode && !hardwareId) {
+    errors.push('At least one identifier (QR Code or Hardware ID) is required');
+    return { isValid: false, errors };
+  }
+  
+  // Validate QR code format and uniqueness
+  if (qrCode) {
+    const trimmedQRCode = qrCode.trim();
+    
+    // Check format (alphanumeric, 8-16 characters)
+    if (!/^[A-Za-z0-9]{8,16}$/.test(trimmedQRCode)) {
+      errors.push('QR Code must be 8-16 alphanumeric characters');
+    }
+    
+    // Check uniqueness
+    const isUnique = await isQRCodeUnique(trimmedQRCode, excludeBikeId);
+    if (!isUnique) {
+      errors.push(`QR code "${trimmedQRCode}" is already in use by another bike`);
+    }
+  }
+  
+  // Validate hardware ID format and uniqueness
+  if (hardwareId) {
+    const trimmedHardwareId = hardwareId.trim();
+    
+    // Check format (alphanumeric, 6-20 characters)
+    if (!/^[A-Za-z0-9]{6,20}$/.test(trimmedHardwareId)) {
+      errors.push('Hardware ID must be 6-20 alphanumeric characters');
+    }
+    
+    // Check uniqueness
+    const isUnique = await isQRCodeUnique(trimmedHardwareId, excludeBikeId);
+    if (!isUnique) {
+      errors.push(`Hardware ID "${trimmedHardwareId}" is already in use by another bike`);
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors,
+    normalizedQRCode: qrCode ? qrCode.trim() : null,
+    normalizedHardwareId: hardwareId ? hardwareId.trim() : null
+  };
+};
+
+// Enhanced uniqueness check that can exclude a specific bike ID
+export const isQRCodeUnique = async (identifier, excludeBikeId = null) => {
+  try {
+    // Check in qrCode field
+    const qrCodeQuery = query(
+      collection(db, "bikes"),
+      where("qrCode", "==", identifier),
+      ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
+    );
+    const qrCodeSnapshot = await getDocs(qrCodeQuery);
+    
+    // Check in hardwareId field for backward compatibility
+    const hardwareIdQuery = query(
+      collection(db, "bikes"),
+      where("hardwareId", "==", identifier),
+      ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
+    );
+    const hardwareIdSnapshot = await getDocs(hardwareIdQuery);
+    
+    return qrCodeSnapshot.empty && hardwareIdSnapshot.empty;
+  } catch (error) {
+    console.error('Error checking identifier uniqueness:', error);
+    return false; // Assume not unique to be safe
   }
 };
 

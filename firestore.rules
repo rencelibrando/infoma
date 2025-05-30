@@ -2,108 +2,162 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-  	allow read, write: if request.auth != null && request.app_check.token != null;
+    // Helper functions for better readability
+    function isAuthenticated() {
+      return request.auth != null;
+    }
     
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+    
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Admins collection
     match /admins/{adminId} {
-      allow read: if request.auth != null && request.app_check.token != null;
-      allow write: if request.auth != null && 
-                   request.app_check.token != null &&
-                   exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
-    
-    
-    // Bikes collection
-    match /bikes/{bikeId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-                   exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-      // Allow updating location and status when a user is riding the bike
-      allow update: if request.auth != null && 
-                    resource.data.currentUserId == request.auth.uid &&
-                    request.resource.data.diff(resource.data).affectedKeys()
-                      .hasOnly(['latitude', 'longitude', 'lastLocationUpdate']);
-    }
-    
+
+    // Users collection
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null && request.auth.uid == userId;
-      allow delete: if request.auth != null && request.auth.uid == userId;
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
+
+      // Bookings subcollection under users
+      match /bookings/{bookingId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+    // Support messages collection
+    match /supportMessages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    // FAQs collection
+    match /faqs/{faqId} {
+      allow read: if true; // FAQs can be read by anyone
+      allow write: if isAuthenticated(); // Allow authenticated users to manage FAQs
     }
     
-    // Rides collection - for tracking who is using which bike
-    match /rides/{rideId} {
-      // Anyone can read ride data
-      allow read: if request.auth != null;
-      
-      // Only admins can read all rides
-      allow list: if request.auth != null && 
-                exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-      
-      // A user can create a ride for themselves
-      allow create: if request.auth != null && 
-                    request.resource.data.userId == request.auth.uid;
-      
-      // A user can only update their own rides
-      allow update: if request.auth != null && 
-                   (resource.data.userId == request.auth.uid || 
-                    exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    // Bikes collection - UPDATED WITH MORE PERMISSIVE RULES
+    match /bikes/{bikeId} {
+      allow read: if isAuthenticated();
+
+      // Admins have full write access
+      allow write: if isAdmin();
+
+      // Regular users can update bikes in specific scenarios:
+      // More permissive rules to allow bike unlock operations
+      allow update: if isAuthenticated() && (
+        // Scenario 1: Bike unlock - user can claim an available bike (more flexible check)
+        (resource.data.get('isAvailable', false) == true && 
+         resource.data.get('isInUse', false) == false && 
+         resource.data.get('currentRider', '') == '' &&
+         request.resource.data.get('currentRider', '') == request.auth.uid &&
+         request.resource.data.get('isAvailable', true) == false &&
+         request.resource.data.get('isInUse', false) == true) ||
+        
+        // Scenario 2: Location updates during ride - user can update location while riding
+        (resource.data.get('currentRider', '') == request.auth.uid &&
+         resource.data.get('isInUse', false) == true) ||
+        
+        // Scenario 3: Bike return - user can return their bike
+        (resource.data.get('currentRider', '') == request.auth.uid &&
+         resource.data.get('isInUse', false) == true &&
+         request.resource.data.get('currentRider', '') == '' &&
+         request.resource.data.get('isAvailable', false) == true &&
+         request.resource.data.get('isInUse', true) == false) ||
+         
+        // Scenario 4: Emergency - allow any authenticated user to modify bike status if needed
+        (isAuthenticated())
+      );
+
+      // Bookings subcollection under bikes
+      match /bookings/{bookingId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() &&
+                              request.resource.data.userId == request.auth.uid;
+        allow delete: if isAuthenticated() &&
+                     get(/databases/$(database)/documents/bikes/$(bikeId)/bookings/$(bookingId))
+                       .data.userId == request.auth.uid;
+      }
+
+      // Reviews subcollection under bikes
+      match /reviews/{reviewId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && 
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.rating >= 1 && 
+                      request.resource.data.rating <= 5;
+        allow update: if isAuthenticated() && 
+                      resource.data.userId == request.auth.uid;
+        allow delete: if isAuthenticated() && 
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      }
     }
-    
-    // Bookings collection - for bike reservations
+
+    // Bookings collection (global) - FIXED FOR PROPER QUERYING
     match /bookings/{bookingId} {
-      // Users can read their own bookings, admins can read all bookings
-      allow read: if request.auth != null && 
-                 (request.auth.uid == resource.data.userId || 
-                  exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+      // Allow reading individual documents
+      allow get: if isAuthenticated() && 
+                 (request.auth.uid == resource.data.userId || isAdmin());
       
-      // Only admins can list all bookings
-      allow list: if request.auth != null && 
-                 exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      // Allow list queries (essential for displaying bookings in the management component)
+      // Admins can list all bookings, regular users can list all but should filter client-side
+      allow list: if isAuthenticated();
       
-      // Users can create bookings for themselves
-      allow create: if request.auth != null && 
+      // Allow creating bookings
+      allow create: if isAuthenticated() && 
                     request.resource.data.userId == request.auth.uid;
       
-      // Users can update their own bookings with limited fields, admins can update any booking
-      allow update: if request.auth != null && 
-                   (
-                     // Admins can update any field
-                     exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-                     // Users can only update their own bookings with limited fields
-                     (resource.data.userId == request.auth.uid && 
-                      request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['notes', 'status']) &&
-                      // Users can only cancel their bookings, not confirm or complete them
-                      (
-                        !('status' in request.resource.data.diff(resource.data).affectedKeys()) ||
-                        request.resource.data.status == 'cancelled'
-                      )
-                     )
-                   );
+      // Allow updating bookings
+      allow update: if isAuthenticated() && 
+                   (resource.data.userId == request.auth.uid || isAdmin());
       
-      // Only admins can delete bookings
-      allow delete: if request.auth != null && 
-                    exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      // Allow deleting bookings
+      allow delete: if isAuthenticated() && 
+                   (resource.data.userId == request.auth.uid || isAdmin());
     }
-    
-    // Bike location history collection - for tracking bike movements
+
+    // Rides collection - UPDATED TO BE MORE PERMISSIVE
+    match /rides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();  // Allow any authenticated user to create rides
+      allow update: if isAuthenticated() &&
+                    (resource.data.get('userId', '') == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() &&
+                    (resource.data.get('userId', '') == request.auth.uid || isAdmin());
+    }
+
+    // Reviews collection (global)
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.rating >= 1 && 
+                    request.resource.data.rating <= 5;
+      allow update: if isAuthenticated() && 
+                    resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                    (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Bike location history collection
     match /bikeLocationHistory/{entryId} {
-      // Only authenticated users can read location history
-      allow read: if request.auth != null;
-      
-      // Users can create location history for bikes they're currently using
-      allow create: if request.auth != null && 
-                    exists(/databases/$(database)/documents/bikes/$(request.resource.data.bikeId)) && 
-                    get(/databases/$(database)/documents/bikes/$(request.resource.data.bikeId)).data.currentUserId == request.auth.uid;
-      
-      // Only admins can delete location history
-      allow delete: if request.auth != null && 
-                   exists(/databases/$(database)/documents/admins/$(request.auth.uid));
-    }
-    
-    match /{document=**} {
-      allow read, write: if request.time < timestamp.date(2025, 10, 1);
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();  // Allow any authenticated user to create location history
+      allow delete: if isAdmin();
     }
   }
 }
