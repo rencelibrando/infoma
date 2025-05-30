@@ -27,6 +27,8 @@ import com.example.bikerental.utils.logE
 import com.example.bikerental.utils.logW
 import javax.inject.Inject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.example.bikerental.utils.PerformanceMonitor
+import com.example.bikerental.utils.NetworkUtils
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
@@ -55,88 +57,217 @@ class AuthViewModel @Inject constructor(
     val bypassVerification: StateFlow<Boolean> = _bypassVerification
 
     init {
-        // Immediately check auth state to prevent loading indefinitely
-        if (auth.currentUser == null) {
+        // Check current auth state immediately without heavy operations
+        val currentFirebaseUser = auth.currentUser
+        logD("AuthViewModel init - Firebase user: ${currentFirebaseUser?.uid}")
+        
+        if (currentFirebaseUser == null) {
             _authState.value = AuthState.Initial
-            logD("Initialized with no logged in user")
+            logD("Initialized with no logged in user - setting state to Initial")
         } else {
+            // Set loading state briefly, then immediately start background check
             _authState.value = AuthState.Loading
-            // Check if there's a logged in user already
-            viewModelScope.launch(Dispatchers.IO) { // Use IO dispatcher for background work
+            logD("Found existing user (${currentFirebaseUser.uid}), checking authentication status...")
+            
+            // Start performance tracking for auth initialization
+            PerformanceMonitor.startTimer("auth_initialization")
+            
+            // Prefetch user from local storage to use as fallback
+            val userId = currentFirebaseUser.uid
+            viewModelScope.launch(Dispatchers.IO) {
                 try {
-                    val firebaseUser = auth.currentUser
-                    if (firebaseUser == null) {
-                        _authState.value = AuthState.Initial
-                        return@launch
+                    // Try to load user from local storage first
+                    val cachedUser = loadUserFromCache(userId)
+                    if (cachedUser != null) {
+                        // Update UI with cached user data while we load from network
+                        withContext(Dispatchers.Main) {
+                            _currentUser.value = cachedUser
+                            _authState.value = AuthState.Authenticated(cachedUser)
+                            logD("Using cached user data while refreshing from network")
+                        }
                     }
                     
-                    // Reload user to get latest information
-                    try {
-                        firebaseUser.reload().await()
-                    } catch (e: Exception) {
-                        logW("Failed to reload user: ${e.message}")
-                        // Continue with existing user data
+                    // Attempt to refresh user data from network with longer timeout
+                    kotlinx.coroutines.withTimeout(10000) { // 10 second timeout
+                        initializeExistingUser(currentFirebaseUser)
                     }
+                    PerformanceMonitor.endTimer("auth_initialization")
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    logW("Authentication initialization timed out after 10s")
+                    PerformanceMonitor.endTimer("auth_initialization")
                     
-                    val userDoc = db.collection("users").document(firebaseUser.uid).get().await()
-
-                    if (userDoc.exists()) {
-                        val user = userDoc.toObject(User::class.java)
-                        if (user != null) { // Check parsing success
-                            _currentUser.value = user
-                            
-                            // Check email verification 
-                            if (!firebaseUser.isEmailVerified && !user.isEmailVerified) {
-                                _authState.value = AuthState.NeedsEmailVerification(user)
-                                _emailVerified.value = false
-                                logD("User needs email verification: ${user.id}")
-                            } else {
-                                _authState.value = AuthState.Authenticated(user)
-                                _emailVerified.value = true
-                                logD("User authenticated: ${user.id}")
-                            }
+                    // Don't reset to Initial state on timeout if we have cached data
+                    withContext(Dispatchers.Main) {
+                        if (_currentUser.value == null && _authState.value != AuthState.Authenticated(null)) {
+                            // Only reset to Initial if we couldn't load from cache
+                            _authState.value = AuthState.Initial
+                            logE("Setting auth state to Initial due to timeout and no cached data")
                         } else {
-                            logE("Failed to parse existing user document: ${firebaseUser.uid}")
-                            _authState.value = AuthState.Error("Failed to load user profile.")
-                        }
-                    } else {
-                        logW("User auth exists but no user doc in Firestore. Creating...")
-                        // Create a new user document with data from Firebase Auth
-                        val newUser = User(
-                            id = firebaseUser.uid,
-                            email = firebaseUser.email ?: "",
-                            fullName = firebaseUser.displayName ?: "",
-                            isEmailVerified = firebaseUser.isEmailVerified, // Use Firebase Auth status initially
-                            createdAt = System.currentTimeMillis()
-                        )
-
-                        // Save to Firestore in background
-                        try {
-                            db.collection("users").document(firebaseUser.uid)
-                                .set(newUser)
-                                .await()
-                            logD("Created new user document: ${newUser.id}")
-                        } catch (e: Exception) {
-                            logE("Failed to create user document: ${e.message}")
-                            // Continue anyway since we created the user locally
-                        }
-
-                        _currentUser.value = newUser
-                        if (firebaseUser.isEmailVerified) {
-                            _authState.value = AuthState.Authenticated(newUser)
-                            _emailVerified.value = true
-                        } else {
-                            _authState.value = AuthState.NeedsEmailVerification(newUser)
-                            _emailVerified.value = false
+                            logW("Auth refresh timed out, but using cached user data")
                         }
                     }
                 } catch (e: Exception) {
-                    logE("Error during initialization", e)
-                    _authState.value = AuthState.Error("Failed to initialize: ${e.message}")
-                    // Ensure we don't stay in Loading state on error
-                    signOut()
+                    logE("Error during user initialization", e)
+                    // Similar fallback logic for other exceptions
+                    withContext(Dispatchers.Main) {
+                        if (_currentUser.value == null && _authState.value != AuthState.Authenticated(null)) {
+                            _authState.value = AuthState.Initial
+                            logE("Setting auth state to Initial due to error: ${e.message}")
+                        }
+                    }
+                    PerformanceMonitor.endTimer("auth_initialization")
                 }
             }
+        }
+    }
+    
+    private suspend fun initializeExistingUser(firebaseUser: com.google.firebase.auth.FirebaseUser) {
+        try {
+            logD("initializeExistingUser: Starting for user ${firebaseUser.uid}")
+            
+            // Quick reload with a single retry for faster startup
+            try {
+                logD("initializeExistingUser: Reloading Firebase user...")
+                NetworkUtils.withRetry(
+                    maxAttempts = 2,
+                    initialDelayMs = 500,
+                    maxDelayMs = 1000
+                ) {
+                    firebaseUser.reload().await()
+                }
+                logD("initializeExistingUser: Firebase user reloaded successfully")
+            } catch (e: Exception) {
+                logW("Failed to reload user, continuing with cached data: ${e.message}")
+            }
+            
+            // Check if user document exists
+            logD("initializeExistingUser: Fetching user document from Firestore...")
+            val userDoc = try {
+                NetworkUtils.withRetry(
+                    maxAttempts = 2,
+                    initialDelayMs = 500,
+                    maxDelayMs = 1000
+                ) {
+                    db.collection("users").document(firebaseUser.uid).get().await()
+                }
+            } catch (e: Exception) {
+                logW("Failed to fetch user document, checking local cache: ${e.message}")
+                
+                // Try fetching from cache as fallback
+                try {
+                    db.collection("users").document(firebaseUser.uid)
+                        .get(com.google.firebase.firestore.Source.CACHE).await()
+                } catch (innerE: Exception) {
+                    logE("Failed to fetch from cache too: ${innerE.message}")
+                    null
+                }
+            }
+            
+            if (userDoc != null && userDoc.exists()) {
+                logD("initializeExistingUser: User document exists: ${userDoc.exists()}")
+                val user = userDoc.toObject(User::class.java)
+                logD("initializeExistingUser: Parsed user data: ${user?.id}")
+                
+                if (user != null) {
+                    withContext(Dispatchers.Main) {
+                        _currentUser.value = user
+                        
+                        // Simplified email verification check
+                        val isEmailVerified = firebaseUser.isEmailVerified || 
+                                            firebaseUser.providerData.any { it.providerId == GoogleAuthProvider.PROVIDER_ID }
+                        
+                        logD("initializeExistingUser: Email verified - Firebase: ${firebaseUser.isEmailVerified}, Google: ${firebaseUser.providerData.any { it.providerId == GoogleAuthProvider.PROVIDER_ID }}, User doc: ${user.isEmailVerified}")
+                        
+                        if (isEmailVerified || user.isEmailVerified) {
+                            _authState.value = AuthState.Authenticated(user)
+                            _emailVerified.value = true
+                            logD("User authenticated successfully: ${user.id}")
+                        } else {
+                            _authState.value = AuthState.NeedsEmailVerification(user)
+                            _emailVerified.value = false
+                            logD("User needs email verification: ${user.id}")
+                        }
+                    }
+                } else {
+                    logE("Failed to parse existing user document: ${firebaseUser.uid}")
+                    withContext(Dispatchers.Main) {
+                        _authState.value = AuthState.Initial
+                        logE("Setting auth state to Initial - failed to parse user document")
+                    }
+                }
+            } else {
+                logD("initializeExistingUser: User document doesn't exist, creating new one...")
+                
+                // Create user document quickly without blocking
+                val newUser = User(
+                    id = firebaseUser.uid,
+                    email = firebaseUser.email ?: "",
+                    fullName = firebaseUser.displayName ?: "",
+                    isEmailVerified = firebaseUser.isEmailVerified,
+                    createdAt = System.currentTimeMillis()
+                )
+
+                logD("initializeExistingUser: Created new user object: ${newUser.id}")
+
+                // Save to Firestore in background (non-blocking)
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        NetworkUtils.withRetry {
+                            db.collection("users").document(firebaseUser.uid).set(newUser).await()
+                        }
+                        logD("Created new user document in Firestore: ${newUser.id}")
+                    } catch (e: Exception) {
+                        logE("Failed to create user document: ${e.message}")
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    _currentUser.value = newUser
+                    if (firebaseUser.isEmailVerified) {
+                        _authState.value = AuthState.Authenticated(newUser)
+                        _emailVerified.value = true
+                        logD("New user authenticated: ${newUser.id}")
+                    } else {
+                        _authState.value = AuthState.NeedsEmailVerification(newUser)
+                        _emailVerified.value = false
+                        logD("New user needs email verification: ${newUser.id}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logE("Error during user initialization", e)
+            withContext(Dispatchers.Main) {
+                // Only reset auth state if we don't have a currentUser already set
+                if (_currentUser.value == null) {
+                    _authState.value = AuthState.Initial
+                    logE("Setting auth state to Initial due to error in initializeExistingUser: ${e.message}")
+                } else {
+                    logW("Keeping existing user state despite initialization error")
+                }
+            }
+        }
+    }
+
+    /**
+     * Loads user data from local cache if available
+     */
+    private suspend fun loadUserFromCache(userId: String): User? {
+        return try {
+            // Check if we have a locally cached user document
+            val userDoc = db.collection("users").document(userId).get(
+                com.google.firebase.firestore.Source.CACHE
+            ).await()
+            
+            if (userDoc.exists()) {
+                logD("Successfully loaded user from cache: $userId")
+                userDoc.toObject(User::class.java)
+            } else {
+                logD("No cached user data found for: $userId")
+                null
+            }
+        } catch (e: Exception) {
+            logE("Failed to load user from cache: ${e.message}")
+            null
         }
     }
 
@@ -275,37 +406,32 @@ class AuthViewModel @Inject constructor(
      * Updates local state and Firestore if necessary.
      */
     fun checkEmailVerification() {
-        viewModelScope.launch(Dispatchers.IO) { // Use IO dispatcher for background work
+        viewModelScope.launch(Dispatchers.IO) {
             val firebaseUser = auth.currentUser ?: run {
                 logD("checkEmailVerification: No user logged in.")
-                _authState.value = AuthState.Initial
+                withContext(Dispatchers.Main) {
+                    _authState.value = AuthState.Initial
+                }
                 return@launch
             }
             
             try {
                 logD("Checking email verification for ${firebaseUser.uid}")
-                // Reload user in background to get latest status
-                try {
-                    firebaseUser.reload().await() 
-                } catch (e: Exception) {
-                    logW("Failed to reload user: ${e.message}")
-                    // Continue with existing user data
-                }
                 
-                val isVerified = firebaseUser.isEmailVerified
-                logD("Firebase Auth email verified status: $isVerified")
-
-                // Check if this is a Google user (should always be treated as verified)
+                // Quick verification check without reloading for better performance
+                val isEmailVerified = firebaseUser.isEmailVerified
                 val isGoogleUser = firebaseUser.providerData.any {
                     it.providerId == GoogleAuthProvider.PROVIDER_ID
                 }
-                val effectiveVerificationStatus = isGoogleUser || isVerified
+                val effectiveVerificationStatus = isGoogleUser || isEmailVerified
+
+                logD("Email verification status: Firebase=$isEmailVerified, Google=$isGoogleUser, Effective=$effectiveVerificationStatus")
 
                 // Get our stored user
                 val currentUser = _currentUser.value
                 
                 if (currentUser != null) {
-                    // If the status changed, update Firestore
+                    // Only update if status actually changed to reduce Firestore writes
                     if (currentUser.isEmailVerified != effectiveVerificationStatus) {
                         try {
                             // Update Firestore with new status
@@ -315,33 +441,37 @@ class AuthViewModel @Inject constructor(
                                 .await()
                             
                             logD("Updated email verification status in Firestore: $effectiveVerificationStatus")
-                            
-                            // Update local state with the new model
-                            val updatedUser = currentUser.copy(isEmailVerified = effectiveVerificationStatus)
+                        } catch (e: Exception) {
+                            logE("Failed to update email verification status in Firestore", e)
+                            // Continue with local update even if Firestore fails
+                        }
+                        
+                        // Update local state
+                        val updatedUser = currentUser.copy(isEmailVerified = effectiveVerificationStatus)
+                        withContext(Dispatchers.Main) {
                             _currentUser.value = updatedUser
+                            _emailVerified.value = effectiveVerificationStatus
                             
-                            // Update auth state if needed
                             if (effectiveVerificationStatus) {
                                 _authState.value = AuthState.Authenticated(updatedUser)
                             } else {
                                 _authState.value = AuthState.NeedsEmailVerification(updatedUser)
                             }
-                            _emailVerified.value = effectiveVerificationStatus
-                        } catch (e: Exception) {
-                            logE("Failed to update email verification status", e)
                         }
                     } else {
-                        // Status didn't change, but make sure local state is consistent
-                        _emailVerified.value = effectiveVerificationStatus
-                        if (effectiveVerificationStatus) {
-                            _authState.value = AuthState.Authenticated(currentUser)
-                        } else {
-                            _authState.value = AuthState.NeedsEmailVerification(currentUser)
+                        // Status didn't change, just ensure local state is consistent
+                        withContext(Dispatchers.Main) {
+                            _emailVerified.value = effectiveVerificationStatus
+                            if (effectiveVerificationStatus) {
+                                _authState.value = AuthState.Authenticated(currentUser)
+                            } else {
+                                _authState.value = AuthState.NeedsEmailVerification(currentUser)
+                            }
                         }
                     }
                 } else {
                     logW("Current user is null, but Firebase user exists. Reloading user data...")
-                    // This is a rare case where we have a Firebase user but no local user data
+                    // Fallback: reload user data
                     try {
                         val userDoc = db.collection("users")
                             .document(firebaseUser.uid).get().await()
@@ -349,19 +479,22 @@ class AuthViewModel @Inject constructor(
                         if (userDoc.exists()) {
                             val user = userDoc.toObject(User::class.java)
                             if (user != null) {
-                                _currentUser.value = user
-                                if (effectiveVerificationStatus || user.isEmailVerified) {
-                                    _authState.value = AuthState.Authenticated(user)
-                                    _emailVerified.value = true
-                                } else {
-                                    _authState.value = AuthState.NeedsEmailVerification(user)
-                                    _emailVerified.value = false
+                                withContext(Dispatchers.Main) {
+                                    _currentUser.value = user
+                                    _emailVerified.value = effectiveVerificationStatus
+                                    if (effectiveVerificationStatus || user.isEmailVerified) {
+                                        _authState.value = AuthState.Authenticated(user)
+                                    } else {
+                                        _authState.value = AuthState.NeedsEmailVerification(user)
+                                    }
                                 }
                             }
                         }
                     } catch (e: Exception) {
                         logE("Failed to reload user data", e)
-                        _authState.value = AuthState.Error("Failed to load user profile")
+                        withContext(Dispatchers.Main) {
+                            _authState.value = AuthState.Error("Failed to load user profile")
+                        }
                     }
                 }
             } catch (e: Exception) {

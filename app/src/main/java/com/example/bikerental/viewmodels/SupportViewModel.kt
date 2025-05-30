@@ -126,4 +126,30 @@ class SupportViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
+    
+    /**
+     * Deletes a user support message
+     */
+    fun deleteUserMessage(messageId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            
+            supportRepository.deleteSupportMessage(messageId)
+                .onSuccess {
+                    // Update UI state by removing the deleted message
+                    val updatedMessages = _uiState.value.userMessages.filter { it.id != messageId }
+                    _uiState.update { it.copy(
+                        userMessages = updatedMessages,
+                        isLoading = false,
+                        errorMessage = null
+                    ) }
+                }
+                .onFailure { error ->
+                    _uiState.update { it.copy(
+                        isLoading = false,
+                        errorMessage = "Failed to delete message: ${error.message}"
+                    ) }
+                }
+        }
+    }
 } 

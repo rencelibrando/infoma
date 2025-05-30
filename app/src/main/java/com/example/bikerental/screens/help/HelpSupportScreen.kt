@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.ripple.rememberRipple
@@ -261,7 +262,10 @@ fun HelpSupportScreen(
                                 items(uiState.userMessages) { message ->
                                     MessageItem(
                                         message = message,
-                                        accentColor = accentColor
+                                        accentColor = accentColor,
+                                        onDeleteClick = { messageId ->
+                                            viewModel.deleteUserMessage(messageId)
+                                        }
                                     )
                                 }
                                 
@@ -512,13 +516,39 @@ private fun ContactSection(
 @Composable
 fun MessageItem(
     message: SupportMessage,
-    accentColor: Color
+    accentColor: Color,
+    onDeleteClick: (String) -> Unit = {}
 ) {
     val dateFormatted = message.dateCreated?.toDate()?.let {
         java.text.SimpleDateFormat("MMM d, yyyy HH:mm", java.util.Locale.getDefault()).format(it)
     } ?: "Unknown date"
     
     var expanded by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    // Delete confirmation dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Message") },
+            text = { Text("Are you sure you want to delete this support message?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        message.id?.let { onDeleteClick(it) }
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("Delete", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
     
     Card(
         modifier = Modifier
@@ -535,7 +565,7 @@ fun MessageItem(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            // Message header
+            // Message header with delete option
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -544,11 +574,27 @@ fun MessageItem(
                 Text(
                     text = message.subject,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
                 )
                 
-                // Status badge
-                StatusBadge(status = message.status, accentColor = accentColor)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Status badge
+                    StatusBadge(status = message.status, accentColor = accentColor)
+                    
+                    // Delete icon
+                    IconButton(
+                        onClick = { showDeleteDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Delete,
+                            contentDescription = "Delete message",
+                            tint = Color.Gray
+                        )
+                    }
+                }
             }
             
             Spacer(modifier = Modifier.height(4.dp))

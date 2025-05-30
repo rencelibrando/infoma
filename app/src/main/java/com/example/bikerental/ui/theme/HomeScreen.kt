@@ -155,8 +155,8 @@ fun HomeScreen(
                                 .background(MaterialTheme.colorScheme.background)
                         ) {
                             when (selectedTab) {
-                                0 -> MapTab(fusedLocationProviderClient)
-                                1 -> BikesTab(fusedLocationProviderClient)
+                                0 -> MapTab()
+                                1 -> BikesTab(navController = navController, fusedLocationProviderClient = fusedLocationProviderClient)
                                 2 -> BookingsTab()
                                 3 -> ProfileScreen(navController, viewModel)
                                 else -> RideHistoryTab()

@@ -45,9 +45,7 @@ fun NavGraphBuilder.setUpHomeNavGraph(
     }
     
     composable(route = "map") { 
-        MapTab(
-            fusedLocationProviderClient = fusedLocationProviderClient
-        )
+        MapTab()
     }
     
     composable(route = "history") { 

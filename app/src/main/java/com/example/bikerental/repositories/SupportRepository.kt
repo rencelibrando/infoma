@@ -84,4 +84,32 @@ class SupportRepository @Inject constructor(
             Result.failure(e)
         }
     }
+    
+    /**
+     * Deletes a support message by its ID
+     */
+    suspend fun deleteSupportMessage(messageId: String): Result<Unit> {
+        return try {
+            val currentUser = auth.currentUser
+                ?: return Result.failure(Exception("User not authenticated"))
+                
+            // First, verify the message belongs to the current user
+            val messageDoc = supportMessagesCollection.document(messageId).get().await()
+            val message = messageDoc.toObject(SupportMessage::class.java)
+            
+            if (message == null) {
+                return Result.failure(Exception("Message not found"))
+            }
+            
+            if (message.userId != currentUser.uid) {
+                return Result.failure(Exception("You don't have permission to delete this message"))
+            }
+            
+            // Delete the message
+            supportMessagesCollection.document(messageId).delete().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 } 

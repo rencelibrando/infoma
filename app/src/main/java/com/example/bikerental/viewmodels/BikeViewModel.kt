@@ -11,6 +11,8 @@ import com.example.bikerental.models.Booking
 import com.example.bikerental.models.BookingStatus
 import com.example.bikerental.models.Review
 import com.example.bikerental.models.TrackableBike
+import com.example.bikerental.utils.QRCodeHelper
+import com.example.bikerental.utils.ErrorHandler
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
@@ -111,6 +113,27 @@ class BikeViewModel : ViewModel() {
     
     // Synchronization lock for booking operations
     private val bookingsLock = Any()
+    
+    // State for QR scanning and bike unlocking
+    private val _isUnlockingBike = MutableStateFlow(false)
+    val isUnlockingBike: StateFlow<Boolean> = _isUnlockingBike
+    
+    private val _unlockError = MutableStateFlow<String?>(null)
+    val unlockError: StateFlow<String?> = _unlockError
+    
+    private val _unlockSuccess = MutableStateFlow(false)
+    val unlockSuccess: StateFlow<Boolean> = _unlockSuccess
+    
+    // QR Scanner state
+    private val _showQRScanner = MutableStateFlow(false)
+    val showQRScanner: StateFlow<Boolean> = _showQRScanner
+    
+    private val _qrScanningError = MutableStateFlow<String?>(null)
+    val qrScanningError: StateFlow<String?> = _qrScanningError
+    
+    // State for active rides (admin tracking)
+    private val _activeRides = MutableStateFlow<List<BikeRide>>(emptyList())
+    val activeRides: StateFlow<List<BikeRide>> = _activeRides
     
     init {
         fetchAllBikes()
@@ -286,8 +309,8 @@ class BikeViewModel : ViewModel() {
                         latitude = location.latitude,
                         longitude = location.longitude,
                         description = description,
-                        isAvailable = true,
-                        isInUse = false
+                        _isAvailable = true,
+                        _isInUse = false
                     )
                     
                     // 3. Save to Firestore
@@ -405,6 +428,299 @@ class BikeViewModel : ViewModel() {
             }
             bikeLocationListener = null
         }
+    }
+    
+    // OPTIMIZED: Validate QR code and unlock bike - streamlined implementation with improved error handling
+    fun validateQRCodeAndUnlockBike(qrCode: String, userLocation: LatLng) {
+        viewModelScope.launch {
+            try {
+                _isUnlockingBike.value = true
+                _unlockError.value = null
+                _unlockSuccess.value = false
+                
+                Log.d(TAG, "Starting QR code validation for: ${qrCode.take(20)}...")
+                
+                // Validate prerequisites
+                val validationResult = validateRidePrerequisites(qrCode, userLocation)
+                if (!validationResult.isValid) {
+                    _unlockError.value = validationResult.errorMessage
+                    return@launch
+                }
+                
+                val currentUser = validationResult.user!!
+                val bikeIdentifier = validationResult.bikeIdentifier!!
+                
+                // Find and validate bike
+                val targetBike = findAndValidateBike(bikeIdentifier)
+                if (targetBike == null) {
+                    _unlockError.value = "Bike not found. Please try scanning again or contact support."
+                    return@launch
+                }
+                
+                // Validate QR code against specific bike
+                if (!QRCodeHelper.validateQRCodeForBike(qrCode, targetBike.qrCode, targetBike.hardwareId)) {
+                    _unlockError.value = "QR code validation failed. This may not be a valid bike QR code."
+                    return@launch
+                }
+                
+                // Execute bike unlock and ride start
+                val unlockResult = executeRideStart(targetBike, userLocation, currentUser.uid)
+                handleUnlockResult(unlockResult)
+                
+            } catch (e: Exception) {
+                ErrorHandler.logError(TAG, "Error in QR code validation", e)
+                _unlockError.value = ErrorHandler.getErrorMessage(e)
+            } finally {
+                _isUnlockingBike.value = false
+            }
+        }
+    }
+    
+    // OPTIMIZED: Consolidated prerequisite validation
+    private suspend fun validateRidePrerequisites(qrCode: String, userLocation: LatLng): ValidationResult {
+        return withContext(Dispatchers.Default) {
+            when {
+                !QRCodeHelper.isValidQRCodeFormat(qrCode) -> {
+                    ValidationResult(false, "Invalid QR code format. Please scan a valid bike QR code.")
+                }
+                
+                auth.currentUser == null -> {
+                    ValidationResult(false, "User not authenticated")
+                }
+                
+                _activeRide.value != null -> {
+                    ValidationResult(false, "You already have an active ride. Please end your current ride first.")
+                }
+                
+                else -> {
+                    val bikeIdentifier = QRCodeHelper.extractBikeIdentifierFromQRCode(qrCode)
+                    if (bikeIdentifier == null) {
+                        ValidationResult(false, "Invalid QR code format. Could not extract bike identifier.")
+                    } else {
+                        ValidationResult(true, null, auth.currentUser, bikeIdentifier)
+                    }
+                }
+            }
+        }
+    }
+    
+    // OPTIMIZED: Enhanced bike search with better error handling
+    private suspend fun findAndValidateBike(identifier: String): Bike? {
+        return try {
+            withContext(Dispatchers.IO) {
+                Log.d(TAG, "Searching for bike with identifier: '$identifier'")
+                
+                // Try primary qrCode field first
+                var querySnapshot = firestore.collection("bikes")
+                    .whereEqualTo("qrCode", identifier)
+                    .limit(1)
+                    .get()
+                    .await()
+                
+                // Fallback to hardwareId for backward compatibility
+                if (querySnapshot.documents.isEmpty()) {
+                    querySnapshot = firestore.collection("bikes")
+                        .whereEqualTo("hardwareId", identifier)
+                        .limit(1)
+                        .get()
+                        .await()
+                }
+                
+                if (querySnapshot.documents.isNotEmpty()) {
+                    val document = querySnapshot.documents[0]
+                    val bike = document.toObject(Bike::class.java)?.copy(id = document.id)
+                    Log.d(TAG, "Found bike: ${bike?.id} - Available: ${bike?.isAvailable}, InUse: ${bike?.isInUse}")
+                    bike
+                } else {
+                    Log.w(TAG, "No bike found with identifier: '$identifier'")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error searching for bike", e)
+            null
+        }
+    }
+    
+    // OPTIMIZED: Streamlined ride start execution with atomic operations
+    private suspend fun executeRideStart(bike: Bike, userLocation: LatLng, userId: String): UnlockResult {
+        return try {
+            withContext(Dispatchers.IO) {
+                Log.d(TAG, "Starting atomic ride creation for bike: ${bike.id}")
+                
+                val bikeRef = firestore.collection("bikes").document(bike.id)
+                
+                // Execute atomic transaction
+                val result = firestore.runTransaction { transaction ->
+                    val bikeSnapshot = transaction.get(bikeRef)
+                    val currentBike = bikeSnapshot.toObject(Bike::class.java)
+                        ?: return@runTransaction UnlockResult(UnlockStatus.UNKNOWN_ERROR, "Failed to parse bike data")
+                    
+                    // Validate bike availability
+                    when {
+                        !currentBike.isAvailable -> return@runTransaction UnlockResult(UnlockStatus.BIKE_NOT_AVAILABLE)
+                        currentBike.isInUse -> return@runTransaction UnlockResult(UnlockStatus.BIKE_IN_USE)
+                        !currentBike.isLocked -> return@runTransaction UnlockResult(UnlockStatus.BIKE_NOT_LOCKED)
+                        currentBike.currentRider.isNotBlank() -> return@runTransaction UnlockResult(UnlockStatus.BIKE_IN_USE)
+                    }
+                    
+                    // Update bike status atomically
+                    val updateData = mapOf(
+                        "isAvailable" to false,
+                        "isInUse" to true,
+                        "isLocked" to false,
+                        "currentRider" to userId,
+                        "lastRideStart" to com.google.firebase.Timestamp.now(),
+                        "lastUpdated" to com.google.firebase.Timestamp.now()
+                    )
+                    
+                    transaction.update(bikeRef, updateData)
+                    UnlockResult(UnlockStatus.SUCCESS)
+                }.await()
+                
+                if (result.status == UnlockStatus.SUCCESS) {
+                    // Create ride after successful bike unlock
+                    createRideRecord(bike.id, userLocation, userId)
+                } else {
+                    result
+                }
+            }
+        } catch (e: Exception) {
+            ErrorHandler.logError(TAG, "Error in ride start execution", e)
+            UnlockResult(UnlockStatus.TRANSACTION_FAILED, e.message)
+        }
+    }
+    
+    // OPTIMIZED: Streamlined ride creation with better error recovery
+    private suspend fun createRideRecord(bikeId: String, userLocation: LatLng, userId: String): UnlockResult {
+        return try {
+            val newRideId = UUID.randomUUID().toString()
+            
+            val startLocation = BikeLocation(
+                latitude = userLocation.latitude,
+                longitude = userLocation.longitude,
+                timestamp = System.currentTimeMillis()
+            )
+            
+            val ride = BikeRide(
+                id = newRideId,
+                bikeId = bikeId,
+                userId = userId,
+                startTime = System.currentTimeMillis(),
+                startLocation = startLocation,
+                path = listOf(startLocation),
+                status = "active"
+            )
+            
+            // Save to Realtime Database for active tracking
+            ridesRef.child(newRideId).setValue(ride).await()
+            
+            // Update Realtime Database bike status for consistency
+            val bikeUpdates = mapOf(
+                "isAvailable" to false,
+                "isInUse" to true,
+                "isLocked" to false,
+                "currentRider" to userId,
+                "lastUpdated" to com.google.firebase.database.ServerValue.TIMESTAMP
+            )
+            bikesRef.child(bikeId).updateChildren(bikeUpdates).await()
+            
+            // Update UI state on main thread
+            withContext(Dispatchers.Main) {
+                _activeRide.value = ride
+                startTrackingBike(bikeId)
+            }
+            
+            // Save to Firestore for history (non-blocking)
+            viewModelScope.launch {
+                try {
+                    firestore.collection("rides").document(newRideId).set(ride.toMap()).await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to save ride to Firestore (non-critical): ${e.message}")
+                }
+            }
+            
+            Log.d(TAG, "Ride started successfully with ID: $newRideId")
+            UnlockResult(UnlockStatus.SUCCESS)
+            
+        } catch (e: Exception) {
+            ErrorHandler.logError(TAG, "Error creating ride record", e)
+            // Attempt to revert bike state
+            revertBikeState(bikeId)
+            UnlockResult(UnlockStatus.TRANSACTION_FAILED, e.message)
+        }
+    }
+    
+    // OPTIMIZED: Improved error handling for unlock results
+    private fun handleUnlockResult(result: UnlockResult) {
+        when (result.status) {
+            UnlockStatus.SUCCESS -> {
+                _unlockSuccess.value = true
+                Log.d(TAG, "Bike unlocked and ride started successfully")
+            }
+            UnlockStatus.BIKE_NOT_AVAILABLE -> {
+                _unlockError.value = "This bike is currently unavailable. Please try another bike."
+            }
+            UnlockStatus.BIKE_IN_USE -> {
+                _unlockError.value = "This bike is already in use by another rider."
+            }
+            UnlockStatus.BIKE_NOT_LOCKED -> {
+                _unlockError.value = "This bike is not properly locked. Please contact support."
+            }
+            UnlockStatus.USER_HAS_ACTIVE_RIDE -> {
+                _unlockError.value = "You already have an active ride. Please end your current ride first."
+            }
+            UnlockStatus.TRANSACTION_FAILED -> {
+                _unlockError.value = "Failed to unlock bike due to a technical issue. Please try again."
+            }
+            UnlockStatus.UNKNOWN_ERROR -> {
+                _unlockError.value = result.errorMessage ?: "An unknown error occurred."
+            }
+        }
+    }
+    
+    // OPTIMIZED: Bike state reversion helper
+    private suspend fun revertBikeState(bikeId: String) {
+        try {
+            val revertData = mapOf(
+                "isAvailable" to true,
+                "isInUse" to false,
+                "isLocked" to true,
+                "currentRider" to "",
+                "lastUpdated" to com.google.firebase.Timestamp.now()
+            )
+            firestore.collection("bikes").document(bikeId).update(revertData).await()
+            Log.d(TAG, "Bike state reverted successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to revert bike state", e)
+        }
+    }
+    
+    // Reset unlock states
+    fun resetUnlockStates() {
+        _unlockError.value = null
+        _unlockSuccess.value = false
+        _isUnlockingBike.value = false
+    }
+    
+    // QR Scanner management methods
+    fun showQRScanner() {
+        _showQRScanner.value = true
+        _qrScanningError.value = null
+    }
+    
+    fun hideQRScanner() {
+        _showQRScanner.value = false
+        _qrScanningError.value = null
+    }
+    
+    fun onQRCodeScanned(qrCode: String, userLocation: LatLng) {
+        hideQRScanner()
+        validateQRCodeAndUnlockBike(qrCode, userLocation)
+    }
+    
+    fun resetQRScanningError() {
+        _qrScanningError.value = null
     }
     
     // Start a new bike ride
@@ -683,7 +999,6 @@ class BikeViewModel : ViewModel() {
                 
                 val currentUser = auth.currentUser
                 if (currentUser == null) {
-                    _isLoading.value = false
                     Log.e(TAG, "Review submission failed: User not logged in")
                     onError("You must be logged in to submit a review")
                     return@launch
@@ -755,12 +1070,12 @@ class BikeViewModel : ViewModel() {
                 }
                 _bikes.value = updatedBikes
                 
-                _isLoading.value = false
                 onSuccess()
             } catch (e: Exception) {
                 Log.e(TAG, "Top level error submitting review", e)
-                _isLoading.value = false
                 onError("Failed to submit review: ${e.message ?: "Unknown error"}")
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -834,7 +1149,6 @@ class BikeViewModel : ViewModel() {
                 
                 val currentUser = auth.currentUser
                 if (currentUser == null) {
-                    _isLoading.value = false
                     onError("You must be logged in to delete a review")
                     return@launch
                 }
@@ -906,12 +1220,12 @@ class BikeViewModel : ViewModel() {
                     _bikes.value = updatedBikes
                 }
                 
-                _isLoading.value = false
                 onSuccess()
             } catch (e: Exception) {
                 Log.e(TAG, "Error deleting review", e)
-                _isLoading.value = false
                 onError("Failed to delete review: ${e.message ?: "Unknown error"}")
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -936,7 +1250,6 @@ class BikeViewModel : ViewModel() {
                 
                 val currentUser = auth.currentUser
                 if (currentUser == null) {
-                    _isBookingLoading.value = false
                     Log.e(TAG, "Booking creation failed: User not logged in")
                     onError("You must be logged in to book a bike")
                     return@launch
@@ -947,7 +1260,6 @@ class BikeViewModel : ViewModel() {
                 // Find the bike to get its price
                 val bike = _bikes.value.find { it.id == bikeId }
                 if (bike == null) {
-                    _isBookingLoading.value = false
                     Log.e(TAG, "Booking creation failed: Bike not found")
                     onError("Bike not found")
                     return@launch
@@ -1044,13 +1356,13 @@ class BikeViewModel : ViewModel() {
                     _bikeBookings.value = updatedBookings
                 }
                 
-                _isBookingLoading.value = false
                 Log.d(TAG, "Booking creation completed successfully: ${booking.id}")
                 onSuccess(booking)
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating booking", e)
-                _isBookingLoading.value = false
                 onError("Failed to create booking: ${e.message ?: "Unknown error"}")
+            } finally {
+                _isBookingLoading.value = false
             }
         }
     }
@@ -1174,7 +1486,6 @@ class BikeViewModel : ViewModel() {
                 
                 val currentUser = auth.currentUser
                 if (currentUser == null) {
-                    _isBookingLoading.value = false
                     onError("You must be logged in to cancel a booking")
                     return@launch
                 }
@@ -1182,7 +1493,6 @@ class BikeViewModel : ViewModel() {
                 // Find the booking in the current state
                 val booking = _bikeBookings.value.find { it.id == bookingId }
                 if (booking == null) {
-                    _isBookingLoading.value = false
                     onError("Booking not found")
                     return@launch
                 }
@@ -1210,12 +1520,49 @@ class BikeViewModel : ViewModel() {
                     _bikeBookings.value = updatedBookings
                 }
                 
-                _isBookingLoading.value = false
                 onSuccess()
             } catch (e: Exception) {
                 Log.e(TAG, "Error cancelling booking", e)
-                _isBookingLoading.value = false
                 onError("Failed to cancel booking: ${e.message ?: "Unknown error"}")
+            } finally {
+                _isBookingLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Fetch all active rides for admin tracking
+     */
+    fun fetchActiveRides() {
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "Fetching active rides from Firestore")
+                
+                // Query for active rides from Firestore 
+                val activeRidesSnapshot = withContext(Dispatchers.IO) {
+                    firestore.collection("rides")
+                        .whereEqualTo("isActive", true)
+                        .get()
+                        .await()
+                }
+                
+                val activeRidesList = withContext(Dispatchers.Default) {
+                    activeRidesSnapshot.documents.mapNotNull { doc ->
+                        try {
+                            doc.toObject(BikeRide::class.java)?.copy(id = doc.id)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing active ride data for document ${doc.id}", e)
+                            null
+                        }
+                    }
+                }
+                
+                Log.d(TAG, "Fetched ${activeRidesList.size} active rides")
+                _activeRides.value = activeRidesList
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching active rides", e)
+                _error.value = "Failed to fetch active rides: ${e.message}"
             }
         }
     }
@@ -1241,4 +1588,28 @@ class BikeViewModel : ViewModel() {
             reviewsListener?.remove()
         }
     }
+}
+
+// OPTIMIZED: Data classes for better validation flow
+data class ValidationResult(
+    val isValid: Boolean,
+    val errorMessage: String? = null,
+    val user: com.google.firebase.auth.FirebaseUser? = null,
+    val bikeIdentifier: String? = null
+)
+
+// Existing UnlockResult and UnlockStatus enums
+data class UnlockResult(
+    val status: UnlockStatus,
+    val errorMessage: String? = null
+)
+
+enum class UnlockStatus {
+    SUCCESS,
+    BIKE_NOT_AVAILABLE,
+    BIKE_IN_USE,
+    BIKE_NOT_LOCKED,
+    USER_HAS_ACTIVE_RIDE,
+    TRANSACTION_FAILED,
+    UNKNOWN_ERROR
 } 

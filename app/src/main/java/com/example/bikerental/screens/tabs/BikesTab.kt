@@ -1,5 +1,6 @@
 package com.example.bikerental.screens.tabs
 
+import android.annotation.SuppressLint
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -40,6 +41,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.outlined.Error
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -90,6 +92,9 @@ import com.example.bikerental.components.BookingCalendar
 import com.example.bikerental.components.RatingBar
 import com.example.bikerental.components.ReviewForm
 import com.example.bikerental.components.ReviewItem
+import com.example.bikerental.components.QRScannerDialog
+import com.example.bikerental.components.StartRideDialog
+import com.example.bikerental.components.BikeUnlockDialog
 import com.example.bikerental.models.Bike
 import com.example.bikerental.models.Booking
 import com.example.bikerental.navigation.Screen
@@ -105,6 +110,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -157,6 +163,15 @@ fun BikesTab(
     // Remove bookingBike state - we'll navigate instead
     val isBookingLoading by bikeViewModel.isBookingLoading.collectAsState()
     
+    // QR Scanning state
+    var showStartRideDialog by remember { mutableStateOf(false) }
+    var showQRScanner by remember { mutableStateOf(false) }
+    
+    // Bike unlocking states from ViewModel
+    val isUnlockingBike by bikeViewModel.isUnlockingBike.collectAsState()
+    val unlockError by bikeViewModel.unlockError.collectAsState()
+    val unlockSuccess by bikeViewModel.unlockSuccess.collectAsState()
+    
     // Get location using the IO scope
     LaunchedEffect(fusedLocationProviderClient) {
         locationManager.getLastLocation(
@@ -181,6 +196,19 @@ fun BikesTab(
         }
     }
 
+    // Handle successful bike unlock - auto-navigate or show success
+    LaunchedEffect(unlockSuccess) {
+        if (unlockSuccess) {
+            // Reset states
+            bikeViewModel.resetUnlockStates()
+            showQRScanner = false
+            showStartRideDialog = false
+            
+            // Optionally navigate to map or show success message
+            Toast.makeText(context, "Bike unlocked successfully! Your ride has started.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -197,11 +225,48 @@ fun BikesTab(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                Text(
-                    text = "Available Bikes",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Available Bikes",
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        // Start Ride button
+                        Button(
+                            onClick = { showStartRideDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DarkGreen
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            enabled = !isUnlockingBike
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCodeScanner,
+                                    contentDescription = "Start Ride",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = Color.White
+                                )
+                                Text(
+                                    text = "Start Ride",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
 
             // Content based on loading state
@@ -381,6 +446,45 @@ fun BikesTab(
                     navController?.navigate("editProfile")
                 }
             )
+        }
+    }
+    
+    // Start Ride Dialog
+    StartRideDialog(
+        isVisible = showStartRideDialog,
+        onDismiss = { showStartRideDialog = false },
+        onStartQRScan = { 
+            showStartRideDialog = false
+            showQRScanner = true 
+        }
+    )
+    
+    // QR Scanner Dialog
+    QRScannerDialog(
+        isVisible = showQRScanner,
+        onDismiss = { showQRScanner = false },
+        onQRCodeScanned = { qrCode ->
+            showQRScanner = false
+            fusedLocationProviderClient?.let { locationProvider ->
+                getCurrentLocationAndUnlockBike(locationProvider, qrCode, bikeViewModel)
+            }
+        }
+    )
+    
+    // Show unlock dialog when bike is being unlocked
+    BikeUnlockDialog(
+        isVisible = isUnlockingBike,
+        onDismiss = { 
+            bikeViewModel.resetUnlockStates()
+        }
+    )
+    
+    // Error display for unlock errors
+    unlockError?.let { error ->
+        LaunchedEffect(error) {
+            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+            kotlinx.coroutines.delay(3000)
+            bikeViewModel.resetUnlockStates()
         }
     }
 }
@@ -1252,6 +1356,51 @@ private suspend fun calculateDistanceInBackground(
             withContext(Dispatchers.Main) {
                 onResult(results[0])
             }
+        }
+    }
+}
+
+// Helper function to get current location and unlock bike - similar to MapTab
+@SuppressLint("MissingPermission")
+private suspend fun getCurrentLocationSuspend(fusedLocationProviderClient: FusedLocationProviderClient?): LatLng {
+    return withContext(Dispatchers.IO) {
+        try {
+            if (fusedLocationProviderClient == null) {
+                Log.w("BikesTab", "Location provider is null, using default coordinates")
+                return@withContext LatLng(14.5890, 120.9760) // Default coordinates for Philippines
+            }
+
+            val location = fusedLocationProviderClient.lastLocation.await()
+            if (location != null) {
+                Log.d("BikesTab", "Location obtained: ${location.latitude}, ${location.longitude}")
+                LatLng(location.latitude, location.longitude)
+            } else {
+                Log.w("BikesTab", "Last known location is null, using default coordinates")
+                LatLng(14.5890, 120.9760)
+            }
+        } catch (e: SecurityException) {
+            Log.e("BikesTab", "Location permission denied: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        } catch (e: Exception) {
+            Log.e("BikesTab", "Error getting location: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        }
+    }
+}
+
+// Helper function to get location and unlock bike
+private fun getCurrentLocationAndUnlockBike(
+    fusedLocationProviderClient: FusedLocationProviderClient,
+    qrCode: String,
+    bikeViewModel: BikeViewModel
+) {
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+        try {
+            val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+            bikeViewModel.validateQRCodeAndUnlockBike(qrCode, location)
+        } catch (e: Exception) {
+            Log.e("BikesTab", "Error getting location for bike unlock", e)
+            bikeViewModel.resetUnlockStates()
         }
     }
 }

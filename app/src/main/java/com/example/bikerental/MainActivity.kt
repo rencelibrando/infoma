@@ -83,6 +83,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.bikerental.screens.help.HelpSupportScreen
+import com.example.bikerental.utils.PerformanceMonitor
 
 @OptIn(ExperimentalMaterial3Api::class)
 @AndroidEntryPoint
@@ -100,48 +101,29 @@ class MainActivity : ComponentActivity() {
     // Auth state listener
     private var authStateListener: FirebaseAuth.AuthStateListener? = null
     
-    // Dedicated scopes for background tasks
-    private val mainActivityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val computeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    
-    // Initialization state
-    private val _initializationComplete = MutableStateFlow(false)
-    val initializationComplete: StateFlow<Boolean> = _initializationComplete.asStateFlow()
-    
-    init {
-        // Logging setup - moved to background to avoid blocking main thread initialization
-        mainActivityScope.launch {
-            try {
-                Logger.getLogger("com.example.bikerental").level = Level.ALL
-                Log.d(TAG, "Logging configuration complete")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to configure logging: ${e.message}")
-            }
-        }
-    }
+    // Simplified scope for background tasks
+    private val mainActivityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
     @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Start performance tracking
+        PerformanceMonitor.startTimer("total_startup")
+        PerformanceMonitor.startTimer("main_activity_creation")
+        
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Initiate background initialization immediately so it can run concurrently with UI setup
-        GlobalScope.launch(Dispatchers.IO) {
-            initializeBackgroundComponents()
-        }
-        
-        // Initialize location services - create the client reference but defer actual initialization
+        // Initialize location services immediately
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
-        // Create location callback - just the definition, not the registration
+        // Create location callback
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                // Handle location updates on a background thread
-                mainActivityScope.launch {
-                    // Process location updates here
-                }
+                // Handle location updates
             }
         }
+        
+        PerformanceMonitor.endTimer("main_activity_creation")
         
         // Set up UI immediately for better perceived performance
         setContent {
@@ -150,49 +132,90 @@ class MainActivity : ComponentActivity() {
                 var showSplash by remember { mutableStateOf(true) }
                 val authState by authViewModel.authState.collectAsStateWithLifecycle()
                 
-                // Shortened splash screen duration for faster startup
+                // Shorter splash screen for faster startup
                 LaunchedEffect(Unit) {
-                    launch(Dispatchers.Default) {
-                        kotlinx.coroutines.delay(800) // Reduced from 1000ms to 800ms
-                        withContext(Dispatchers.Main) {
-                            showSplash = false
-                        }
-                    }
+                    // Reduced splash time and simplified
+                    kotlinx.coroutines.delay(500) // Reduced from 800ms to 500ms
+                    showSplash = false
+                    PerformanceMonitor.endTimer("total_startup")
+                    PerformanceMonitor.checkStartupPerformance()
+                    PerformanceMonitor.benchmarkResults()
                 }
                 
-                // Navigation logic only runs after splash screen is dismissed
+                // Simplified navigation logic with better Loading state handling
                 LaunchedEffect(showSplash, authState) {
+                    Log.d(TAG, "Navigation check - showSplash: $showSplash, authState: $authState")
+                    
                     if (!showSplash) {
                         when (authState) {
                             is AuthState.Authenticated -> {
                                 Log.d(TAG, "User authenticated, navigating to Home")
-                                navController.navigate(Screen.Home.route) {
-                                    popUpTo(0) { inclusive = true }
+                                if (navController.currentDestination?.route != Screen.Home.route) {
+                                    navController.navigate(Screen.Home.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
                                 }
                             }
                             is AuthState.NeedsEmailVerification -> {
                                 Log.d(TAG, "User needs email verification")
-                                navController.navigate(Screen.EmailVerification.route) {
-                                    popUpTo(0) { inclusive = true }
+                                if (navController.currentDestination?.route != Screen.EmailVerification.route) {
+                                    navController.navigate(Screen.EmailVerification.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            }
+                            is AuthState.Loading -> {
+                                Log.d(TAG, "Auth state is Loading, waiting for resolution...")
+                                // Wait for auth state to resolve, don't navigate yet
+                            }
+                            is AuthState.NeedsAdditionalInfo -> {
+                                Log.d(TAG, "User needs additional info, navigating to setup")
+                                if (navController.currentDestination?.route != Screen.SignUp.route) {
+                                    navController.navigate(Screen.SignUp.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            }
+                            is AuthState.NeedsAppVerification -> {
+                                Log.d(TAG, "User needs app verification")
+                                if (navController.currentDestination?.route != Screen.EmailVerification.route) {
+                                    navController.navigate(Screen.EmailVerification.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            }
+                            is AuthState.PasswordResetSent -> {
+                                Log.d(TAG, "Password reset sent, staying on current screen")
+                                // Stay on current screen, show success message
+                            }
+                            is AuthState.VerificationEmailSent -> {
+                                Log.d(TAG, "Verification email sent, staying on current screen")
+                                // Stay on current screen, show success message
+                            }
+                            is AuthState.VerificationSuccess -> {
+                                Log.d(TAG, "Verification successful, navigating to Home")
+                                if (navController.currentDestination?.route != Screen.Home.route) {
+                                    navController.navigate(Screen.Home.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
                                 }
                             }
                             is AuthState.Initial, is AuthState.Error -> {
                                 if (navController.currentDestination?.route != Screen.Initial.route) {
-                                    Log.d(TAG, "User not authenticated, navigating to initial login")
+                                    Log.d(TAG, "User not authenticated (state: $authState), navigating to initial login")
                                     navController.navigate(Screen.Initial.route) {
                                         popUpTo(0) { inclusive = true }
                                     }
                                 }
                             }
-                            else -> {
-                                // Keep current screen for other states
-                            }
                         }
+                    } else {
+                        Log.d(TAG, "Still showing splash screen, auth state: $authState")
                     }
                 }
                 
                 if (showSplash) {
-                    SplashScreen(onSplashComplete = { /* Ignore manual completion, using timer */ })
+                    SplashScreen(onSplashComplete = { /* Using timer only */ })
                 } else {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
@@ -208,103 +231,45 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    
-    // Moved background initialization to a dedicated function
-    private suspend fun initializeBackgroundComponents() {
-        try {
-            Log.d(TAG, "Starting background initialization")
-            
-            // Check email verification in the background
-            authViewModel.checkEmailVerification()
-            
-            // Pre-fetch any common data
-            withContext(Dispatchers.IO) {
-                try {
-                    // Firebase connection priming - using an optimized read to establish connection
-                    FirebaseFirestore.getInstance()
-                        .collection("app_config")
-                        .document("startup")
-                        .get(com.google.firebase.firestore.Source.CACHE)
-                        .addOnCompleteListener { task ->
-                            if (task.isSuccessful) {
-                                Log.d(TAG, "Firebase connection initialized")
-                            }
-                        }
-                } catch (e: Exception) {
-                    // Non-critical, can continue
-                    Log.w(TAG, "Firebase priming failed: ${e.message}")
-                }
-            }
-            
-            // Any other background initialization tasks
-            // ...
-            
-            Log.d(TAG, "Background initialization complete")
-            _initializationComplete.value = true
-        } catch (e: Exception) {
-            Log.w(TAG, "Error during background initialization: ${e.message}")
-            // Even on error, mark as complete to not block the app
-            _initializationComplete.value = true
-        }
-    }
-    
+
     override fun onStart() {
         super.onStart()
         
-        // Set up auth state listener in the background
-        mainActivityScope.launch {
-            // Set up auth state listener if needed
-            if (authStateListener == null) {
-                authStateListener = FirebaseAuth.AuthStateListener { auth ->
-                    // Handle auth state changes in a background thread
-                    mainActivityScope.launch {
-                        val user = auth.currentUser
-                        Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
-                        
-                        // Additional auth state processing can be done here
-                    }
-                }
-                FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
+        // Simplified auth state listener setup
+        if (authStateListener == null) {
+            authStateListener = FirebaseAuth.AuthStateListener { auth ->
+                val user = auth.currentUser
+                Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
             }
+            FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
         }
     }
-    
+
     override fun onStop() {
         super.onStop()
         
-        // Remove location updates to save battery - defer to background
-        mainActivityScope.launch {
-            if (::locationCallback.isInitialized) {
-                fusedLocationClient.removeLocationUpdates(locationCallback)
-                    .addOnCompleteListener { task ->
-                        Log.d(TAG, "Location updates removed: ${task.isSuccessful}")
-                    }
-            }
+        // Remove location updates to save battery
+        if (::locationCallback.isInitialized) {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         
-        // Clean up in the background to avoid blocking UI during teardown
-        mainActivityScope.launch {
-            try {
-                // Clean up location callbacks
-                if (::locationCallback.isInitialized) {
-                    fusedLocationClient.removeLocationUpdates(locationCallback)
-                }
-                
-                // Remove auth state listener
-                authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
-                
-                Log.d(TAG, "Resources successfully cleaned up")
-            } catch (e: Exception) {
-                Log.w(TAG, "Error during cleanup: ${e.message}")
-            } finally {
-                // Cancel all coroutines from our scopes
-                computeScope.cancel()
-                mainActivityScope.cancel()
+        // Clean up resources
+        try {
+            if (::locationCallback.isInitialized) {
+                fusedLocationClient.removeLocationUpdates(locationCallback)
             }
+            
+            authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
+            
+            Log.d(TAG, "Resources successfully cleaned up")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during cleanup: ${e.message}")
+        } finally {
+            mainActivityScope.cancel()
         }
     }
 }

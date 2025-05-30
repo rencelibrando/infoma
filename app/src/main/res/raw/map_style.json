@@ -71,7 +71,8 @@
     "elementType": "geometry",
     "stylers": [
       {
-        "color": "#c5e8b7"
+        "color": "#c5e8b7",
+        "visibility": "on"
       }
     ]
   },

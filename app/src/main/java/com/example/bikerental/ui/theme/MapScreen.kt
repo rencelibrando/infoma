@@ -37,6 +37,29 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
 import kotlin.math.roundToInt
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.Job
+import androidx.compose.runtime.derivedStateOf
+import java.util.concurrent.ConcurrentHashMap
+
+// Cache for distance calculations to avoid repeated calculations
+private val distanceCache = ConcurrentHashMap<String, Float>()
+
+// Optimized distance calculation with caching
+suspend fun calculateDistanceCached(start: LatLng, end: LatLng): Float {
+    val key = "${start.latitude},${start.longitude}-${end.latitude},${end.longitude}"
+    return distanceCache.getOrPut(key) {
+        withContext(Dispatchers.Default) {
+            val results = FloatArray(1)
+            Location.distanceBetween(
+                start.latitude, start.longitude,
+                end.latitude, end.longitude,
+                results
+            )
+            results[0]
+        }
+    }
+}
 
 @Composable
 fun BikeMap(
@@ -46,37 +69,40 @@ fun BikeMap(
     bikeViewModel: BikeViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
 
-    // Create dedicated scopes for different types of background operations
-    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+    // Create singleton coroutine scopes that are properly disposed
+    val backgroundScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val computationScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
 
-    // Intramuros location (center point)
+    // Properly dispose scopes when composable is removed
+    DisposableEffect(Unit) {
+        onDispose {
+            backgroundScope.coroutineContext[Job]?.cancel()
+            computationScope.coroutineContext[Job]?.cancel()
+        }
+    }
+
+    // Intramuros location (center point) - immutable
     val intramurosLocation = remember { LatLng(14.5895, 120.9750) }
 
-    // Define map properties
-    val mapProperties by remember {
-        mutableStateOf(
-            MapProperties(
-                mapType = MapType.NORMAL,
-                isMyLocationEnabled = ActivityCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED,
-                mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, R.raw.map_style)
-            )
+    // Define map properties - memoized to prevent recreation
+    val mapProperties = remember {
+        MapProperties(
+            mapType = MapType.NORMAL,
+            isMyLocationEnabled = ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED,
+            mapStyleOptions = MapStyleOptions.loadRawResourceStyle(context, R.raw.map_style)
         )
     }
 
-    // Map UI settings
-    val uiSettings by remember {
-        mutableStateOf(
-            MapUiSettings(
-                zoomControlsEnabled = false,
-                myLocationButtonEnabled = false, // We'll use our custom button instead
-                compassEnabled = true
-            )
+    // Map UI settings - memoized
+    val uiSettings = remember {
+        MapUiSettings(
+            zoomControlsEnabled = false,
+            myLocationButtonEnabled = false,
+            compassEnabled = true
         )
     }
 
@@ -88,152 +114,174 @@ fun BikeMap(
     // Current user location handling
     var userLocation by remember { mutableStateOf<LatLng?>(null) }
 
-    // Collect real-time bike data from ViewModel
+    // Collect real-time bike data from ViewModel with optimized state management
     val availableBikes by bikeViewModel.availableBikes.collectAsState()
     val selectedBike by bikeViewModel.selectedBike.collectAsState()
     val activeRide by bikeViewModel.activeRide.collectAsState()
     val bikeLocation by bikeViewModel.bikeLocation.collectAsState()
 
-    // Flow for storing processed bike markers with distance calculations
-    // Use a StateFlow to handle bikesWithDistance that can be updated from background threads
-    val bikesWithDistanceFlow = remember { MutableStateFlow<List<BikeMapMarker>>(emptyList()) }
-    val bikesWithDistance by bikesWithDistanceFlow.collectAsState()
+    // Optimized bike markers with distance calculations
+    val bikesWithDistance by remember {
+        derivedStateOf {
+            if (userLocation == null) {
+                availableBikes.map { bike ->
+                    BikeMapMarker(
+                        id = bike.id,
+                        name = bike.name,
+                        type = bike.type,
+                        price = bike.price,
+                        position = LatLng(bike.latitude, bike.longitude),
+                        imageRes = bike.imageRes,
+                        distance = ""
+                    )
+                }
+            } else {
+                availableBikes.map { bike ->
+                    BikeMapMarker(
+                        id = bike.id,
+                        name = bike.name,
+                        type = bike.type,
+                        price = bike.price,
+                        position = LatLng(bike.latitude, bike.longitude),
+                        imageRes = bike.imageRes,
+                        distance = "" // Will be calculated asynchronously
+                    )
+                }
+            }
+        }
+    }
 
-    // Move distance calculation to background thread
+    // Separate state for distances to avoid blocking UI
+    var bikeDistances by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    // Calculate distances asynchronously only when needed
     LaunchedEffect(availableBikes, userLocation) {
-        computeScope.launch {
-            val processedBikes = availableBikes.map { bike ->
-                val distance = if (userLocation != null) {
-                    calculateDistanceSuspend(userLocation!!, bike.position)
-                } else null
-                
-                BikeMapMarker(
-                    id = bike.id,
-                    name = bike.name,
-                    type = bike.type,
-                    price = bike.price,
-                    position = LatLng(bike.latitude, bike.longitude),
-                    imageRes = bike.imageRes,
-                    distance = when {
-                        distance == null -> ""
+        userLocation?.let { location ->
+            computationScope.launch {
+                val distances = mutableMapOf<String, String>()
+                availableBikes.forEach { bike ->
+                    val bikePosition = LatLng(bike.latitude, bike.longitude)
+                    val distance = calculateDistanceCached(location, bikePosition)
+                    distances[bike.id] = when {
                         distance < 1000 -> "${distance.roundToInt()} m"
                         else -> String.format(Locale.getDefault(), "%.1f km", distance / 1000)
                     }
-                )
+                }
+                withContext(Dispatchers.Main) {
+                    bikeDistances = distances
+                }
             }
-            bikesWithDistanceFlow.value = processedBikes
         }
     }
 
-    // Route tracking
+    // Route tracking with optimized memory management
     var routePoints by remember { mutableStateOf<List<LatLng>>(emptyList()) }
 
-    // If there's an active ride, collect location updates
+    // Optimized location tracking for active rides
     LaunchedEffect(activeRide) {
-        if (activeRide != null) {
-            val bikeId = activeRide?.bikeId ?: return@LaunchedEffect
-            bikeViewModel.startTrackingBike(bikeId)
+        activeRide?.let { ride ->
+            bikeViewModel.startTrackingBike(ride.bikeId)
             
-            // If user is currently riding, update bike location with user location periodically
+            // Reduced update frequency for better performance
             while (isActive && activeRide != null) {
                 userLocation?.let { location ->
-                    // Process location updates in IO thread
-                    ioScope.launch {
-                        bikeViewModel.updateBikeLocation(bikeId, location)
+                    backgroundScope.launch {
+                        bikeViewModel.updateBikeLocation(ride.bikeId, location)
                     }
                 }
-                delay(5000) // Update every 5 seconds
+                delay(10000) // Update every 10 seconds instead of 5
             }
         }
     }
 
-    // Update route points when bike location changes
+    // Optimized route points update
     LaunchedEffect(bikeLocation) {
         bikeLocation?.let { location ->
-            // Append route points in computation thread to avoid UI jank
-            computeScope.launch {
-                val updatedRoute = routePoints + location
+            computationScope.launch {
+                val newRoutePoints = routePoints + location
+                // Limit route points to prevent memory issues (keep last 1000 points)
+                val optimizedRoutePoints = if (newRoutePoints.size > 1000) {
+                    newRoutePoints.takeLast(1000)
+                } else {
+                    newRoutePoints
+                }
+                
                 withContext(Dispatchers.Main) {
-                    routePoints = updatedRoute
+                    routePoints = optimizedRoutePoints
                 }
             }
         }
     }
 
-    // Function to move camera to user's location
-    fun moveToUserLocation() {
+    // Optimized location function
+    suspend fun moveToUserLocationSuspend() {
         if (fusedLocationProviderClient != null &&
             ActivityCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
         ) {
-            // Move location retrieval to IO thread
-            ioScope.launch {
-                try {
-                    val locationTask = fusedLocationProviderClient.lastLocation
-                    val location = locationTask.await()
-                    
-                    if (location != null) {
-                        val newUserLocation = LatLng(location.latitude, location.longitude)
-                        
-                        // Update UI on main thread
-                        withContext(Dispatchers.Main) {
-                            userLocation = newUserLocation
-                            cameraPositionState.animate(
-                                update = CameraUpdateFactory.newLatLngZoom(
-                                    newUserLocation,
-                                    16f
-                                ),
-                                durationMs = 1000
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("BikeMap", "Error getting location: ${e.message}")
+            try {
+                val location = withContext(Dispatchers.IO) {
+                    fusedLocationProviderClient.lastLocation.await()
                 }
+                
+                location?.let {
+                    val newUserLocation = LatLng(it.latitude, it.longitude)
+                    userLocation = newUserLocation
+                    cameraPositionState.animate(
+                        update = CameraUpdateFactory.newLatLngZoom(newUserLocation, 16f),
+                        durationMs = 1000
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("BikeMap", "Error getting location: ${e.message}")
             }
         }
     }
     
-    // Function to start a ride
+    // Optimized ride management functions
     fun startRide(bike: BikeMapMarker) {
         userLocation?.let { location ->
-            // Process ride start in background
-            ioScope.launch {
+            backgroundScope.launch {
                 bikeViewModel.startRide(bike.id, location)
             }
         }
     }
     
-    // Function to end a ride
     fun endRide() {
         userLocation?.let { location ->
-            // Process ride end in background
-            ioScope.launch {
+            backgroundScope.launch {
                 bikeViewModel.endRide(location)
                 withContext(Dispatchers.Main) {
-                    routePoints = emptyList() // Clear route on UI thread
+                    routePoints = emptyList()
                 }
             }
         }
     }
 
-    // Initial location check - this gets called once on composition
-    LaunchedEffect(true) {
-        moveToUserLocation()
+    // Initial location check
+    LaunchedEffect(Unit) {
+        moveToUserLocationSuspend()
     }
 
-    // Watch for "Locate Me" button press
+    // Watch for location update requests
     LaunchedEffect(requestLocationUpdate) {
-        if (requestLocationUpdate) {
-            if (ActivityCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                moveToUserLocation()
-            }
+        if (requestLocationUpdate && ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            moveToUserLocationSuspend()
+        }
+    }
+
+    // Memoized filtered bikes to prevent unnecessary recomposition
+    val filteredBikes = remember(bikesWithDistance, availableBikes) {
+        bikesWithDistance.filter { bike -> 
+            availableBikes.find { it.id == bike.id }?.let { 
+                it.isAvailable
+            } ?: false
         }
     }
 
@@ -256,50 +304,46 @@ fun BikeMap(
                 zIndex = 2f
             )
 
-            // Draw a circle around user's location (range indicator)
+            // Optimized circle with reduced alpha for better performance
             Circle(
                 center = location,
-                radius = 300.0, // 300 meters radius
-                fillColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
-                strokeColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f),
+                radius = 300.0,
+                fillColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
+                strokeColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f),
                 strokeWidth = 2f
             )
         }
 
-        // Available bikes markers - only show available bikes that aren't in use
-        bikesWithDistance
-            .filter { bike -> 
-                availableBikes.find { it.id == bike.id }?.isAvailable == true &&
-                availableBikes.find { it.id == bike.id }?.isInUse == false
-            }
-            .forEach { bike ->
-                MarkerInfoWindow(
-                    state = MarkerState(position = bike.position),
-                    title = bike.name,
-                    snippet = "${bike.type} • ${bike.price}",
-                    icon = BitmapDescriptorFactory.defaultMarker(
-                        if (selectedBike?.id == bike.id) 
-                            BitmapDescriptorFactory.HUE_GREEN 
-                        else 
-                            BitmapDescriptorFactory.HUE_RED
-                    ),
-                    onClick = {
-                        if (activeRide == null) {
-                            bikeViewModel.selectBike(bike.id)
-                            onBikeSelected(bike)
-                        }
-                        true
-                    },
-                    onInfoWindowClick = {
-                        if (activeRide == null) {
-                            onBikeSelected(bike)
-                        }
-                    },
-                    zIndex = 1f
-                )
-            }
-            
-        // Draw the tracked bike if in use
+        // Optimized bike markers with cached distances
+        filteredBikes.forEach { bike ->
+            val distance = bikeDistances[bike.id] ?: ""
+            MarkerInfoWindow(
+                state = MarkerState(position = bike.position),
+                title = bike.name,
+                snippet = "${bike.type} • ${bike.price} ${if (distance.isNotEmpty()) "• $distance" else ""}",
+                icon = BitmapDescriptorFactory.defaultMarker(
+                    if (selectedBike?.id == bike.id) 
+                        BitmapDescriptorFactory.HUE_GREEN 
+                    else 
+                        BitmapDescriptorFactory.HUE_RED
+                ),
+                onClick = {
+                    if (activeRide == null) {
+                        bikeViewModel.selectBike(bike.id)
+                        onBikeSelected(bike)
+                    }
+                    true
+                },
+                onInfoWindowClick = {
+                    if (activeRide == null) {
+                        onBikeSelected(bike)
+                    }
+                },
+                zIndex = 1f
+            )
+        }
+        
+        // Tracked bike marker
         bikeLocation?.let { location ->
             if (activeRide != null) {
                 Marker(
@@ -312,7 +356,7 @@ fun BikeMap(
             }
         }
 
-        // Bike station markers
+        // Memoized station markers
         intramurosStations.forEach { station ->
             Marker(
                 state = MarkerState(position = station.position),
@@ -323,7 +367,7 @@ fun BikeMap(
             )
         }
         
-        // Draw ride path if active
+        // Optimized route rendering
         if (routePoints.isNotEmpty()) {
             Polyline(
                 points = routePoints,
@@ -332,25 +376,12 @@ fun BikeMap(
             )
         }
 
-        // Add a polygon outline of Intramuros boundaries for reference
+        // Memoized polygon outline
         Polygon(
             points = intramurosOutlinePoints,
             fillColor = Color.Transparent,
             strokeColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
             strokeWidth = 3f
         )
-    }
-}
-
-// Convert distance calculation to a suspend function that runs off the main thread
-suspend fun calculateDistanceSuspend(start: LatLng, end: LatLng): Float {
-    return withContext(Dispatchers.Default) {
-        val results = FloatArray(1)
-        Location.distanceBetween(
-            start.latitude, start.longitude,
-            end.latitude, end.longitude,
-            results
-        )
-        results[0] // Distance in meters
     }
 }

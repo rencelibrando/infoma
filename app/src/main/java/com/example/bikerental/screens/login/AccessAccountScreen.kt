@@ -51,68 +51,42 @@ fun AccessAccountScreen(
     // Collect auth state
     val authState by viewModel.authState.collectAsState()
 
-    // Add a state to track if we've already processed the auth state to prevent duplicate triggers
-    var authStateProcessed by remember { mutableStateOf(false) }
+    // Simplified state tracking to prevent navigation loops
+    var hasNavigated by remember { mutableStateOf(false) }
 
-    // Add a flag to prevent multiple navigations
-    var hasNavigatedToHome by remember { mutableStateOf(false) }
-
-    // Handle auth state changes - make this more robust to prevent unintended redirects
+    // Simplified auth state handling
     LaunchedEffect(authState) {
-        Log.d("AccessAccountScreen", "Auth state changed: $authState, processed: $authStateProcessed")
-        
-        // Skip initial auth state updates which could cause redirects when typing
-        if (authState is AuthState.Initial) {
-            Log.d("AccessAccountScreen", "Ignoring Initial auth state")
-            return@LaunchedEffect
-        }
-        
-        // Always process error states, regardless of previous processed status
-        if (authState is AuthState.Error) {
-            Log.e("AccessAccountScreen", "Auth Error: ${(authState as AuthState.Error).message}")
-            Toast.makeText(context, (authState as AuthState.Error).message, Toast.LENGTH_LONG).show()
-            authStateProcessed = false // Allow reprocessing after error
-            return@LaunchedEffect
-        }
-        
-        // Skip re-processing of the same auth state except for Authenticated state
-        // This ensures authentication is always processed for navigation
-        if (authStateProcessed && !(authState is AuthState.Authenticated)) {
-            Log.d("AccessAccountScreen", "Ignoring already processed auth state: $authState")
-            return@LaunchedEffect
-        }
+        Log.d("AccessAccountScreen", "Auth state changed: $authState")
         
         when (val currentState = authState) {
             is AuthState.Authenticated -> {
-                Log.d("AccessAccountScreen", "Auth state is Authenticated. Navigating to Home.")
-                // Force navigation here for login screen
-                NavigationUtils.navigateToHome(navController)
-                authStateProcessed = true // Mark as processed to avoid loops if state reappears
-                hasNavigatedToHome = true
-            }
-            is AuthState.NeedsAdditionalInfo -> {
-                Log.d("AccessAccountScreen", "Auth state: NeedsAdditionalInfo")
-                authStateProcessed = true
-                NavigationUtils.navigateToSignUp(navController)
-            }
-            is AuthState.NeedsAppVerification -> {
-                Log.d("AccessAccountScreen", "Auth state: NeedsAppVerification")
-                authStateProcessed = true
-                NavigationUtils.navigateToEmailVerification(navController)
+                if (!hasNavigated) {
+                    Log.d("AccessAccountScreen", "User authenticated, navigating to Home")
+                    NavigationUtils.navigateToHome(navController)
+                    hasNavigated = true
+                }
             }
             is AuthState.NeedsEmailVerification -> {
-                Log.d("AccessAccountScreen", "Auth state: NeedsEmailVerification")
-                authStateProcessed = true // Mark as processed
+                if (!hasNavigated) {
+                    Log.d("AccessAccountScreen", "User needs email verification")
+                    NavigationUtils.navigateToEmailVerification(navController)
+                    hasNavigated = true
+                }
+            }
+            is AuthState.Error -> {
+                Log.e("AccessAccountScreen", "Auth Error: ${currentState.message}")
+                Toast.makeText(context, currentState.message, Toast.LENGTH_LONG).show()
+                hasNavigated = false // Allow retry after error
             }
             is AuthState.PasswordResetSent -> {
-                Log.d("AccessAccountScreen", "Auth state: PasswordResetSent")
+                Log.d("AccessAccountScreen", "Password reset email sent")
                 Toast.makeText(context, "Password reset email sent", Toast.LENGTH_LONG).show()
                 showForgotPasswordDialog = false
-                authStateProcessed = false // Reset to allow reprocessing
+                hasNavigated = false
             }
             else -> {
-                Log.d("AccessAccountScreen", "Unhandled auth state: $currentState")
-                authStateProcessed = false // Reset to allow reprocessing
+                // Reset navigation flag for other states to allow future navigation
+                hasNavigated = false
             }
         }
     }
