@@ -2,7 +2,7 @@
 // This prevents multiple API loads and handles initialization properly
 
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "AIzaSyASfb-LFSstZrbPUIgPn1rKOqNTFF6mhhk";
-const LIBRARIES = ['places', 'geometry'];
+const LIBRARIES = ['places', 'geometry', 'visualization'];
 
 let isLoaded = false;
 let isLoading = false;

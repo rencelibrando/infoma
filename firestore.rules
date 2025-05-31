@@ -24,10 +24,9 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && request.auth.uid == userId;
-      allow delete: if isAuthenticated() && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
 
       // Bookings subcollection under users
       match /bookings/{bookingId} {
@@ -158,10 +157,24 @@ service cloud.firestore {
 
     // Rides collection - UPDATED TO BE MORE PERMISSIVE
     match /rides/{rideId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();  // Allow any authenticated user to create rides
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      // Users can read/write their own rides
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      
+      // Users can create new rides for themselves
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      
+      // Admins can read all rides for monitoring
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      
+      // Allow updates to location fields during active rides
+      allow update: if request.auth != null && 
+        request.auth.uid == resource.data.userId &&
+        resource.data.status == 'active' &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['lastLocation', 'lastLocationUpdate', 'totalDistance']);
       
       // Bookings subcollection under rides
       match /bookings/{bookingId} {
@@ -189,6 +202,23 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();  // Allow any authenticated user to create location history
       allow delete: if isAdmin();
+    }
+
+    // Rules for locations collection (real-time tracking)
+    match /locations/{locationId} {
+      // Users can create location updates for their own rides
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId &&
+        exists(/databases/$(database)/documents/rides/$(request.resource.data.rideId)) &&
+        get(/databases/$(database)/documents/rides/$(request.resource.data.rideId)).data.userId == request.auth.uid;
+      
+      // Users can read their own location history
+      allow read: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      
+      // Admins can read all location data for monitoring
+      allow read: if request.auth != null && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
   }
 } 

@@ -1,16 +1,16 @@
 // src/components/Dashboard.js
 import React, { useState, useEffect } from 'react';
 import { auth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { useNavigate, useLocation } from 'react-router-dom';
+import Analytics from './Analytics';
 import BikesList from './BikesList';
+import BookingManagement from './BookingManagement';
 import EditBike from './EditBike';
 import UsersList from './UsersList';
-import Analytics from './Analytics';
-import BikesMap from './BikesMap';
 import BikeReviews from './BikeReviews';
-import BookingManagement from './BookingManagement';
 import CustomerSupportMessages from './CustomerSupportMessages';
-import { initializeBikesData } from '../services/bikeService';
+import RealTimeTrackingDashboard from './admin/RealTimeTrackingDashboard';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
@@ -315,12 +315,6 @@ const Dashboard = () => {
               Bookings
             </MenuOption>
             <MenuOption 
-              active={activeTab === 'map'}
-              onClick={() => handleMenuClick('map')}
-            >
-              Bikes Map
-            </MenuOption>
-            <MenuOption 
               active={activeTab === 'users'}
               onClick={() => handleMenuClick('users')}
             >
@@ -337,6 +331,12 @@ const Dashboard = () => {
               onClick={() => handleMenuClick('customerSupport')}
             >
               Customer Support Messages
+            </MenuOption>
+            <MenuOption 
+              active={activeTab === 'realTimeTracking'}
+              onClick={() => handleMenuClick('realTimeTracking')}
+            >
+              Real Time Tracking
             </MenuOption>
             <LogoutOption onClick={handleLogout}>
               Logout
@@ -355,9 +355,6 @@ const Dashboard = () => {
             {activeTab === 'bookings' && (
               <BookingManagement />
             )}
-            {activeTab === 'map' && (
-              <BikesMap />
-            )}
             {activeTab === 'edit' && selectedBike && (
               <EditBike 
                 bike={selectedBike} 
@@ -373,6 +370,9 @@ const Dashboard = () => {
             )}
             {activeTab === 'customerSupport' && (
               <CustomerSupportMessages />
+            )}
+            {activeTab === 'realTimeTracking' && (
+              <RealTimeTrackingDashboard />
             )}
           </ContentSection>
         </Content>
