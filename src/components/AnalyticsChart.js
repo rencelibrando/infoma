@@ -157,9 +157,19 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
       // Count rides per day (only if we have rides)
       if (rides && rides.length > 0) {
         rides.forEach(ride => {
-          if (!ride.startDate) return;
+          // Handle both new startTime (timestamp) and legacy startDate fields
+          let rideDate = null;
           
-          const rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          if (ride.startTime) {
+            // New format: startTime is timestamp in milliseconds
+            rideDate = new Date(ride.startTime);
+          } else if (ride.startDate) {
+            // Legacy format: startDate is Firestore timestamp
+            rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          }
+          
+          if (!rideDate) return;
+          
           // Only count if within the last 7 days
           if ((today - rideDate) / (1000 * 60 * 60 * 24) <= 7) {
             const dayStr = rideDate.toLocaleDateString('en-US', { weekday: 'short' });
@@ -190,9 +200,19 @@ const AnalyticsChart = ({ data = { rides: [] } }) => {
       // Count rides per month (only if we have rides)
       if (rides && rides.length > 0) {
         rides.forEach(ride => {
-          if (!ride.startDate) return;
+          // Handle both new startTime (timestamp) and legacy startDate fields
+          let rideDate = null;
           
-          const rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          if (ride.startTime) {
+            // New format: startTime is timestamp in milliseconds
+            rideDate = new Date(ride.startTime);
+          } else if (ride.startDate) {
+            // Legacy format: startDate is Firestore timestamp
+            rideDate = ride.startDate.toDate ? ride.startDate.toDate() : new Date(ride.startDate);
+          }
+          
+          if (!rideDate) return;
+          
           const monthsAgo = (today.getFullYear() - rideDate.getFullYear()) * 12 + 
                             today.getMonth() - rideDate.getMonth();
           

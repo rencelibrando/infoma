@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { collection, getDocs, limit, query } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 const Container = styled.div`
   padding: 20px;
@@ -74,6 +75,7 @@ const ErrorDetails = styled.pre`
 const StatusCheck = ({ children }) => {
   const [status, setStatus] = useState({
     firebase: { status: 'checking', message: 'Checking connection...' },
+    auth: { status: 'checking', message: 'Checking authentication...' },
     bikes: { status: 'checking', message: 'Checking bikes collection...' },
     users: { status: 'checking', message: 'Checking users collection...' },
     reviews: { status: 'checking', message: 'Checking reviews collection...' },
@@ -84,6 +86,7 @@ const StatusCheck = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState([]);
   const [checksComplete, setChecksComplete] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
   
   const runChecks = async () => {
     setLoading(true);
@@ -92,6 +95,7 @@ const StatusCheck = ({ children }) => {
     // Reset status
     setStatus({
       firebase: { status: 'checking', message: 'Checking connection...' },
+      auth: { status: 'checking', message: 'Checking authentication...' },
       bikes: { status: 'checking', message: 'Checking bikes collection...' },
       users: { status: 'checking', message: 'Checking users collection...' },
       reviews: { status: 'checking', message: 'Checking reviews collection...' },
@@ -99,7 +103,49 @@ const StatusCheck = ({ children }) => {
       googleMaps: { status: 'checking', message: 'Checking Google Maps API...' }
     });
     
-    // Check Firebase connection
+    // Check authentication first
+    try {
+      if (!currentUser) {
+        setStatus(prev => ({
+          ...prev,
+          auth: { status: 'error', message: 'Not authenticated' },
+          firebase: { status: 'warning', message: 'Cannot check Firebase without authentication' },
+          bikes: { status: 'warning', message: 'Cannot check bikes without authentication' },
+          users: { status: 'warning', message: 'Cannot check users without authentication' },
+          reviews: { status: 'warning', message: 'Cannot check reviews without authentication' }
+        }));
+        
+        // Still check non-Firebase services
+        await checkNonFirebaseServices();
+        setLoading(false);
+        setChecksComplete(true);
+        return;
+      }
+      
+      setStatus(prev => ({
+        ...prev,
+        auth: { status: 'ok', message: `Authenticated as ${currentUser.email}` }
+      }));
+      
+      // Now check Firebase collections with authentication
+      await checkFirebaseCollections();
+      
+    } catch (error) {
+      setStatus(prev => ({
+        ...prev,
+        auth: { status: 'error', message: `Authentication error: ${error.message}` }
+      }));
+      setErrors(prev => [...prev, { component: 'Authentication', error }]);
+    }
+    
+    // Check non-Firebase services
+    await checkNonFirebaseServices();
+    
+    setLoading(false);
+    setChecksComplete(true);
+  };
+  
+  const checkFirebaseCollections = async () => {
     try {
       // Check bikes collection
       const bikesQuery = query(collection(db, 'bikes'), limit(1));
@@ -190,7 +236,9 @@ const StatusCheck = ({ children }) => {
       }));
       setErrors(prev => [...prev, { component: 'Firebase', error }]);
     }
-    
+  };
+  
+  const checkNonFirebaseServices = async () => {
     // Check Recharts
     try {
       const rechartsAvailable = typeof require('recharts') !== 'undefined';
@@ -225,16 +273,26 @@ const StatusCheck = ({ children }) => {
         googleMaps: { status: 'warning', message: `Could not check: ${error.message}` }
       }));
     }
-    
-    setLoading(false);
-    setChecksComplete(true);
   };
   
   useEffect(() => {
-    runChecks();
+    // Listen for authentication state changes
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      // Run checks whenever auth state changes
+      if (user) {
+        runChecks();
+      } else {
+        // If not authenticated, still run checks but they'll show warnings
+        runChecks();
+      }
+    });
+    
+    return () => unsubscribe();
   }, []);
   
-  if (checksComplete && !errors.some(e => e.component === 'Firebase')) {
+  // If user is authenticated and no Firebase errors, show the children
+  if (checksComplete && currentUser && !errors.some(e => e.component === 'Firebase')) {
     return children;
   }
   
@@ -269,6 +327,13 @@ const StatusCheck = ({ children }) => {
               </ErrorDetails>
             </div>
           ))}
+        </StatusCard>
+      )}
+      
+      {!currentUser && checksComplete && (
+        <StatusCard>
+          <h3>Authentication Required</h3>
+          <p>Please log in to access the application and check all system components.</p>
         </StatusCard>
       )}
     </Container>

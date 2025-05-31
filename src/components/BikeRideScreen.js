@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getBikeById } from '../services/bikeService';
-import { startBikeRide, endBikeRide, updateBikeLocation } from '../services/bikeLocationService';
+import { startBikeRide, endBikeRide, updateBikeLocation, updateRideLocation } from '../services/bikeLocationService';
 import { auth } from '../firebase';
 import styled from 'styled-components';
 import { Marker } from '@react-google-maps/api';
@@ -209,11 +209,22 @@ const BikeRideScreen = () => {
         
         setCurrentLocation(newLocation);
         
-        // Update bike location in Firestore
+        // Update ride location in Firestore if ride is active
         try {
-          await updateBikeLocation(bikeId, newLocation.lat, newLocation.lng);
+          if (rideActive && rideId) {
+            await updateRideLocation(
+              rideId, 
+              newLocation.lat, 
+              newLocation.lng, 
+              position.coords.speed || 0,
+              position.coords.accuracy || 0
+            );
+          } else {
+            // Fallback to updating bike location if no active ride
+            await updateBikeLocation(bikeId, newLocation.lat, newLocation.lng);
+          }
         } catch (error) {
-          console.error('Error updating bike location:', error);
+          console.error('Error updating location:', error);
         }
       },
       (error) => {
@@ -228,7 +239,7 @@ const BikeRideScreen = () => {
     );
     
     setLocationWatchId(watchId);
-  }, [bikeId]);
+  }, [bikeId, rideActive, rideId]);
   
   // Stop watching position
   const stopLocationTracking = useCallback(() => {
@@ -378,7 +389,13 @@ const BikeRideScreen = () => {
         setMapKey('ride-map-' + Date.now());
         
         // If ride is active, make sure to update location
-        if (rideActive && currentLocation) {
+        if (rideActive && currentLocation && rideId) {
+          try {
+            updateRideLocation(rideId, currentLocation.lat, currentLocation.lng);
+          } catch (error) {
+            console.error('Error updating ride location on visibility change:', error);
+          }
+        } else if (currentLocation) {
           try {
             updateBikeLocation(bikeId, currentLocation.lat, currentLocation.lng);
           } catch (error) {
@@ -393,7 +410,7 @@ const BikeRideScreen = () => {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [bikeId, rideActive, currentLocation]);
+  }, [bikeId, rideActive, currentLocation, rideId]);
   
   if (loading) return <LoadingMessage>Loading bike details...</LoadingMessage>;
   if (error) return <ErrorMessage>{error}</ErrorMessage>;

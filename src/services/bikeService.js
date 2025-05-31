@@ -1,6 +1,6 @@
 // src/services/bikeService.js
-import { db, storage } from '../firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query, where } from "firebase/firestore";
+import { db, storage, auth } from '../firebase';
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query, where, addDoc, serverTimestamp } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { v4 as uuidv4 } from 'uuid';
 
@@ -78,69 +78,50 @@ const generateHardwareId = async () => {
   return await generateSecureQRCode();
 };
 
+// Helper function to check authentication
+const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User not authenticated. Please log in to access this resource.');
+  }
+  return user;
+};
+
 // Get all bikes
-export const getBikes = async () => {
+export const getAllBikes = async () => {
   try {
-    const bikesCollection = collection(db, "bikes");
-    const snapshot = await getDocs(bikesCollection);
-    const bikes = snapshot.docs.map(doc => {
-      const data = doc.data();
-      
-      // Ensure coordinates are proper numbers
-      let latitude = data.latitude;
-      let longitude = data.longitude;
-      
-      // Convert string coordinates to numbers
-      if (typeof latitude === 'string') {
-        latitude = parseFloat(latitude);
-      }
-      
-      if (typeof longitude === 'string') {
-        longitude = parseFloat(longitude);
-      }
-      
-      // Ensure they're valid numbers
-      if (isNaN(latitude)) latitude = null;
-      if (isNaN(longitude)) longitude = null;
-      
-      return {
-        id: doc.id,
-        ...data,
-        latitude,
-        longitude
-      };
-    });
+    // Check authentication first
+    checkAuth();
     
-    // Log each bike's status to help with debugging
-    bikes.forEach(bike => {
-      console.log(`Bike ${bike.id} (${bike.name}) status:`, {
-        isLocked: bike.isLocked,
-        isAvailable: bike.isAvailable,
-        isInUse: bike.isInUse,
-        coordinates: `${bike.latitude}, ${bike.longitude}`
-      });
-    });
-    
-    return bikes;
+    const bikesRef = collection(db, 'bikes');
+    const snapshot = await getDocs(bikesRef);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
   } catch (error) {
-    console.error('Error getting bikes:', error);
+    console.error('Error fetching bikes:', error);
     throw error;
   }
 };
 
 // Get a single bike by ID
-export const getBikeById = async (bikeId) => {
-  const bikeRef = doc(db, "bikes", bikeId);
-  const bikeDoc = await getDoc(bikeRef);
-  
-  if (bikeDoc.exists()) {
-    return {
-      id: bikeDoc.id,
-      ...bikeDoc.data()
-    };
+export const getBikeById = async (id) => {
+  try {
+    // Check authentication first
+    checkAuth();
+    
+    const bikeRef = doc(db, 'bikes', id);
+    const bikeDoc = await getDoc(bikeRef);
+    if (bikeDoc.exists()) {
+      return { id: bikeDoc.id, ...bikeDoc.data() };
+    } else {
+      throw new Error('Bike not found');
+    }
+  } catch (error) {
+    console.error('Error fetching bike:', error);
+    throw error;
   }
-  
-  return null;
 };
 
 // Upload a bike
@@ -233,17 +214,27 @@ export const uploadBike = async (bike, imageFile) => {
 };
 
 // Delete a bike
-export const deleteBike = async (bikeId) => {
-  await deleteDoc(doc(db, "bikes", bikeId));
+export const deleteBike = async (id) => {
+  try {
+    // Check authentication first
+    checkAuth();
+    
+    const bikeRef = doc(db, 'bikes', id);
+    await deleteDoc(bikeRef);
+    console.log('Bike deleted successfully');
+  } catch (error) {
+    console.error('Error deleting bike:', error);
+    throw error;
+  }
 };
 
 // Function to update an existing bike
-export const updateBike = async (bikeId, bikeData, imageFile) => {
+export const updateBike = async (id, bikeData, imageFile) => {
   try {
-    const bikesRef = collection(db, 'bikes');
-    const bikeRef = doc(bikesRef, bikeId);
+    // Check authentication first
+    checkAuth();
     
-    // Get current bike data
+    const bikeRef = doc(db, 'bikes', id);
     const currentBikeDoc = await getDoc(bikeRef);
     const currentBike = currentBikeDoc.exists() ? currentBikeDoc.data() : {};
     
@@ -254,20 +245,20 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     
     // Rule: All bikes in use must be unlocked
     if (isInUse && isLocked) {
-      console.warn(`Bike ${bikeId} is in use but was being set to locked. Forcing unlock.`);
+      console.warn(`Bike ${id} is in use but was being set to locked. Forcing unlock.`);
       bikeData.isLocked = false;
     }
     
     // If trying to make a bike available but it's not locked, force lock it
     if (isAvailable && !isLocked) {
-      console.warn(`Bike ${bikeId} is being marked as available but wasn't locked. Forcing lock state.`);
+      console.warn(`Bike ${id} is being marked as available but wasn't locked. Forcing lock state.`);
       bikeData.isLocked = true;
     }
     
     // If bike is not locked, it cannot be available
     if (!bikeData.isLocked && isAvailable) {
       isAvailable = false;
-      console.warn(`Bike ${bikeId} cannot be available when unlocked. Setting to unavailable.`);
+      console.warn(`Bike ${id} cannot be available when unlocked. Setting to unavailable.`);
     }
     
     // Prepare update data
@@ -299,7 +290,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     } else if (!currentBike.qrCode) {
       // Generate QR code if not present and not provided by user
       updatedBike.qrCode = await generateSecureQRCode();
-      console.log(`Generated new QR code for bike ${bikeId}: ${updatedBike.qrCode}`);
+      console.log(`Generated new QR code for bike ${id}: ${updatedBike.qrCode}`);
     }
 
     // Handle hardware ID field (legacy compatibility)
@@ -316,7 +307,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     } else if (!currentBike.hardwareId) {
       // Generate hardware ID if not present and not provided by user (backward compatibility)
       updatedBike.hardwareId = await generateHardwareId();
-      console.log(`Generated new hardware ID for bike ${bikeId}: ${updatedBike.hardwareId}`);
+      console.log(`Generated new hardware ID for bike ${id}: ${updatedBike.hardwareId}`);
     }
 
     // Validation: Ensure at least one identifier exists
@@ -329,7 +320,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
 
     // Upload new image if provided
     if (imageFile) {
-      const storageRef = ref(storage, `bikes/${bikeId}_${Date.now()}`);
+      const storageRef = ref(storage, `bikes/${id}_${Date.now()}`);
       await uploadBytes(storageRef, imageFile);
       const imageUrl = await getDownloadURL(storageRef);
       updatedBike.imageUrl = imageUrl;
@@ -338,7 +329,7 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
     // Update Firestore document
     await updateDoc(bikeRef, updatedBike);
     return { 
-      id: bikeId, 
+      id, 
       ...currentBike,
       ...updatedBike 
     };
@@ -351,7 +342,10 @@ export const updateBike = async (bikeId, bikeData, imageFile) => {
 // Function to update or generate QR codes and hardware IDs for existing bikes
 export const updateBikesWithHardwareIds = async () => {
   try {
-    const bikes = await getBikes();
+    // Check authentication first
+    checkAuth();
+    
+    const bikes = await getAllBikes();
     const updates = [];
     
     for (const bike of bikes) {
@@ -418,6 +412,9 @@ export const updateBikesWithHardwareIds = async () => {
 // Function to toggle the lock state of a bike
 export const toggleBikeLock = async (bikeId, lockState) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     const bikeRef = doc(db, "bikes", bikeId);
     const bikeDoc = await getDoc(bikeRef);
     
@@ -477,8 +474,11 @@ export const toggleBikeLock = async (bikeId, lockState) => {
 // Function to ensure data consistency across all bikes
 export const ensureBikeDataConsistency = async () => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     console.log("Running bike data consistency check...");
-    const bikes = await getBikes();
+    const bikes = await getAllBikes();
     const updates = [];
     
     for (const bike of bikes) {
@@ -527,7 +527,7 @@ export const ensureBikeDataConsistency = async () => {
       console.log("No data inconsistencies found.");
     }
     
-    return await getBikes();
+    return await getAllBikes();
   } catch (error) {
     console.error('Error ensuring bike data consistency:', error);
     throw error;
@@ -537,6 +537,9 @@ export const ensureBikeDataConsistency = async () => {
 // Call this function when initializing to ensure all bikes are consistent
 export const initializeBikesData = async () => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     // First ensure all bikes have hardware IDs
     await updateBikesWithHardwareIds();
     
@@ -551,6 +554,9 @@ export const initializeBikesData = async () => {
 // Function to subscribe to real-time bike updates
 export const subscribeToBikes = (callback) => {
   try {
+    // Check authentication first
+    const user = checkAuth();
+    
     console.log("Setting up real-time listener for bikes...");
     const bikesCollection = collection(db, "bikes");
     const bikesQuery = query(bikesCollection);
@@ -560,7 +566,7 @@ export const subscribeToBikes = (callback) => {
       const bikes = snapshot.docs.map(doc => {
         const data = doc.data();
         
-        // Process coordinates like in getBikes
+        // Process coordinates like in getAllBikes
         let latitude = data.latitude;
         let longitude = data.longitude;
         
@@ -602,7 +608,10 @@ export const subscribeToBikes = (callback) => {
 // Function to fix bikes with missing coordinates
 export const fixBikeCoordinates = async () => {
   try {
-    const bikes = await getBikes();
+    // Check authentication first
+    checkAuth();
+    
+    const bikes = await getAllBikes();
     const defaultCoords = { latitude: 14.554729, longitude: 121.0244 }; // Default Manila coords
     let fixedCount = 0;
     
@@ -634,6 +643,9 @@ export const fixBikeCoordinates = async () => {
 // Function to update bike status based on booking changes
 export const updateBikeStatus = async (bikeId, statusUpdate) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     const bikeRef = doc(db, "bikes", bikeId);
     const bikeDoc = await getDoc(bikeRef);
     
@@ -644,26 +656,62 @@ export const updateBikeStatus = async (bikeId, statusUpdate) => {
     
     const currentBike = bikeDoc.data();
     
-    // Determine lock state based on availability
-    // Business rule: available bikes should be locked
-    const isLocked = statusUpdate.isAvailable ? true : statusUpdate.isInUse ? false : currentBike.isLocked;
+    // Create update data with proper fallbacks for undefined values
+    const updateData = {};
     
-    const updateData = {
-      isAvailable: statusUpdate.isAvailable,
-      isInUse: statusUpdate.isInUse,
-      isLocked: isLocked,
-      updatedAt: new Date()
-    };
+    // Only update fields that are explicitly provided and not undefined
+    if (statusUpdate.isAvailable !== undefined) {
+      updateData.isAvailable = Boolean(statusUpdate.isAvailable);
+    }
+    
+    if (statusUpdate.isInUse !== undefined) {
+      updateData.isInUse = Boolean(statusUpdate.isInUse);
+    }
+    
+    // Determine lock state based on availability
+    // Business rule: available bikes should be locked, bikes in use should be unlocked
+    if (statusUpdate.isAvailable !== undefined || statusUpdate.isInUse !== undefined) {
+      const finalIsAvailable = statusUpdate.isAvailable !== undefined ? 
+        Boolean(statusUpdate.isAvailable) : 
+        Boolean(currentBike.isAvailable);
+      
+      const finalIsInUse = statusUpdate.isInUse !== undefined ? 
+        Boolean(statusUpdate.isInUse) : 
+        Boolean(currentBike.isInUse);
+      
+      // Set lock state: available bikes are locked, bikes in use are unlocked
+      if (finalIsAvailable && !finalIsInUse) {
+        updateData.isLocked = true;  // Available bikes should be locked
+      } else if (finalIsInUse) {
+        updateData.isLocked = false; // Bikes in use should be unlocked
+      } else {
+        // Preserve current lock state if unclear
+        updateData.isLocked = Boolean(currentBike.isLocked);
+      }
+    }
+    
+    // Always add timestamp
+    updateData.updatedAt = new Date();
     
     console.log(`Updating bike ${bikeId} status:`, updateData);
     
-    await updateDoc(bikeRef, updateData);
-    
-    return {
-      id: bikeId,
-      ...currentBike,
-      ...updateData
-    };
+    // Only proceed with update if we have data to update
+    if (Object.keys(updateData).length > 1) { // More than just updatedAt
+      await updateDoc(bikeRef, updateData);
+      
+      return {
+        id: bikeId,
+        ...currentBike,
+        ...updateData
+      };
+    } else {
+      console.log(`No valid updates provided for bike ${bikeId}`);
+      return {
+        id: bikeId,
+        ...currentBike,
+        updatedAt: updateData.updatedAt
+      };
+    }
   } catch (error) {
     console.error('Error updating bike status:', error);
     throw error;
@@ -672,57 +720,68 @@ export const updateBikeStatus = async (bikeId, statusUpdate) => {
 
 // QR Code and Hardware ID validation utilities
 export const validateBikeIdentifiers = async (qrCode, hardwareId, excludeBikeId = null) => {
-  const errors = [];
-  
-  // Ensure at least one identifier exists
-  if (!qrCode && !hardwareId) {
-    errors.push('At least one identifier (QR Code or Hardware ID) is required');
-    return { isValid: false, errors };
+  try {
+    // Check authentication first
+    checkAuth();
+    
+    const errors = [];
+    
+    // Ensure at least one identifier exists
+    if (!qrCode && !hardwareId) {
+      errors.push('At least one identifier (QR Code or Hardware ID) is required');
+      return { isValid: false, errors };
+    }
+    
+    // Validate QR code format and uniqueness
+    if (qrCode) {
+      const trimmedQRCode = qrCode.trim();
+      
+      // Check format (alphanumeric, 8-16 characters)
+      if (!/^[A-Za-z0-9]{8,16}$/.test(trimmedQRCode)) {
+        errors.push('QR Code must be 8-16 alphanumeric characters');
+      }
+      
+      // Check uniqueness
+      const isUnique = await isQRCodeUnique(trimmedQRCode, excludeBikeId);
+      if (!isUnique) {
+        errors.push(`QR code "${trimmedQRCode}" is already in use by another bike`);
+      }
+    }
+    
+    // Validate hardware ID format and uniqueness
+    if (hardwareId) {
+      const trimmedHardwareId = hardwareId.trim();
+      
+      // Check format (alphanumeric, 6-20 characters)
+      if (!/^[A-Za-z0-9]{6,20}$/.test(trimmedHardwareId)) {
+        errors.push('Hardware ID must be 6-20 alphanumeric characters');
+      }
+      
+      // Check uniqueness
+      const isUnique = await isQRCodeUnique(trimmedHardwareId, excludeBikeId);
+      if (!isUnique) {
+        errors.push(`Hardware ID "${trimmedHardwareId}" is already in use by another bike`);
+      }
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors,
+      normalizedQRCode: qrCode ? qrCode.trim() : null,
+      normalizedHardwareId: hardwareId ? hardwareId.trim() : null
+    };
+  } catch (error) {
+    console.error('Error validating bike identifiers:', error);
+    throw error;
   }
-  
-  // Validate QR code format and uniqueness
-  if (qrCode) {
-    const trimmedQRCode = qrCode.trim();
-    
-    // Check format (alphanumeric, 8-16 characters)
-    if (!/^[A-Za-z0-9]{8,16}$/.test(trimmedQRCode)) {
-      errors.push('QR Code must be 8-16 alphanumeric characters');
-    }
-    
-    // Check uniqueness
-    const isUnique = await isQRCodeUnique(trimmedQRCode, excludeBikeId);
-    if (!isUnique) {
-      errors.push(`QR code "${trimmedQRCode}" is already in use by another bike`);
-    }
-  }
-  
-  // Validate hardware ID format and uniqueness
-  if (hardwareId) {
-    const trimmedHardwareId = hardwareId.trim();
-    
-    // Check format (alphanumeric, 6-20 characters)
-    if (!/^[A-Za-z0-9]{6,20}$/.test(trimmedHardwareId)) {
-      errors.push('Hardware ID must be 6-20 alphanumeric characters');
-    }
-    
-    // Check uniqueness
-    const isUnique = await isQRCodeUnique(trimmedHardwareId, excludeBikeId);
-    if (!isUnique) {
-      errors.push(`Hardware ID "${trimmedHardwareId}" is already in use by another bike`);
-    }
-  }
-  
-  return {
-    isValid: errors.length === 0,
-    errors,
-    normalizedQRCode: qrCode ? qrCode.trim() : null,
-    normalizedHardwareId: hardwareId ? hardwareId.trim() : null
-  };
 };
 
 // Enhanced uniqueness check that can exclude a specific bike ID
 export const isQRCodeUnique = async (identifier, excludeBikeId = null) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     // Check in qrCode field
     const qrCodeQuery = query(
       collection(db, "bikes"),

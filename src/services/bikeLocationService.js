@@ -66,11 +66,39 @@ export const startBikeRide = async (bikeId, userId) => {
       isInUse: bikeData.isInUse
     });
     
-    // Create a new ride record
+    const currentTimestamp = Date.now();
+    
+    // Create a new ride record with proper structure
     const rideData = {
       bikeId,
       userId,
-      startTime: serverTimestamp(),
+      startTime: currentTimestamp,
+      startLocation: {
+        accuracy: 0,
+        latitude: bikeData.latitude,
+        longitude: bikeData.longitude,
+        position: {
+          latitude: bikeData.latitude,
+          longitude: bikeData.longitude
+        },
+        speed: 0,
+        timestamp: currentTimestamp
+      },
+      status: "active",
+      cost: 0,
+      distanceTraveled: 0,
+      path: [{
+        accuracy: 0,
+        latitude: bikeData.latitude,
+        longitude: bikeData.longitude,
+        position: {
+          latitude: bikeData.latitude,
+          longitude: bikeData.longitude
+        },
+        speed: 0,
+        timestamp: currentTimestamp
+      }],
+      // Keep legacy fields for backward compatibility
       isActive: true,
       startLatitude: bikeData.latitude,
       startLongitude: bikeData.longitude
@@ -92,7 +120,7 @@ export const startBikeRide = async (bikeId, userId) => {
     return {
       rideId: rideRef.id,
       ...rideData,
-      startTime: new Date()
+      startTime: new Date(currentTimestamp)
     };
   } catch (error) {
     console.error('Error starting bike ride:', error);
@@ -112,16 +140,50 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
     
     const rideData = rideDoc.data();
     
-    if (!rideData.isActive) {
+    if (rideData.status === "completed" || !rideData.isActive) {
       throw new Error("This ride is already completed");
     }
     
     const bikeId = rideData.bikeId;
     const bikeRef = doc(db, "bikes", bikeId);
+    const currentTimestamp = Date.now();
     
-    // Update ride status
+    // Calculate ride cost and distance
+    const startTime = rideData.startTime;
+    const duration = (currentTimestamp - startTime) / 1000 / 3600; // hours
+    const bikeDoc = await getDoc(bikeRef);
+    const bikeInfo = bikeDoc.data();
+    const hourlyRate = bikeInfo.priceValue || 50; // Default rate if not found
+    const calculatedCost = duration * hourlyRate;
+    
+    // Calculate distance from path if available
+    let totalDistance = 0;
+    if (rideData.path && rideData.path.length > 1) {
+      for (let i = 1; i < rideData.path.length; i++) {
+        const prev = rideData.path[i - 1];
+        const curr = rideData.path[i];
+        totalDistance += getDistanceBetweenPoints(prev, curr);
+      }
+    }
+    
+    // Update ride status with proper structure
     await updateDoc(rideRef, {
-      endTime: serverTimestamp(),
+      endTime: currentTimestamp,
+      endLocation: {
+        accuracy: 0,
+        latitude: latitude,
+        longitude: longitude,
+        position: {
+          latitude: latitude,
+          longitude: longitude
+        },
+        speed: 0,
+        timestamp: currentTimestamp
+      },
+      status: "completed",
+      cost: calculatedCost,
+      distanceTraveled: totalDistance,
+      // Keep legacy fields for backward compatibility
       isActive: false,
       endLatitude: latitude, 
       endLongitude: longitude
@@ -144,12 +206,92 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
     return {
       rideId,
       bikeId,
-      endTime: new Date(),
+      endTime: new Date(currentTimestamp),
       endLatitude: latitude,
-      endLongitude: longitude
+      endLongitude: longitude,
+      cost: calculatedCost,
+      distanceTraveled: totalDistance
     };
   } catch (error) {
     console.error('Error ending bike ride:', error);
+    throw error;
+  }
+};
+
+// Helper function to calculate distance between two points
+const getDistanceBetweenPoints = (point1, point2) => {
+  const R = 6371; // Earth's radius in kilometers
+  const dLat = (point2.latitude - point1.latitude) * Math.PI / 180;
+  const dLon = (point2.longitude - point1.longitude) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(point1.latitude * Math.PI / 180) * Math.cos(point2.latitude * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // Distance in kilometers
+};
+
+// Update ride location during active ride
+export const updateRideLocation = async (rideId, latitude, longitude, speed = 0, accuracy = 0) => {
+  try {
+    const rideRef = doc(db, "rides", rideId);
+    const rideDoc = await getDoc(rideRef);
+    
+    if (!rideDoc.exists()) {
+      throw new Error(`Ride with ID ${rideId} not found`);
+    }
+    
+    const rideData = rideDoc.data();
+    
+    if (rideData.status !== "active" && !rideData.isActive) {
+      throw new Error("Cannot update location for inactive ride");
+    }
+    
+    const currentTimestamp = Date.now();
+    const newLocationPoint = {
+      accuracy: accuracy,
+      latitude: latitude,
+      longitude: longitude,
+      position: {
+        latitude: latitude,
+        longitude: longitude
+      },
+      speed: speed,
+      timestamp: currentTimestamp
+    };
+    
+    // Add to path array
+    const currentPath = rideData.path || [];
+    const updatedPath = [...currentPath, newLocationPoint];
+    
+    // Calculate updated distance
+    let totalDistance = rideData.distanceTraveled || 0;
+    if (currentPath.length > 0) {
+      const lastPoint = currentPath[currentPath.length - 1];
+      totalDistance += getDistanceBetweenPoints(lastPoint, newLocationPoint);
+    }
+    
+    await updateDoc(rideRef, {
+      path: updatedPath,
+      distanceTraveled: totalDistance,
+      // Update current location fields for real-time tracking
+      currentLatitude: latitude,
+      currentLongitude: longitude,
+      currentSpeed: speed,
+      locationAccuracy: accuracy,
+      lastLocationUpdate: serverTimestamp()
+    });
+    
+    return {
+      rideId,
+      latitude,
+      longitude,
+      speed,
+      accuracy,
+      distanceTraveled: totalDistance
+    };
+  } catch (error) {
+    console.error('Error updating ride location:', error);
     throw error;
   }
 };
@@ -158,13 +300,14 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
 export const getActiveRides = async () => {
   try {
     const ridesCollection = collection(db, "rides");
-    const q = query(ridesCollection, where("isActive", "==", true));
+    const q = query(ridesCollection, where("status", "==", "active"));
     const snapshot = await getDocs(q);
     
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      startTime: doc.data().startTime?.toDate() || null
+      startTime: doc.data().startTime ? new Date(doc.data().startTime) : null,
+      endTime: doc.data().endTime ? new Date(doc.data().endTime) : null
     }));
   } catch (error) {
     console.error('Error getting active rides:', error);
@@ -182,8 +325,8 @@ export const getUserRideHistory = async (userId) => {
     return snapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      startTime: doc.data().startTime?.toDate() || null,
-      endTime: doc.data().endTime?.toDate() || null
+      startTime: doc.data().startTime ? new Date(doc.data().startTime) : null,
+      endTime: doc.data().endTime ? new Date(doc.data().endTime) : null
     }));
   } catch (error) {
     console.error('Error getting user ride history:', error);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { 
   getAllBookings, 
+  getAllBookingsFromAllCollections,
   updateBooking, 
   deleteBooking,
   getBookingsByBike,
@@ -10,18 +11,21 @@ import {
   getRevenueByPeriod,
   getBookingsByUserRole
 } from '../services/bookingService';
-import { getBikes, updateBikeStatus } from '../services/bikeService';
+import { getAllBikes as getBikes, updateBikeStatus } from '../services/bikeService';
 import { getUsers } from '../services/userService';
 import { format, parseISO, startOfWeek, endOfWeek, addDays, startOfDay, endOfDay } from 'date-fns';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { 
   collection, 
   query, 
   orderBy, 
-  onSnapshot,
   doc,
-  getDocs
+  getDocs,
+  collectionGroup,
+  addDoc,
+  setDoc
 } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 
@@ -922,10 +926,14 @@ const BookingManagement = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
-  const [realTimeEnabled, setRealTimeEnabled] = useState(true);
   const [isAdmin, setIsAdmin] = useState(true);
   const [showAllBikesView, setShowAllBikesView] = useState(true);
   const [updating, setUpdating] = useState(false);
+  
+  // Authentication state
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   
   // Notification state
   const [notification, setNotification] = useState(null);
@@ -939,6 +947,24 @@ const BookingManagement = () => {
       setNotification(null);
     }, 5000);
   };
+
+  // Authentication check effect
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUser(user);
+        setIsAuthenticated(true);
+        setAuthLoading(false);
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+        setAuthLoading(false);
+        showNotification('Please log in to access booking management', 'error');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
   
   // Mock data for filters and pagination
   const [statusFilter, setStatusFilter] = useState('all');
@@ -948,9 +974,12 @@ const BookingManagement = () => {
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
   const [activeFilters, setActiveFilters] = useState([]);
-  const indexOfFirstBooking = 0;
-  const indexOfLastBooking = 10;
-  const currentBookings = filteredBookings.slice(0, 10);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  
+  // Pagination constants
+  const indexOfLastBooking = currentPage * itemsPerPage;
+  const indexOfFirstBooking = indexOfLastBooking - itemsPerPage;
+  const currentBookings = filteredBookings.slice(indexOfFirstBooking, indexOfLastBooking);
   
   const locales = {
     'en-US': require('date-fns/locale/en-US')
@@ -963,10 +992,6 @@ const BookingManagement = () => {
     getDay: (date) => date.getDay(),
     locales,
   });
-
-  const toggleRealTimeUpdates = () => {
-    setRealTimeEnabled(!realTimeEnabled);
-  };
 
   const handleViewAllBikes = () => {
     setShowAllBikesView(true);
@@ -994,10 +1019,11 @@ const BookingManagement = () => {
           });
         }
       } else if (newStatus === 'CONFIRMED') {
-        // When confirming, mark the bike as unavailable
+        // When confirming, mark the bike as unavailable and in use
         const booking = bookings.find(b => b.id === bookingId);
         if (booking && booking.bikeId) {
           await updateBikeStatus(booking.bikeId, {
+            isAvailable: false,  // Explicitly set as not available
             isInUse: true
           });
         }
@@ -1037,7 +1063,6 @@ const BookingManagement = () => {
       showNotification(`${bookingName} successfully ${statusText}!`, 'success');
       
     } catch (error) {
-      console.error(`Error updating booking status to ${newStatus}:`, error);
       showNotification(`Error updating booking: ${error.message}`, 'error');
     } finally {
       setUpdating(false);
@@ -1134,8 +1159,16 @@ const BookingManagement = () => {
     );
   };
 
-  // Initial data loading
+  // Main data loading effect
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!isAuthenticated || !user) {
+      return;
+    }
+    
     // Load bookings, bikes, and revenue data
     const loadData = async () => {
       try {
@@ -1149,132 +1182,184 @@ const BookingManagement = () => {
         
         setBikes(bikesData);
         
-        // Set up real-time listener for bookings if enabled
-        if (realTimeEnabled) {
-          try {
-            // Use collection query to get bookings from main collection
-            const bookingsRef = collection(db, "bookings");
-            const bookingsQuery = query(bookingsRef, orderBy("createdAt", "desc"));
-            
-            // Set up the real-time listener
-            const unsubscribe = onSnapshot(bookingsQuery, (snapshot) => {
-              const bookingsData = [];
-              
-              snapshot.forEach(doc => {
-                const data = doc.data();
-                bookingsData.push({
-                  id: doc.id,
-                  ...data,
-                  startDate: data.startDate?.toDate ? data.startDate?.toDate() : data.startDate,
-                  endDate: data.endDate?.toDate ? data.endDate?.toDate() : data.endDate,
-                  createdAt: data.createdAt?.toDate ? data.createdAt?.toDate() : data.createdAt
-                });
-              });
-              
-              // Enhance booking data with bike and user information
-              const enhancedBookings = bookingsData.map(booking => {
-                let enhancedBooking = { ...booking };
-                
-                // Add bike information if missing
-                if (!booking.bikeName) {
-                  const matchingBike = bikesData.find(bike => bike.id === booking.bikeId);
-                  if (matchingBike) {
-                    enhancedBooking = {
-                      ...enhancedBooking,
-                      bikeName: matchingBike.name || 'Unknown Bike',
-                      bikeType: matchingBike.type || '',
-                      bikeImageUrl: matchingBike.imageUrl || ''
-                    };
-                  }
-                }
-                
-                // Add user fullName if missing
-                if (!booking.fullName) {
-                  const matchingUser = usersData.find(user => user.id === booking.userId);
-                  if (matchingUser) {
-                    enhancedBooking = {
-                      ...enhancedBooking,
-                      fullName: matchingUser.fullName || matchingUser.displayName || booking.userName,
-                      userEmail: matchingUser.email,
-                      userPhone: matchingUser.phoneNumber
-                    };
-                  }
-                }
-                
-                return enhancedBooking;
-              });
-              
-              // Update state with the real-time data
-              setBookings(enhancedBookings);
-              setFilteredBookings(enhancedBookings);
-              
-              // If we have a selected booking, update its data too
-              if (selectedBooking) {
-                const updatedSelectedBooking = enhancedBookings.find(booking => booking.id === selectedBooking.id);
-                if (updatedSelectedBooking) {
-                  setSelectedBooking(updatedSelectedBooking);
-                }
-              }
-              
-              setIsLoading(false);
-            }, (error) => {
-              console.error("Real-time bookings error:", error);
-              setIsLoading(false);
-              // Fall back to regular fetch if real-time listener fails
-              setRealTimeEnabled(false);
-              loadBookingsOnce(bikesData, usersData);
-            });
-            
-            // Clean up the listener when component unmounts or realTimeEnabled changes
-            return () => unsubscribe();
-          } catch (error) {
-            console.error("Error setting up real-time listener:", error);
-            setIsLoading(false);
-            setRealTimeEnabled(false);
-            loadBookingsOnce(bikesData, usersData);
-          }
-        } else {
-          // If real-time is disabled, load bookings once
-          await loadBookingsOnce(bikesData, usersData);
-        }
+        // Load bookings once
+        await loadBookingsOnce(bikesData, usersData);
         
         // Load revenue data
-        const [dayRevenue, weekRevenue, monthRevenue] = await Promise.all([
-          getRevenueByPeriod('day'),
-          getRevenueByPeriod('week'),
-          getRevenueByPeriod('month')
-        ]);
-        
-        setRevenueSummary({
-          day: dayRevenue,
-          week: weekRevenue,
-          month: monthRevenue
-        });
+        await loadRevenueData();
       } catch (error) {
-        console.error('Error loading booking data:', error);
         setIsLoading(false);
+        if (error.code === 'permission-denied') {
+          showNotification('Permission denied. Please ensure you are logged in.', 'error');
+        } else {
+          showNotification('Error loading booking data: ' + error.message, 'error');
+        }
       }
     };
-    
+
     loadData();
-    
-    // Clean up function
-    return () => {
-      // Any cleanup will be handled by the unsubscribe function returned by onSnapshot
-    };
-  }, [realTimeEnabled, selectedBooking]);
+  }, [selectedBooking, isAuthenticated, authLoading, user]);
+  
+  // Load revenue data
+  const loadRevenueData = async () => {
+    try {
+      const [dayRevenue, weekRevenue, monthRevenue] = await Promise.all([
+        getRevenueByPeriod('day'),
+        getRevenueByPeriod('week'),
+        getRevenueByPeriod('month')
+      ]);
+      
+      setRevenueSummary({
+        day: dayRevenue,
+        week: weekRevenue,
+        month: monthRevenue
+      });
+    } catch (error) {
+      showNotification('Error loading revenue data: ' + error.message, 'error');
+    }
+  };
   
   // Helper function to load bookings without real-time updates
   const loadBookingsOnce = async (bikesData, usersData) => {
     try {
-      const bookingsData = await getAllBookings();
+      setIsLoading(true);
+      
+      // Get bookings from main collection
+      const mainBookingsCollection = collection(db, "bookings");
+      const mainSnapshot = await getDocs(mainBookingsCollection);
+      
+      const mainBookings = mainSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          startDate: data.startDate?.toDate ? data.startDate.toDate() : 
+                    data.startDate ? new Date(data.startDate) : null,
+          endDate: data.endDate?.toDate ? data.endDate.toDate() : 
+                  data.endDate ? new Date(data.endDate) : null,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : 
+                    data.createdAt ? new Date(data.createdAt) : new Date(),
+          source: 'main'
+        };
+      });
+
+      // Get bookings from bike subcollections
+      const bikeBookings = [];
+      
+      for (const bike of bikesData) {
+        try {
+          const bikeBookingsRef = collection(db, `bikes/${bike.id}/bookings`);
+          const bikeBookingsSnapshot = await getDocs(bikeBookingsRef);
+          
+          if (bikeBookingsSnapshot.docs.length > 0) {
+            bikeBookingsSnapshot.docs.forEach(doc => {
+              const data = doc.data();
+              bikeBookings.push({
+                id: doc.id,
+                ...data,
+                startDate: data.startDate?.toDate ? data.startDate.toDate() : 
+                          data.startDate ? new Date(data.startDate) : null,
+                endDate: data.endDate?.toDate ? data.endDate.toDate() : 
+                        data.endDate ? new Date(data.endDate) : null,
+                createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : 
+                          data.createdAt ? new Date(data.createdAt) : new Date(),
+                source: `bike-${bike.id}`,
+                bikeName: data.bikeName || bike.name,
+                bikeType: data.bikeType || bike.type
+              });
+            });
+          }
+        } catch (error) {
+          // Silent error handling for individual bike collections
+        }
+      }
+
+      // Get bookings from user subcollections
+      const userBookings = [];
+      
+      for (const user of usersData) {
+        try {
+          const userBookingsRef = collection(db, `users/${user.id}/bookings`);
+          const userBookingsSnapshot = await getDocs(userBookingsRef);
+          
+          if (userBookingsSnapshot.docs.length > 0) {
+            userBookingsSnapshot.docs.forEach(doc => {
+              const data = doc.data();
+              userBookings.push({
+                id: doc.id,
+                ...data,
+                startDate: data.startDate?.toDate ? data.startDate.toDate() : 
+                          data.startDate ? new Date(data.startDate) : null,
+                endDate: data.endDate?.toDate ? data.endDate.toDate() : 
+                        data.endDate ? new Date(data.endDate) : null,
+                createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : 
+                          data.createdAt ? new Date(data.createdAt) : new Date(),
+                source: `user-${user.id}`,
+                fullName: data.fullName || user.fullName || user.displayName,
+                userEmail: data.userEmail || user.email
+              });
+            });
+          }
+        } catch (error) {
+          // Silent error handling for individual user collections
+        }
+      }
+
+      // Also try collectionGroup query as fallback
+      let collectionGroupBookings = [];
+      try {
+        const bookingsGroupRef = collectionGroup(db, "bookings");
+        const groupSnapshot = await getDocs(bookingsGroupRef);
+        
+        collectionGroupBookings = groupSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            startDate: data.startDate?.toDate ? data.startDate.toDate() : 
+                      data.startDate ? new Date(data.startDate) : null,
+            endDate: data.endDate?.toDate ? data.endDate.toDate() : 
+                    data.endDate ? new Date(data.endDate) : null,
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : 
+                      data.createdAt ? new Date(data.createdAt) : new Date(),
+            source: 'collectionGroup',
+            documentPath: doc.ref.path
+          };
+        });
+      } catch (error) {
+        // Silent error handling for collectionGroup query
+      }
+
+      // Merge all bookings and remove duplicates
+      const allBookings = [...mainBookings];
+      
+      // Add bike subcollection bookings that aren't already in main collection
+      bikeBookings.forEach(booking => {
+        if (!allBookings.some(existing => existing.id === booking.id)) {
+          allBookings.push(booking);
+        }
+      });
+      
+      // Add user subcollection bookings that aren't already in main collection or bike collections
+      userBookings.forEach(booking => {
+        if (!allBookings.some(existing => existing.id === booking.id)) {
+          allBookings.push(booking);
+        }
+      });
+      
+      // Add any additional bookings from collectionGroup that we might have missed
+      collectionGroupBookings.forEach(booking => {
+        if (!allBookings.some(existing => existing.id === booking.id)) {
+          allBookings.push(booking);
+        }
+      });
       
       // Enhance booking data with bike and user information
-      const enhancedBookings = bookingsData.map(booking => {
+      const enhancedBookings = allBookings.map(booking => {
         let enhancedBooking = { ...booking };
         
         // Add bike information if missing
-        if (!booking.bikeName) {
+        if (!booking.bikeName && booking.bikeId) {
           const matchingBike = bikesData.find(bike => bike.id === booking.bikeId);
           if (matchingBike) {
             enhancedBooking = {
@@ -1287,7 +1372,7 @@ const BookingManagement = () => {
         }
         
         // Add user fullName if missing
-        if (!booking.fullName) {
+        if (!booking.fullName && booking.userId) {
           const matchingUser = usersData.find(user => user.id === booking.userId);
           if (matchingUser) {
             enhancedBooking = {
@@ -1302,17 +1387,30 @@ const BookingManagement = () => {
         return enhancedBooking;
       });
       
+      // Sort by creation date (newest first)
+      enhancedBookings.sort((a, b) => {
+        const aDate = a.createdAt || new Date(0);
+        const bDate = b.createdAt || new Date(0);
+        return bDate - aDate;
+      });
+      
       setBookings(enhancedBookings);
       setFilteredBookings(enhancedBookings);
       setIsLoading(false);
+      
     } catch (error) {
-      console.error('Error loading bookings:', error);
       setIsLoading(false);
+      showNotification('Error loading bookings: ' + error.message, 'error');
     }
   };
   
   // Apply filters and search whenever filter states change
   useEffect(() => {
+    // Skip filtering if bookings are currently being updated
+    if (isLoading) {
+      return;
+    }
+    
     let result = [...bookings];
     
     // Filter by status
@@ -1388,58 +1486,117 @@ const BookingManagement = () => {
     
     setActiveFilters(newActiveFilters);
     setFilteredBookings(result);
-    setTotalPages(Math.ceil(result.length / 10));
+    setTotalPages(Math.ceil(result.length / itemsPerPage));
     setCurrentPage(1);
+    
   }, [statusFilter, bikeFilter, bookingTypeFilter, searchTerm, startDateFilter, endDateFilter, bookings, bikes]);
 
   // Return loading state or actual UI
+  
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <Container>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '50vh',
+          flexDirection: 'column',
+          gap: '20px'
+        }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: `4px solid ${colors.lightGray}`,
+            borderTop: `4px solid ${colors.pineGreen}`,
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }}></div>
+          <div style={{ color: colors.mediumGray, fontSize: '16px' }}>
+            Checking authentication...
+          </div>
+          <style>
+            {`
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            `}
+          </style>
+        </div>
+      </Container>
+    );
+  }
+
+  // Show error state if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <Container>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          height: '50vh',
+          flexDirection: 'column',
+          gap: '20px',
+          textAlign: 'center'
+        }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke={colors.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 12l2 2 4-4"/>
+            <path d="M21 12c.552 0 1-.449 1-1s-.448-1-1-1-1 .449-1 1 .448 1 1 1z"/>
+            <path d="M3 12c.552 0 1-.449 1-1s-.448-1-1-1-1 .449-1 1 .448 1 1 1z"/>
+            <path d="M12 21c.552 0 1-.449 1-1s-.448-1-1-1-1 .449-1 1 .448 1 1 1z"/>
+            <path d="M12 3c.552 0 1-.449 1-1s-.448-1-1-1-1 .449-1 1 .448 1 1 1z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          <div>
+            <div style={{ 
+              fontSize: '24px', 
+              fontWeight: '600', 
+              color: colors.darkGray,
+              marginBottom: '10px' 
+            }}>
+              Authentication Required
+            </div>
+            <div style={{ 
+              fontSize: '16px', 
+              color: colors.mediumGray,
+              maxWidth: '400px',
+              lineHeight: '1.5'
+            }}>
+              You need to be logged in to access booking management. 
+              Please return to the dashboard and ensure you're properly authenticated.
+            </div>
+          </div>
+        </div>
+      </Container>
+    );
+  }
+
   return (
     <Container>
       <PageHeader>
         <PageTitle>Booking Management</PageTitle>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            background: colors.lightGray, 
-            padding: '6px 12px', 
-            borderRadius: '20px',
-            cursor: 'pointer',
-            opacity: realTimeEnabled ? 1 : 0.6
-          }}
-          onClick={toggleRealTimeUpdates}
-          >
-            <span style={{ 
-              width: '10px', 
-              height: '10px', 
-              borderRadius: '50%', 
-              backgroundColor: realTimeEnabled ? '#4caf50' : '#999',
-              marginRight: '8px',
-              display: 'inline-block'
-            }}></span>
-            <span style={{ fontSize: '14px' }}>
-              {realTimeEnabled ? 'Real-time updates on' : 'Real-time updates off'}
-            </span>
+        {isAdmin && (
+          <div>
+            <ViewToggleButton 
+              active={showAllBikesView}
+              onClick={handleViewAllBikes}
+            >
+              All Bookings
+            </ViewToggleButton>
+            <ViewToggleButton 
+              active={!showAllBikesView}
+              onClick={() => setShowAllBikesView(false)}
+            >
+              Per Bike View
+            </ViewToggleButton>
           </div>
-          
-          {isAdmin && (
-            <div>
-              <ViewToggleButton 
-                active={showAllBikesView}
-                onClick={handleViewAllBikes}
-              >
-                All Bookings
-              </ViewToggleButton>
-              <ViewToggleButton 
-                active={!showAllBikesView}
-                onClick={() => setShowAllBikesView(false)}
-              >
-                Per Bike View
-              </ViewToggleButton>
-            </div>
-          )}
-        </div>
+        )}
       </PageHeader>
+      
+      {/* Debug Information - Remove this section completely */}
       
       {/* Revenue Summary - Admin Only */}
       {isAdmin && (
@@ -1683,7 +1840,35 @@ const BookingManagement = () => {
               <div>Actions</div>
             </TableHeader>
             
-            {currentBookings.length === 0 ? (
+            {isLoading ? (
+              <EmptyState>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  gap: '10px',
+                  color: colors.pineGreen 
+                }}>
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    border: `3px solid ${colors.lightGray}`,
+                    borderTop: `3px solid ${colors.pineGreen}`,
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                  }}></div>
+                  <span>Loading bookings...</span>
+                </div>
+                <style>
+                  {`
+                    @keyframes spin {
+                      0% { transform: rotate(0deg); }
+                      100% { transform: rotate(360deg); }
+                    }
+                  `}
+                </style>
+              </EmptyState>
+            ) : currentBookings.length === 0 ? (
               <EmptyState>
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10"></circle>

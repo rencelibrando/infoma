@@ -1,4 +1,4 @@
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { 
   collection, 
   addDoc, 
@@ -16,28 +16,94 @@ import {
   setDoc
 } from "firebase/firestore";
 
+// Helper function to check authentication
+const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User not authenticated. Please log in to access this resource.');
+  }
+  return user;
+};
+
+// Get all bookings from all collections and subcollections
+export const getAllBookingsFromAllCollections = async () => {
+  try {
+    checkAuth();
+    
+    // Get bookings from main collection
+    const mainBookingsCollection = collection(db, "bookings");
+    const mainSnapshot = await getDocs(mainBookingsCollection);
+    
+    const mainBookings = mainSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      startDate: doc.data().startDate?.toDate ? doc.data().startDate?.toDate() : doc.data().startDate,
+      endDate: doc.data().endDate?.toDate ? doc.data().endDate?.toDate() : doc.data().endDate,
+      createdAt: doc.data().createdAt,
+      source: 'main'
+    }));
+
+    // Get bookings from all subcollections using collectionGroup
+    const bookingsGroupRef = collectionGroup(db, "bookings");
+    const subcollectionSnapshot = await getDocs(bookingsGroupRef);
+    
+    const subcollectionBookings = subcollectionSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      startDate: doc.data().startDate?.toDate ? doc.data().startDate?.toDate() : doc.data().startDate,
+      endDate: doc.data().endDate?.toDate ? doc.data().endDate?.toDate() : doc.data().endDate,
+      createdAt: doc.data().createdAt,
+      source: 'subcollection'
+    }));
+
+    // Merge all bookings, avoiding duplicates
+    const mergedBookings = [...mainBookings];
+    
+    // Add subcollection bookings that don't already exist in the main collection
+    subcollectionBookings.forEach(subcollectionBooking => {
+      if (!mergedBookings.some(booking => booking.id === subcollectionBooking.id)) {
+        mergedBookings.push(subcollectionBooking);
+      }
+    });
+
+    return mergedBookings;
+  } catch (error) {
+    throw error;
+  }
+};
+
 // Get all bookings
 export const getAllBookings = async () => {
   try {
-    const bookingsCollection = collection(db, "bookings");
-    const snapshot = await getDocs(bookingsCollection);
-    const bookings = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      startDate: doc.data().startDate?.toDate(),
-      endDate: doc.data().endDate?.toDate(),
-      createdAt: doc.data().createdAt
-    }));
-    return bookings;
+    checkAuth();
+    
+    // Use the new function that fetches from all collections
+    return await getAllBookingsFromAllCollections();
   } catch (error) {
-    console.error('Error getting bookings:', error);
-    throw error;
+    // Fallback to main collection only if collectionGroup fails
+    try {
+      const bookingsCollection = collection(db, "bookings");
+      const snapshot = await getDocs(bookingsCollection);
+      const bookings = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        startDate: doc.data().startDate?.toDate(),
+        endDate: doc.data().endDate?.toDate(),
+        createdAt: doc.data().createdAt
+      }));
+      return bookings;
+    } catch (fallbackError) {
+      throw fallbackError;
+    }
   }
 };
 
 // Get bookings by user
 export const getBookingsByUser = async (userId) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     const bookingsCollection = collection(db, "bookings");
     const q = query(
       bookingsCollection, 
@@ -54,7 +120,6 @@ export const getBookingsByUser = async (userId) => {
     }));
     return bookings;
   } catch (error) {
-    console.error('Error getting user bookings:', error);
     throw error;
   }
 };
@@ -62,23 +127,56 @@ export const getBookingsByUser = async (userId) => {
 // Get bookings by bike
 export const getBookingsByBike = async (bikeId) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
+    // Get bookings from main collection
     const bookingsCollection = collection(db, "bookings");
-    const q = query(
+    const mainQuery = query(
       bookingsCollection, 
       where("bikeId", "==", bikeId),
       orderBy("startDate", "desc")
     );
-    const snapshot = await getDocs(q);
-    const bookings = snapshot.docs.map(doc => ({
+    const mainSnapshot = await getDocs(mainQuery);
+    
+    const mainBookings = mainSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
       startDate: doc.data().startDate?.toDate(),
       endDate: doc.data().endDate?.toDate(),
-      createdAt: doc.data().createdAt
+      createdAt: doc.data().createdAt,
+      source: 'main'
     }));
-    return bookings;
+    
+    // Get bookings from all subcollections using collectionGroup
+    const bookingsGroupRef = collectionGroup(db, "bookings");
+    const subcollectionQuery = query(
+      bookingsGroupRef,
+      where("bikeId", "==", bikeId),
+      orderBy("startDate", "desc")
+    );
+    const subcollectionSnapshot = await getDocs(subcollectionQuery);
+    
+    const subcollectionBookings = subcollectionSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      startDate: doc.data().startDate?.toDate ? doc.data().startDate?.toDate() : doc.data().startDate,
+      endDate: doc.data().endDate?.toDate ? doc.data().endDate?.toDate() : doc.data().endDate,
+      createdAt: doc.data().createdAt,
+      source: 'subcollection'
+    }));
+    
+    // Merge and deduplicate bookings
+    const allBookings = [...mainBookings];
+    
+    subcollectionBookings.forEach(subcollectionBooking => {
+      if (!allBookings.some(booking => booking.id === subcollectionBooking.id)) {
+        allBookings.push(subcollectionBooking);
+      }
+    });
+    
+    return allBookings;
   } catch (error) {
-    console.error('Error getting bike bookings:', error);
     throw error;
   }
 };
@@ -86,6 +184,9 @@ export const getBookingsByBike = async (bikeId) => {
 // Get bookings within a date range
 export const getBookingsByDateRange = async (startDate, endDate) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     const startTimestamp = startDate instanceof Date ? Timestamp.fromDate(startDate) : startDate;
     const endTimestamp = endDate instanceof Date ? Timestamp.fromDate(endDate) : endDate;
     
@@ -108,7 +209,6 @@ export const getBookingsByDateRange = async (startDate, endDate) => {
     
     return bookings;
   } catch (error) {
-    console.error('Error getting bookings by date range:', error);
     throw error;
   }
 };
@@ -161,6 +261,9 @@ export const validateBookingFormat = (booking) => {
 // Create a new booking
 export const createBooking = async (bookingData) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     // Validate and standardize the booking data format
     const validatedBookingData = validateBookingFormat(bookingData);
     
@@ -189,9 +292,6 @@ export const createBooking = async (bookingData) => {
       createdAt: validatedBookingData.createdAt || Date.now()
     };
     
-    // Logging for debugging
-    console.log("Creating new booking:", booking);
-    
     // 1. Save to main bookings collection
     const docRef = await addDoc(collection(db, "bookings"), booking);
     
@@ -208,7 +308,6 @@ export const createBooking = async (bookingData) => {
       endDate: booking.endDate?.toDate()
     };
   } catch (error) {
-    console.error('Error creating booking:', error);
     throw error;
   }
 };
@@ -216,16 +315,37 @@ export const createBooking = async (bookingData) => {
 // Update a booking
 export const updateBooking = async (bookingId, updatedData) => {
   try {
-    const bookingRef = doc(db, "bookings", bookingId);
+    // Check authentication first
+    checkAuth();
     
-    // Get the current booking to find the user ID
-    const currentBookingDoc = await getDoc(bookingRef);
-    if (!currentBookingDoc.exists()) {
-      throw new Error(`Booking with ID ${bookingId} not found`);
+    let bookingRef = null;
+    let currentBooking = null;
+    let foundLocation = null;
+    
+    // First, try to find the booking in the main collection
+    const mainBookingRef = doc(db, "bookings", bookingId);
+    const mainBookingDoc = await getDoc(mainBookingRef);
+    
+    if (mainBookingDoc.exists()) {
+      bookingRef = mainBookingRef;
+      currentBooking = mainBookingDoc.data();
+      foundLocation = 'main';
+    } else {
+      // If not found in main collection, use collectionGroup to find it in subcollections
+      const bookingsGroupRef = collectionGroup(db, "bookings");
+      const groupSnapshot = await getDocs(bookingsGroupRef);
+      
+      // Find the specific booking document
+      const foundDoc = groupSnapshot.docs.find(doc => doc.id === bookingId);
+      
+      if (foundDoc) {
+        bookingRef = foundDoc.ref;
+        currentBooking = foundDoc.data();
+        foundLocation = foundDoc.ref.path;
+      } else {
+        throw new Error(`Booking with ID ${bookingId} not found in any collection`);
+      }
     }
-    
-    const currentBooking = currentBookingDoc.data();
-    const userId = currentBooking.userId;
     
     // Convert Date objects to Firestore Timestamps if present
     const updates = { ...updatedData };
@@ -238,38 +358,97 @@ export const updateBooking = async (bookingId, updatedData) => {
       updates.endDate = Timestamp.fromDate(updates.endDate);
     }
     
-    // 1. Update in main bookings collection
+    // Add updatedAt timestamp
+    updates.updatedAt = serverTimestamp();
+    
+    // Update the booking in its found location
     await updateDoc(bookingRef, updates);
     
-    // 2. Also update in user's bookings subcollection if user ID exists
-    if (userId) {
-      const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
+    // If booking was found in a subcollection, also try to update/sync with other locations
+    if (foundLocation !== 'main') {
+      const userId = currentBooking.userId;
+      const bikeId = currentBooking.bikeId;
       
-      // Check if the document exists in the user's subcollection
-      const userBookingDoc = await getDoc(userBookingRef);
+      // Try to update in main collection if it exists there
+      try {
+        const mainDoc = await getDoc(mainBookingRef);
+        if (mainDoc.exists()) {
+          await updateDoc(mainBookingRef, updates);
+        }
+      } catch (error) {
+        // Silent error handling
+      }
       
-      if (userBookingDoc.exists()) {
-        await updateDoc(userBookingRef, updates);
-      } else {
-        // If it doesn't exist in the subcollection, create it
-        const mergedBooking = { ...currentBooking, ...updates };
-        await setDoc(userBookingRef, mergedBooking);
+      // Try to update in user subcollection if it exists and we have userId
+      if (userId) {
+        try {
+          const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
+          const userBookingDoc = await getDoc(userBookingRef);
+          if (userBookingDoc.exists()) {
+            await updateDoc(userBookingRef, updates);
+          }
+        } catch (error) {
+          // Silent error handling
+        }
+      }
+      
+      // Try to update in bike subcollection if it exists and we have bikeId
+      if (bikeId) {
+        try {
+          const bikeBookingRef = doc(db, `bikes/${bikeId}/bookings`, bookingId);
+          const bikeBookingDoc = await getDoc(bikeBookingRef);
+          if (bikeBookingDoc.exists()) {
+            await updateDoc(bikeBookingRef, updates);
+          }
+        } catch (error) {
+          // Silent error handling
+        }
+      }
+    } else {
+      // If booking was found in main collection, also update subcollections
+      const userId = currentBooking.userId;
+      const bikeId = currentBooking.bikeId;
+      
+      // Update in user subcollection if it exists
+      if (userId) {
+        try {
+          const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
+          const userBookingDoc = await getDoc(userBookingRef);
+          if (userBookingDoc.exists()) {
+            await updateDoc(userBookingRef, updates);
+          }
+        } catch (error) {
+          // Silent error handling
+        }
+      }
+      
+      // Update in bike subcollection if it exists
+      if (bikeId) {
+        try {
+          const bikeBookingRef = doc(db, `bikes/${bikeId}/bookings`, bookingId);
+          const bikeBookingDoc = await getDoc(bikeBookingRef);
+          if (bikeBookingDoc.exists()) {
+            await updateDoc(bikeBookingRef, updates);
+          }
+        } catch (error) {
+          // Silent error handling
+        }
       }
     }
     
-    // Get the updated document
+    // Get the updated document from the original location
     const updatedDoc = await getDoc(bookingRef);
     const data = updatedDoc.data();
     
     return {
       id: bookingId,
       ...data,
-      startDate: data.startDate?.toDate(),
-      endDate: data.endDate?.toDate(),
-      createdAt: data.createdAt
+      startDate: data.startDate?.toDate ? data.startDate.toDate() : data.startDate,
+      endDate: data.endDate?.toDate ? data.endDate.toDate() : data.endDate,
+      createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
+      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : data.updatedAt
     };
   } catch (error) {
-    console.error('Error updating booking:', error);
     throw error;
   }
 };
@@ -277,34 +456,86 @@ export const updateBooking = async (bookingId, updatedData) => {
 // Delete a booking
 export const deleteBooking = async (bookingId) => {
   try {
-    // Get the booking to find the user ID
-    const bookingRef = doc(db, "bookings", bookingId);
-    const bookingDoc = await getDoc(bookingRef);
+    // Check authentication first
+    checkAuth();
     
-    if (bookingDoc.exists()) {
-      const bookingData = bookingDoc.data();
-      const userId = bookingData.userId;
+    let bookingRef = null;
+    let currentBooking = null;
+    let foundLocation = null;
+    
+    // First, try to find the booking in the main collection
+    const mainBookingRef = doc(db, "bookings", bookingId);
+    const mainBookingDoc = await getDoc(mainBookingRef);
+    
+    if (mainBookingDoc.exists()) {
+      bookingRef = mainBookingRef;
+      currentBooking = mainBookingDoc.data();
+      foundLocation = 'main';
+    } else {
+      // If not found in main collection, use collectionGroup to find it in subcollections
+      const bookingsGroupRef = collectionGroup(db, "bookings");
+      const groupSnapshot = await getDocs(bookingsGroupRef);
       
-      // Delete from main collection
-      await deleteDoc(bookingRef);
+      // Find the specific booking document
+      const foundDoc = groupSnapshot.docs.find(doc => doc.id === bookingId);
       
-      // Delete from user's subcollection if user ID exists
-      if (userId) {
+      if (foundDoc) {
+        bookingRef = foundDoc.ref;
+        currentBooking = foundDoc.data();
+        foundLocation = foundDoc.ref.path;
+      } else {
+        return { id: bookingId, deleted: false, error: 'Booking not found' };
+      }
+    }
+    
+    const userId = currentBooking.userId;
+    const bikeId = currentBooking.bikeId;
+    
+    // Delete the booking from its found location
+    await deleteDoc(bookingRef);
+    
+    // Also try to delete from other locations if they exist
+    
+    // Try to delete from main collection if booking was found elsewhere
+    if (foundLocation !== 'main') {
+      try {
+        const mainDoc = await getDoc(mainBookingRef);
+        if (mainDoc.exists()) {
+          await deleteDoc(mainBookingRef);
+        }
+      } catch (error) {
+        // Silent error handling
+      }
+    }
+    
+    // Try to delete from user subcollection if it exists
+    if (userId) {
+      try {
         const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
-        
-        // Check if it exists in the subcollection before deleting
         const userBookingDoc = await getDoc(userBookingRef);
         if (userBookingDoc.exists()) {
           await deleteDoc(userBookingRef);
         }
+      } catch (error) {
+        // Silent error handling
       }
-    } else {
-      console.warn(`Booking with ID ${bookingId} not found when attempting to delete`);
+    }
+    
+    // Try to delete from bike subcollection if it exists
+    if (bikeId) {
+      try {
+        const bikeBookingRef = doc(db, `bikes/${bikeId}/bookings`, bookingId);
+        const bikeBookingDoc = await getDoc(bikeBookingRef);
+        if (bikeBookingDoc.exists()) {
+          await deleteDoc(bikeBookingRef);
+        }
+      } catch (error) {
+        // Silent error handling
+      }
     }
     
     return { id: bookingId, deleted: true };
   } catch (error) {
-    console.error('Error deleting booking:', error);
     throw error;
   }
 };
@@ -335,6 +566,9 @@ export const calculateBookingDuration = (booking) => {
 // Get revenue by period (day, week, month)
 export const getRevenueByPeriod = async (period) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     const now = new Date();
     let startDate;
     
@@ -351,8 +585,14 @@ export const getRevenueByPeriod = async (period) => {
       throw new Error('Invalid period. Use "day", "week", or "month"');
     }
     
-    // Get all bookings from start date
-    const bookings = await getBookingsByDateRange(Timestamp.fromDate(startDate), Timestamp.fromDate(now));
+    // Get all bookings from all collections and subcollections
+    const allBookings = await getAllBookingsFromAllCollections();
+    
+    // Filter bookings by date range
+    const bookings = allBookings.filter(booking => {
+      const bookingDate = booking.startDate instanceof Date ? booking.startDate : new Date(booking.startDate);
+      return bookingDate >= startDate && bookingDate <= now;
+    });
     
     // Calculate total revenue from completed bookings
     // Include all COMPLETED bookings regardless of payment status
@@ -373,7 +613,6 @@ export const getRevenueByPeriod = async (period) => {
       endDate: now
     };
   } catch (error) {
-    console.error(`Error getting revenue for ${period}:`, error);
     // Return default values in case of error
     return {
       period,
@@ -388,30 +627,45 @@ export const getRevenueByPeriod = async (period) => {
 // Check if a bike is available during a specific time period
 export const checkBikeAvailability = async (bikeId, startDate, endDate) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     // Convert to timestamp if needed
     const startTimestamp = startDate instanceof Date ? Timestamp.fromDate(startDate) : startDate;
     const endTimestamp = endDate instanceof Date ? Timestamp.fromDate(endDate) : endDate;
     
+    // Check main bookings collection
     const bookingsCollection = collection(db, "bookings");
-    
-    // Query to find any conflicting bookings for this bike
-    // We need to check for bookings where:
-    // 1. The booking starts during our requested period
-    // 2. The booking ends during our requested period
-    // 3. The booking spans our entire requested period
-    const q = query(
+    const mainQuery = query(
       bookingsCollection,
       where("bikeId", "==", bikeId),
       where("status", "in", ["PENDING", "CONFIRMED"]),
       where("startDate", "<=", endTimestamp)
     );
+    const mainSnapshot = await getDocs(mainQuery);
     
-    const snapshot = await getDocs(q);
+    // Check all subcollections using collectionGroup
+    const bookingsGroupRef = collectionGroup(db, "bookings");
+    const subcollectionQuery = query(
+      bookingsGroupRef,
+      where("bikeId", "==", bikeId),
+      where("status", "in", ["PENDING", "CONFIRMED"]),
+      where("startDate", "<=", endTimestamp)
+    );
+    const subcollectionSnapshot = await getDocs(subcollectionQuery);
     
-    // Filter out bookings that end before our start time
-    const conflictingBookings = snapshot.docs.filter(doc => {
+    // Combine results and filter out bookings that end before our start time
+    const allConflictingDocs = [...mainSnapshot.docs, ...subcollectionSnapshot.docs];
+    
+    // Remove duplicates based on document ID
+    const uniqueConflictingDocs = allConflictingDocs.filter((doc, index, self) => 
+      index === self.findIndex(d => d.id === doc.id)
+    );
+    
+    const conflictingBookings = uniqueConflictingDocs.filter(doc => {
       const bookingData = doc.data();
-      return bookingData.endDate >= startTimestamp;
+      const bookingEndDate = bookingData.endDate instanceof Timestamp ? bookingData.endDate : Timestamp.fromDate(new Date(bookingData.endDate));
+      return bookingEndDate >= startTimestamp;
     });
     
     return {
@@ -419,12 +673,11 @@ export const checkBikeAvailability = async (bikeId, startDate, endDate) => {
       conflictingBookings: conflictingBookings.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        startDate: doc.data().startDate?.toDate(),
-        endDate: doc.data().endDate?.toDate()
+        startDate: doc.data().startDate?.toDate ? doc.data().startDate?.toDate() : doc.data().startDate,
+        endDate: doc.data().endDate?.toDate ? doc.data().endDate?.toDate() : doc.data().endDate
       }))
     };
   } catch (error) {
-    console.error('Error checking bike availability:', error);
     throw error;
   }
 };
@@ -432,9 +685,12 @@ export const checkBikeAvailability = async (bikeId, startDate, endDate) => {
 // Get bookings based on user role (admin sees all, regular users see only their own)
 export const getBookingsByUserRole = async (userId, isAdmin) => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     if (isAdmin) {
-      // Admins see all bookings from main collection
-      return await getAllBookings();
+      // Admins see all bookings from all collections and subcollections
+      return await getAllBookingsFromAllCollections();
     } else {
       // Regular users only see their own bookings
       // Check both the main bookings collection and user subcollection
@@ -453,9 +709,29 @@ export const getBookingsByUserRole = async (userId, isAdmin) => {
         createdAt: doc.data().createdAt
       }));
       
+      // Also check for user bookings in other subcollections using collectionGroup
+      const userBookingsGroupRef = collectionGroup(db, "bookings");
+      const userBookingsQuery = query(userBookingsGroupRef, where("userId", "==", userId));
+      const userBookingsSnapshot = await getDocs(userBookingsQuery);
+      
+      const userBookingsFromSubcollections = userBookingsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        startDate: doc.data().startDate?.toDate ? doc.data().startDate?.toDate() : doc.data().startDate,
+        endDate: doc.data().endDate?.toDate ? doc.data().endDate?.toDate() : doc.data().endDate,
+        createdAt: doc.data().createdAt
+      }));
+      
       // Merge and deduplicate bookings
       const allUserBookings = [...mainBookings];
+      
       userBookings.forEach(userBooking => {
+        if (!allUserBookings.some(booking => booking.id === userBooking.id)) {
+          allUserBookings.push(userBooking);
+        }
+      });
+      
+      userBookingsFromSubcollections.forEach(userBooking => {
         if (!allUserBookings.some(booking => booking.id === userBooking.id)) {
           allUserBookings.push(userBooking);
         }
@@ -464,7 +740,6 @@ export const getBookingsByUserRole = async (userId, isAdmin) => {
       return allUserBookings;
     }
   } catch (error) {
-    console.error('Error getting bookings based on user role:', error);
     throw error;
   }
-}; 
+};

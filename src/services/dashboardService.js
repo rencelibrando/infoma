@@ -1,4 +1,4 @@
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { collection, getDocs, query, onSnapshot, limit, orderBy, where, getDoc, doc } from 'firebase/firestore';
 
 // Enhanced in-memory cache with expiration timestamps for different data types
@@ -45,8 +45,20 @@ const getFromCacheOrFetch = async (key, fetchFunction) => {
   return data;
 };
 
+// Helper function to check authentication
+const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User not authenticated. Please log in to access this resource.');
+  }
+  return user;
+};
+
 // Get bike details with caching support
 export const getBikeDetails = async (bikeId) => {
+  // Check authentication first
+  checkAuth();
+  
   const now = Date.now();
   const maxAgeMs = dataCache.expiryTimes.bikeDetails;
   
@@ -94,6 +106,9 @@ export const getBikeDetails = async (bikeId) => {
 
 // Function to extract unique bike types from bikes collection
 export const getBikeTypes = async () => {
+  // Check authentication first
+  checkAuth();
+  
   if (dataCache.bikeTypes) {
     return dataCache.bikeTypes;
   }
@@ -120,6 +135,9 @@ export const getBikeTypes = async () => {
 
 // Function to extract unique user roles
 export const getUserRoles = async () => {
+  // Check authentication first
+  checkAuth();
+  
   if (dataCache.userRoles) {
     return dataCache.userRoles;
   }
@@ -147,6 +165,9 @@ export const getUserRoles = async () => {
 // Preload all filter options data (called once at app startup)
 export const preloadOptionsData = async () => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     console.log('Preloading options data...');
     await Promise.all([
       getBikeTypes(),
@@ -161,6 +182,9 @@ export const preloadOptionsData = async () => {
 // Preload all dashboard data for faster access across components
 export const preloadDashboardData = async () => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     console.log('Preloading all dashboard data...');
     await getAnalyticsData();
     console.log('Dashboard data preloaded successfully');
@@ -179,6 +203,9 @@ export const clearReviewsCache = () => {
 // Fetch analytics data for the dashboard
 export const getAnalyticsData = async () => {
   try {
+    // Check authentication first
+    checkAuth();
+    
     // Use cached data if available
     const fetchBikes = async () => {
       // Optimize query with limit and ordering
@@ -200,17 +227,45 @@ export const getAnalyticsData = async () => {
     };
     
     const fetchRides = async () => {
-      // Prioritize active rides and recent ones
-      const ridesQuery = query(
-        collection(db, 'rides'), 
-        orderBy('startDate', 'desc'), 
-        limit(100)
-      );
+      // Always fetch fresh ride data as it's highly dynamic
+      console.log('Fetching fresh rides data');
+      // Try both startTime (new) and startDate (legacy) fields
+      let ridesQuery;
+      try {
+        ridesQuery = query(
+          collection(db, 'rides'), 
+          orderBy('startTime', 'desc'), 
+          limit(100)
+        );
+      } catch (error) {
+        // Fallback to startDate if startTime index doesn't exist
+        console.log('Using startDate fallback for rides query in subscription');
+        ridesQuery = query(
+          collection(db, 'rides'), 
+          orderBy('startDate', 'desc'), 
+          limit(100)
+        );
+      }
+      
       const ridesSnapshot = await getDocs(ridesQuery);
-      return ridesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      const rideData = ridesSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Normalize timestamp fields
+          startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+          endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+          // Handle both new status field and legacy isActive
+          isActive: data.status === "active" || data.isActive === true,
+          status: data.status || (data.isActive ? "active" : "completed")
+        };
+      });
+      
+      dataCache.rides = rideData;
+      dataCache.lastUpdated.rides = Date.now();
+      
+      return rideData;
     };
     
     const fetchReviews = async () => {
@@ -396,231 +451,280 @@ const calculateAverageRating = (reviews) => {
 
 // Set up optimized real-time listener for dashboard analytics data
 export const subscribeToAnalytics = (callback) => {
-  // Create an array to store all unsubscribe functions
-  const unsubscribeFunctions = [];
-  
-  // Subscribe to bikes collection with optimized query
-  const bikesQuery = query(collection(db, 'bikes'));
-  const bikesUnsubscribe = onSnapshot(bikesQuery, async (bikesSnapshot) => {
-    try {
-      console.log('Bikes update received, processing...');
-      // Process bikes data changes first for immediate UI update
-      const bikes = bikesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Update cache
-      dataCache.bikes = bikes;
-      dataCache.lastUpdated.bikes = Date.now();
-      
-      // Extract bike types for filters
-      dataCache.bikeTypes = [...new Set(bikes.map(bike => bike.type))];
-      
-      // Use cached data for other collections if available and recent
-      const fetchUsers = async () => {
-        if (dataCache.users && 
-            dataCache.lastUpdated.users && 
-            (Date.now() - dataCache.lastUpdated.users < dataCache.expiryTimes.users)) {
-          console.log('Using cached users data');
-          return dataCache.users;
-        }
-        
-        console.log('Fetching fresh users data');
-        const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-        const usersSnapshot = await getDocs(usersQuery);
-        const userData = usersSnapshot.docs.map(doc => ({
+  try {
+    // Check authentication first
+    const user = checkAuth();
+    
+    // Create an array to store all unsubscribe functions
+    const unsubscribeFunctions = [];
+    
+    // Subscribe to bikes collection with optimized query
+    const bikesQuery = query(collection(db, 'bikes'));
+    const bikesUnsubscribe = onSnapshot(bikesQuery, async (bikesSnapshot) => {
+      try {
+        console.log('Bikes update received, processing...');
+        // Process bikes data changes first for immediate UI update
+        const bikes = bikesSnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         
-        dataCache.users = userData;
-        dataCache.lastUpdated.users = Date.now();
-        dataCache.userRoles = [...new Set(userData.map(user => user.role || 'User'))];
+        // Update cache
+        dataCache.bikes = bikes;
+        dataCache.lastUpdated.bikes = Date.now();
         
-        return userData;
-      };
-      
-      const fetchRides = async () => {
-        // Always fetch fresh ride data as it's highly dynamic
-        console.log('Fetching fresh rides data');
-        const ridesQuery = query(
-          collection(db, 'rides'), 
-          orderBy('startDate', 'desc'), 
-          limit(100)
-        );
-        const ridesSnapshot = await getDocs(ridesQuery);
-        const rideData = ridesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+        // Extract bike types for filters
+        dataCache.bikeTypes = [...new Set(bikes.map(bike => bike.type))];
         
-        dataCache.rides = rideData;
-        dataCache.lastUpdated.rides = Date.now();
-        
-        return rideData;
-      };
-      
-      const fetchReviews = async () => {
-        if (dataCache.reviews && 
-            dataCache.lastUpdated.reviews && 
-            (Date.now() - dataCache.lastUpdated.reviews < dataCache.expiryTimes.reviews)) {
-          console.log('Using cached reviews data');
-          return dataCache.reviews;
-        }
-        
-        console.log('Fetching fresh reviews data');
-        let reviewData = [];
-        
-        // First try to get reviews from the top-level collection
-        try {
-          const reviewsQuery = query(
-            collection(db, 'reviews'), 
-            orderBy('timestamp', 'desc'), 
-            limit(50)
-          );
-          const reviewsSnapshot = await getDocs(reviewsQuery);
-          reviewData = reviewsSnapshot.docs.map(doc => ({
+        // Use cached data for other collections if available and recent
+        const fetchUsers = async () => {
+          if (dataCache.users && 
+              dataCache.lastUpdated.users && 
+              (Date.now() - dataCache.lastUpdated.users < dataCache.expiryTimes.users)) {
+            console.log('Using cached users data');
+            return dataCache.users;
+          }
+          
+          console.log('Fetching fresh users data');
+          const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+          const usersSnapshot = await getDocs(usersQuery);
+          const userData = usersSnapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
           }));
           
-          console.log(`Found ${reviewData.length} reviews in top-level collection`);
-        } catch (error) {
-          console.warn('Error fetching top-level reviews:', error);
+          dataCache.users = userData;
+          dataCache.lastUpdated.users = Date.now();
+          dataCache.userRoles = [...new Set(userData.map(user => user.role || 'User'))];
+          
+          return userData;
+        };
+        
+        const fetchRides = async () => {
+          // Always fetch fresh ride data as it's highly dynamic
+          console.log('Fetching fresh rides data');
+          // Try both startTime (new) and startDate (legacy) fields
+          let ridesQuery;
+          try {
+            ridesQuery = query(
+              collection(db, 'rides'), 
+              orderBy('startTime', 'desc'), 
+              limit(100)
+            );
+          } catch (error) {
+            // Fallback to startDate if startTime index doesn't exist
+            console.log('Using startDate fallback for rides query in subscription');
+            ridesQuery = query(
+              collection(db, 'rides'), 
+              orderBy('startDate', 'desc'), 
+              limit(100)
+            );
+          }
+          
+          const ridesSnapshot = await getDocs(ridesQuery);
+          const rideData = ridesSnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              // Normalize timestamp fields
+              startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+              endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+              // Handle both new status field and legacy isActive
+              isActive: data.status === "active" || data.isActive === true,
+              status: data.status || (data.isActive ? "active" : "completed")
+            };
+          });
+          
+          dataCache.rides = rideData;
+          dataCache.lastUpdated.rides = Date.now();
+          
+          return rideData;
+        };
+        
+        const fetchReviews = async () => {
+          if (dataCache.reviews && 
+              dataCache.lastUpdated.reviews && 
+              (Date.now() - dataCache.lastUpdated.reviews < dataCache.expiryTimes.reviews)) {
+            console.log('Using cached reviews data');
+            return dataCache.reviews;
+          }
+          
+          console.log('Fetching fresh reviews data');
+          let reviewData = [];
+          
+          // First try to get reviews from the top-level collection
+          try {
+            const reviewsQuery = query(
+              collection(db, 'reviews'), 
+              orderBy('timestamp', 'desc'), 
+              limit(50)
+            );
+            const reviewsSnapshot = await getDocs(reviewsQuery);
+            reviewData = reviewsSnapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            
+            console.log(`Found ${reviewData.length} reviews in top-level collection`);
+          } catch (error) {
+            console.warn('Error fetching top-level reviews:', error);
+          }
+          
+          // Then try to get reviews from bike subcollections if we have bikes data
+          if (dataCache.bikes && dataCache.bikes.length > 0) {
+            try {
+              // Get reviews from each bike's subcollection
+              const bikeReviewsPromises = dataCache.bikes.map(async (bike) => {
+                try {
+                  const bikeReviewsQuery = query(
+                    collection(db, `bikes/${bike.id}/reviews`),
+                    orderBy('timestamp', 'desc'),
+                    limit(10)
+                  );
+                  const bikeReviewsSnapshot = await getDocs(bikeReviewsQuery);
+                  return bikeReviewsSnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    bikeId: bike.id, // Ensure bikeId is set
+                    ...doc.data()
+                  }));
+                } catch (error) {
+                  console.warn(`Error fetching reviews for bike ${bike.id}:`, error);
+                  return [];
+                }
+              });
+              
+              const bikeReviewsResults = await Promise.all(bikeReviewsPromises);
+              const allBikeReviews = bikeReviewsResults.flat();
+              
+              console.log(`Found ${allBikeReviews.length} reviews in bike subcollections`);
+              
+              // Merge with top-level reviews, avoiding duplicates by id
+              const allReviewIds = new Set(reviewData.map(r => r.id));
+              const uniqueBikeReviews = allBikeReviews.filter(r => !allReviewIds.has(r.id));
+              
+              reviewData = [...reviewData, ...uniqueBikeReviews];
+            } catch (error) {
+              console.warn('Error fetching bike subcollection reviews:', error);
+            }
+          }
+          
+          console.log(`Total reviews found: ${reviewData.length}`);
+          
+          // Cache the combined results
+          dataCache.reviews = reviewData;
+          dataCache.lastUpdated.reviews = Date.now();
+          
+          return reviewData;
+        };
+        
+        // Optimized - fetch concurrently
+        console.log('Fetching related data after bikes update...');
+        const [users, rides, reviews] = await Promise.all([
+          fetchUsers(),
+          fetchRides(),
+          fetchReviews()
+        ]);
+        
+        // Calculate statistics and return complete data
+        console.log('All data fetched, notifying subscribers...');
+        const completeData = {
+          bikes,
+          users,
+          rides,
+          reviews,
+          stats: calculateStats(bikes, users, rides, reviews)
+        };
+        
+        callback(completeData);
+      } catch (error) {
+        console.error('Error in analytics subscription:', error);
+      }
+    }, (error) => {
+      console.error('Error in bikes listener:', error);
+    });
+    
+    unsubscribeFunctions.push(bikesUnsubscribe);
+    
+    // Only subscribe to the rides collection separately for active ride updates
+    // as these change more frequently
+    // Try to query by status first, fallback to isActive
+    let activeRidesQuery;
+    try {
+      activeRidesQuery = query(
+        collection(db, 'rides'),
+        where('status', '==', 'active')
+      );
+    } catch (error) {
+      console.log('Using isActive fallback for active rides query');
+      activeRidesQuery = query(
+        collection(db, 'rides'),
+        where('isActive', '==', true)
+      );
+    }
+    
+    const ridesUnsubscribe = onSnapshot(activeRidesQuery, async (ridesSnapshot) => {
+      try {
+        if (!dataCache.bikes) {
+          console.log('No bikes data available yet, skipping rides update');
+          return;
         }
         
-        // Then try to get reviews from bike subcollections if we have bikes data
-        if (dataCache.bikes && dataCache.bikes.length > 0) {
-          try {
-            // Get reviews from each bike's subcollection
-            const bikeReviewsPromises = dataCache.bikes.map(async (bike) => {
-              try {
-                const bikeReviewsQuery = query(
-                  collection(db, `bikes/${bike.id}/reviews`),
-                  orderBy('timestamp', 'desc'),
-                  limit(10)
-                );
-                const bikeReviewsSnapshot = await getDocs(bikeReviewsQuery);
-                return bikeReviewsSnapshot.docs.map(doc => ({
-                  id: doc.id,
-                  bikeId: bike.id, // Ensure bikeId is set
-                  ...doc.data()
-                }));
-              } catch (error) {
-                console.warn(`Error fetching reviews for bike ${bike.id}:`, error);
-                return [];
-              }
+        console.log('Active rides update received');
+        const activeRides = ridesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            // Normalize timestamp fields
+            startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+            endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+            // Handle both new status field and legacy isActive
+            isActive: data.status === "active" || data.isActive === true,
+            status: data.status || (data.isActive ? "active" : "completed")
+          };
+        });
+        
+        // Only update the active rides in the cache
+        if (dataCache.rides) {
+          // Find all non-active rides in current cache
+          const nonActiveRides = dataCache.rides.filter(ride => !ride.isActive && ride.status !== "active");
+          
+          // Combine with new active rides
+          dataCache.rides = [...activeRides, ...nonActiveRides];
+          dataCache.lastUpdated.rides = Date.now();
+          
+          // Notify subscribers with updated data
+          if (dataCache.bikes && dataCache.users && dataCache.reviews) {
+            console.log('Notifying subscribers of rides update...');
+            callback({
+              bikes: dataCache.bikes,
+              users: dataCache.users,
+              rides: dataCache.rides,
+              reviews: dataCache.reviews,
+              stats: calculateStats(
+                dataCache.bikes, 
+                dataCache.users, 
+                dataCache.rides, 
+                dataCache.reviews
+              )
             });
-            
-            const bikeReviewsResults = await Promise.all(bikeReviewsPromises);
-            const allBikeReviews = bikeReviewsResults.flat();
-            
-            console.log(`Found ${allBikeReviews.length} reviews in bike subcollections`);
-            
-            // Merge with top-level reviews, avoiding duplicates by id
-            const allReviewIds = new Set(reviewData.map(r => r.id));
-            const uniqueBikeReviews = allBikeReviews.filter(r => !allReviewIds.has(r.id));
-            
-            reviewData = [...reviewData, ...uniqueBikeReviews];
-          } catch (error) {
-            console.warn('Error fetching bike subcollection reviews:', error);
           }
         }
-        
-        console.log(`Total reviews found: ${reviewData.length}`);
-        
-        // Cache the combined results
-        dataCache.reviews = reviewData;
-        dataCache.lastUpdated.reviews = Date.now();
-        
-        return reviewData;
-      };
-      
-      // Optimized - fetch concurrently
-      console.log('Fetching related data after bikes update...');
-      const [users, rides, reviews] = await Promise.all([
-        fetchUsers(),
-        fetchRides(),
-        fetchReviews()
-      ]);
-      
-      // Calculate statistics and return complete data
-      console.log('All data fetched, notifying subscribers...');
-      const completeData = {
-        bikes,
-        users,
-        rides,
-        reviews,
-        stats: calculateStats(bikes, users, rides, reviews)
-      };
-      
-      callback(completeData);
-    } catch (error) {
-      console.error('Error in analytics subscription:', error);
-    }
-  }, (error) => {
-    console.error('Error in bikes listener:', error);
-  });
-  
-  unsubscribeFunctions.push(bikesUnsubscribe);
-  
-  // Only subscribe to the rides collection separately for active ride updates
-  // as these change more frequently
-  const ridesQuery = query(
-    collection(db, 'rides'),
-    where('isActive', '==', true)
-  );
-  
-  const ridesUnsubscribe = onSnapshot(ridesQuery, async (ridesSnapshot) => {
-    try {
-      if (!dataCache.bikes) {
-        console.log('No bikes data available yet, skipping rides update');
-        return;
+      } catch (error) {
+        console.error('Error in active rides subscription:', error);
       }
-      
-      console.log('Active rides update received');
-      const activeRides = ridesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Only update the active rides in the cache
-      if (dataCache.rides) {
-        // Find all non-active rides in current cache
-        const nonActiveRides = dataCache.rides.filter(ride => !ride.isActive);
-        
-        // Combine with new active rides
-        dataCache.rides = [...activeRides, ...nonActiveRides];
-        dataCache.lastUpdated.rides = Date.now();
-        
-        // Notify subscribers with updated data
-        if (dataCache.bikes && dataCache.users && dataCache.reviews) {
-          console.log('Notifying subscribers of rides update...');
-          callback({
-            bikes: dataCache.bikes,
-            users: dataCache.users,
-            rides: dataCache.rides,
-            reviews: dataCache.reviews,
-            stats: calculateStats(
-              dataCache.bikes, 
-              dataCache.users, 
-              dataCache.rides, 
-              dataCache.reviews
-            )
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error in active rides subscription:', error);
-    }
-  });
-  
-  unsubscribeFunctions.push(ridesUnsubscribe);
-  
-  // Return a function that unsubscribes from all listeners
-  return () => {
-    console.log('Unsubscribing from all analytics listeners');
-    unsubscribeFunctions.forEach(unsubscribe => unsubscribe());
-  };
+    });
+    
+    unsubscribeFunctions.push(ridesUnsubscribe);
+    
+    // Return a function that unsubscribes from all listeners
+    return () => {
+      console.log('Unsubscribing from all analytics listeners');
+      unsubscribeFunctions.forEach(unsubscribe => unsubscribe());
+    };
+  } catch (error) {
+    console.error('Error in subscribeToAnalytics:', error);
+    throw error;
+  }
 }; 

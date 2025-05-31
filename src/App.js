@@ -54,14 +54,30 @@ function App() {
     <Router>
       <GoogleMapsPreloader />
       <AuthHistoryHandler />
-      <StatusCheck>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/ride/:bikeId" element={<ProtectedRoute><BikeRideScreen /></ProtectedRoute>} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </StatusCheck>
+      <Routes>
+        {/* Login route - NOT wrapped in StatusCheck so users can always access it */}
+        <Route path="/login" element={<Login />} />
+        
+        {/* Protected routes - wrapped in StatusCheck for system verification */}
+        <Route path="/dashboard" element={
+          <ProtectedRoute>
+            <StatusCheck>
+              <Dashboard />
+            </StatusCheck>
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/ride/:bikeId" element={
+          <ProtectedRoute>
+            <StatusCheck>
+              <BikeRideScreen />
+            </StatusCheck>
+          </ProtectedRoute>
+        } />
+        
+        {/* Default redirect to login */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
     </Router>
   );
 }

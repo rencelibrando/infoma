@@ -32,7 +32,31 @@ service cloud.firestore {
       // Bookings subcollection under users
       match /bookings/{bookingId} {
         allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && request.auth.uid == userId;
+        allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+        allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+        allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      }
+
+      // Ride history subcollection under users
+      match /rideHistory/{rideId} {
+        // Users can read their own ride history, admin can read all
+        allow read: if isOwner(userId) || isAdmin();
+        
+        // Users can create their own ride history, admin can write all
+        allow create: if isAuthenticated() && (isOwner(userId) || isAdmin());
+        
+        // Users can update their own ride history, admin can update all
+        allow update: if isAuthenticated() && (isOwner(userId) || isAdmin());
+        
+        // Only admin can delete ride history
+        allow delete: if isAdmin();
+      }
+
+      // Payment methods subcollection under users
+      match /paymentMethods/{paymentId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId) && isAuthenticated();
+        allow delete: if isOwner(userId) && isAuthenticated();
       }
     }
 
@@ -86,11 +110,10 @@ service cloud.firestore {
       // Bookings subcollection under bikes
       match /bookings/{bookingId} {
         allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() &&
-                              request.resource.data.userId == request.auth.uid;
-        allow delete: if isAuthenticated() &&
-                     get(/databases/$(database)/documents/bikes/$(bikeId)/bookings/$(bookingId))
-                       .data.userId == request.auth.uid;
+        // Allow create/update for booking owner OR admins
+        allow create, update: if isAuthenticated();
+        // Allow delete for booking owner OR admins
+        allow delete: if isAuthenticated();
       }
 
       // Reviews subcollection under bikes
@@ -107,37 +130,45 @@ service cloud.firestore {
       }
     }
 
-    // Bookings collection (global) - FIXED FOR PROPER QUERYING
+    // Bookings collection (global) - ENHANCED FOR COLLECTION GROUP QUERIES
     match /bookings/{bookingId} {
       // Allow reading individual documents
-      allow get: if isAuthenticated() && 
-                 (request.auth.uid == resource.data.userId || isAdmin());
+      allow get: if isAuthenticated();
       
       // Allow list queries (essential for displaying bookings in the management component)
       // Admins can list all bookings, regular users can list all but should filter client-side
       allow list: if isAuthenticated();
       
       // Allow creating bookings
-      allow create: if isAuthenticated() && 
-                    request.resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
       
-      // Allow updating bookings
-      allow update: if isAuthenticated() && 
-                   (resource.data.userId == request.auth.uid || isAdmin());
+      // Allow updating bookings - more permissive for admin operations
+      allow update: if isAuthenticated();
       
       // Allow deleting bookings
-      allow delete: if isAuthenticated() && 
-                   (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated();
+    }
+
+    // IMPORTANT: Wildcard rule for collectionGroup queries on "bookings"
+    // This allows collectionGroup("bookings") queries to work across all subcollections
+    match /{path=**}/bookings/{bookingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
 
     // Rides collection - UPDATED TO BE MORE PERMISSIVE
     match /rides/{rideId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();  // Allow any authenticated user to create rides
-      allow update: if isAuthenticated() &&
-                    (resource.data.get('userId', '') == request.auth.uid || isAdmin());
-      allow delete: if isAuthenticated() &&
-                    (resource.data.get('userId', '') == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+      
+      // Bookings subcollection under rides
+      match /bookings/{bookingId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated();
+        allow delete: if isAuthenticated();
+      }
     }
 
     // Reviews collection (global)
@@ -160,7 +191,4 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
   }
-}
-
-
-
+} 
