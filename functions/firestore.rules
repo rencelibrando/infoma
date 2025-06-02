@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users can read and write their own data
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Bikes - public read, admin write
+    match /bikes/{bikeId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && isAdmin();
+      allow update: if request.auth != null && 
+        (request.auth.uid == resource.data.currentUserId || isAdmin());
+    }
+    
+    // Rides - users can read/write their own rides, admins can read all
+    match /rides/{rideId} {
+      allow read: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      allow update: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || isAdmin());
+    }
+    
+    // Active rides - real-time tracking data (admins can read all, users can write their own)
+    match /activeRides/{rideId} {
+      allow read: if request.auth != null && isAdmin();
+      allow create, update: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+      allow delete: if request.auth != null && 
+        (request.auth.uid == resource.data.userId || isAdmin());
+    }
+    
+    // Location history - for detailed tracking (users can write their own, admins can read all)
+    match /locations/{locationId} {
+      allow read: if request.auth != null && isAdmin();
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.userId;
+    }
+    
+    // Real-time rider locations for admin dashboard
+    match /riderLocations/{sessionId} {
+      allow read: if request.auth != null && isAdmin();
+      allow write: if request.auth != null;
+    }
+    
+    // Admin-only collections
+    match /admin/{document=**} {
+      allow read, write: if request.auth != null && isAdmin();
+    }
+    
+    // Helper functions
+    function isAdmin() {
+      return request.auth != null && 
+        request.auth.token.email in [
+          'admin@bambike.com',
+          'support@bambike.com'
+        ];
+    }
+  }
+} 

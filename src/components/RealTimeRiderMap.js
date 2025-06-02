@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, getDoc, doc } from 'firebase/firestore';
-import { db } from '../firebase';
-import styled from 'styled-components';
+import { ref, onValue, off } from 'firebase/database';
 import { Marker, InfoWindow, Polyline, Circle, HeatmapLayer } from '@react-google-maps/api';
+import { db, rtDb } from '../firebase';
+import styled from 'styled-components';
 import MapContainer from './MapContainer';
+import { useDataContext } from '../context/DataContext';
+import { preparePolylinePath } from '../utils/coordinateUtils';
 
 // Enhanced color theme
 const colors = {
@@ -975,10 +978,14 @@ const RealTimeRiderMap = () => {
           {showRoutes && Object.entries(riderRoutes).map(([rideId, route]) => {
             if (!filteredRiders.find(([id]) => id === rideId)) return null;
             
+            // Use utility function to prepare safe polyline path
+            const validRoute = preparePolylinePath(route, `route_${rideId}`);
+            if (!validRoute) return null;
+            
             return (
               <Polyline
                 key={`route_${rideId}`}
-                path={route}
+                path={validRoute}
                 options={{
                   strokeColor: getLocationStatus(riderLocations[rideId]?.lastUpdate) === 'live' ? colors.success : colors.info,
                   strokeOpacity: 0.8,

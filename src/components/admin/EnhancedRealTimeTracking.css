@@ -1,0 +1,331 @@
+.real-time-tracking {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #f5f5f5;
+}
+
+.tracking-header {
+  background: white;
+  padding: 20px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.tracking-header h2 {
+  margin: 0;
+  color: #333;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.tracking-stats {
+  display: flex;
+  gap: 30px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #2196F3;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tracking-controls {
+  background: white;
+  padding: 15px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+.control-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  user-select: none;
+}
+
+.control-group input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #2196F3;
+}
+
+.center-map-btn {
+  background: #2196F3;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.center-map-btn:hover {
+  background: #1976D2;
+}
+
+.tracking-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.map-container {
+  flex: 1;
+  position: relative;
+}
+
+.riders-sidebar {
+  width: 320px;
+  background: white;
+  border-left: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.riders-sidebar h3 {
+  margin: 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+}
+
+.riders-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.rider-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  padding: 15px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.rider-card:hover {
+  border-color: #2196F3;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.15);
+}
+
+.rider-card.selected {
+  border-color: #2196F3;
+  background: #f3f8ff;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.25);
+}
+
+.rider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.rider-name {
+  font-weight: 600;
+  color: #333;
+  font-size: 14px;
+}
+
+.rider-status {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.rider-status.moving {
+  background: #e8f5e8;
+  color: #4caf50;
+}
+
+.rider-status.stationary {
+  background: #fff3e0;
+  color: #ff9800;
+}
+
+.rider-details {
+  font-size: 12px;
+  color: #666;
+}
+
+.rider-details p {
+  margin: 4px 0;
+}
+
+.rider-info-window {
+  max-width: 250px;
+}
+
+.rider-info-window h4 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.rider-info-window p {
+  margin: 5px 0;
+  font-size: 13px;
+  color: #666;
+}
+
+.rider-info-window strong {
+  color: #333;
+}
+
+.loading-container, .error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #2196F3;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.error-container h3 {
+  color: #f44336;
+  margin-bottom: 10px;
+}
+
+.error-container button {
+  background: #2196F3;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 15px;
+}
+
+.error-container button:hover {
+  background: #1976D2;
+}
+
+.no-riders {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .tracking-header {
+    flex-direction: column;
+    gap: 15px;
+    text-align: center;
+  }
+
+  .tracking-stats {
+    gap: 20px;
+  }
+
+  .tracking-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .tracking-content {
+    flex-direction: column;
+  }
+
+  .riders-sidebar {
+    width: 100%;
+    height: 300px;
+    border-left: none;
+    border-top: 1px solid #e0e0e0;
+  }
+
+  .map-container {
+    min-height: 400px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tracking-header {
+    padding: 15px;
+  }
+
+  .tracking-header h2 {
+    font-size: 20px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+
+  .tracking-controls {
+    padding: 10px 15px;
+  }
+
+  .control-group {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .riders-sidebar h3 {
+    padding: 15px;
+    font-size: 16px;
+  }
+
+  .rider-card {
+    padding: 12px;
+  }
+} 
