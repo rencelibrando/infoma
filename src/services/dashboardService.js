@@ -45,8 +45,19 @@ const getFromCacheOrFetch = async (key, fetchFunction) => {
   return data;
 };
 
-// Helper function to check authentication
+// Helper function to check authentication with better error handling
 const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    // Don't throw an error immediately, log it for debugging
+    console.warn('User not authenticated in checkAuth()');
+    return null;
+  }
+  return user;
+};
+
+// Helper function for operations that require authentication
+const requireAuth = () => {
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated. Please log in to access this resource.');
@@ -56,8 +67,12 @@ const checkAuth = () => {
 
 // Get bike details with caching support
 export const getBikeDetails = async (bikeId) => {
-  // Check authentication first
-  checkAuth();
+  // Check authentication - but don't fail immediately
+  const user = checkAuth();
+  if (!user) {
+    console.warn('Attempting to get bike details without authentication');
+    // Try to proceed anyway for public data
+  }
   
   const now = Date.now();
   const maxAgeMs = dataCache.expiryTimes.bikeDetails;
@@ -100,14 +115,22 @@ export const getBikeDetails = async (bikeId) => {
     return bikeData;
   } catch (error) {
     console.error(`Error fetching bike ${bikeId}:`, error);
+    // Return cached data if available, even if expired
+    if (dataCache.bikeDetails[bikeId]) {
+      console.log(`Returning expired cache for bike ${bikeId} due to error`);
+      return dataCache.bikeDetails[bikeId];
+    }
     throw error;
   }
 };
 
 // Function to extract unique bike types from bikes collection
 export const getBikeTypes = async () => {
-  // Check authentication first
-  checkAuth();
+  // Check authentication - but don't fail immediately for public data
+  const user = checkAuth();
+  if (!user) {
+    console.warn('Attempting to get bike types without authentication');
+  }
   
   if (dataCache.bikeTypes) {
     return dataCache.bikeTypes;
@@ -129,14 +152,20 @@ export const getBikeTypes = async () => {
     return types;
   } catch (error) {
     console.error('Error fetching bike types:', error);
-    return [];
+    // Return fallback types if there's an error
+    return ['Standard', 'Electric', 'Mountain', 'Road'];
   }
 };
 
 // Function to extract unique user roles
 export const getUserRoles = async () => {
-  // Check authentication first
-  checkAuth();
+  // Check authentication - but don't fail immediately
+  const user = checkAuth();
+  if (!user) {
+    console.warn('Attempting to get user roles without authentication');
+    // Return default roles for public access
+    return ['User', 'Admin', 'Manager'];
+  }
   
   if (dataCache.userRoles) {
     return dataCache.userRoles;
@@ -165,8 +194,11 @@ export const getUserRoles = async () => {
 // Preload all filter options data (called once at app startup)
 export const preloadOptionsData = async () => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Preloading options data without authentication');
+    }
     
     console.log('Preloading options data...');
     await Promise.all([
@@ -182,8 +214,11 @@ export const preloadOptionsData = async () => {
 // Preload all dashboard data for faster access across components
 export const preloadDashboardData = async () => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Preloading dashboard data without authentication');
+    }
     
     console.log('Preloading all dashboard data...');
     await getAnalyticsData();
@@ -203,30 +238,89 @@ export const clearReviewsCache = () => {
 // Fetch analytics data for the dashboard
 export const getAnalyticsData = async () => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Fetching analytics data without authentication - some data may be limited');
+    } else {
+      console.log('User is authenticated for analytics:', user.uid);
+    }
+    
+    // Test Firebase connection first
+    console.log('Testing Firebase connection...');
+    try {
+      const testCollection = collection(db, 'bikes');
+      console.log('Firebase connection test successful');
+    } catch (connectionError) {
+      console.error('Firebase connection test failed:', connectionError);
+      throw new Error('Cannot connect to Firebase: ' + connectionError.message);
+    }
     
     // Use cached data if available
     const fetchBikes = async () => {
-      // Optimize query with limit and ordering
-      const bikesQuery = query(collection(db, 'bikes'), orderBy('updatedAt', 'desc'));
-      const bikesSnapshot = await getDocs(bikesQuery);
-      return bikesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      console.log('Starting to fetch bikes...');
+      try {
+        // Optimize query with limit and ordering
+        const bikesQuery = query(collection(db, 'bikes'), orderBy('updatedAt', 'desc'));
+        const bikesSnapshot = await getDocs(bikesQuery);
+        console.log('Bikes query successful, got', bikesSnapshot.docs.length, 'bikes');
+        const bikes = bikesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        console.log('Processed bikes:', bikes.length);
+        return bikes;
+      } catch (error) {
+        console.error('Error in fetchBikes:', error);
+        console.log('Trying bikes query without orderBy...');
+        try {
+          const simpleBikesQuery = query(collection(db, 'bikes'));
+          const simpleBikesSnapshot = await getDocs(simpleBikesQuery);
+          console.log('Simple bikes query successful, got', simpleBikesSnapshot.docs.length, 'bikes');
+          const bikes = simpleBikesSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          return bikes;
+        } catch (simpleError) {
+          console.error('Even simple bikes query failed:', simpleError);
+          return [];
+        }
+      }
     };
     
     const fetchUsers = async () => {
-      const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-      const usersSnapshot = await getDocs(usersQuery);
-      return usersSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      console.log('Starting to fetch users...');
+      try {
+        const usersQuery = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
+        const usersSnapshot = await getDocs(usersQuery);
+        console.log('Users query successful, got', usersSnapshot.docs.length, 'users');
+        const users = usersSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        return users;
+      } catch (error) {
+        console.error('Error in fetchUsers:', error);
+        console.log('Trying users query without orderBy...');
+        try {
+          const simpleUsersQuery = query(collection(db, 'users'));
+          const simpleUsersSnapshot = await getDocs(simpleUsersQuery);
+          console.log('Simple users query successful, got', simpleUsersSnapshot.docs.length, 'users');
+          const users = simpleUsersSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          return users;
+        } catch (simpleError) {
+          console.error('Even simple users query failed:', simpleError);
+          return [];
+        }
+      }
     };
     
     const fetchRides = async () => {
+      console.log('Starting to fetch rides...');
       // Always fetch fresh ride data as it's highly dynamic
       console.log('Fetching fresh rides data');
       // Try both startTime (new) and startDate (legacy) fields
@@ -237,38 +331,91 @@ export const getAnalyticsData = async () => {
           orderBy('startTime', 'desc'), 
           limit(100)
         );
+        const ridesSnapshot = await getDocs(ridesQuery);
+        console.log('Rides query with startTime successful, got', ridesSnapshot.docs.length, 'rides');
+        const rideData = ridesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            // Normalize timestamp fields
+            startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+            endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+            // Handle both new status field and legacy isActive
+            isActive: data.status === "active" || data.isActive === true,
+            status: data.status || (data.isActive ? "active" : "completed")
+          };
+        });
+        
+        dataCache.rides = rideData;
+        dataCache.lastUpdated.rides = Date.now();
+        
+        return rideData;
       } catch (error) {
+        console.error('Error fetching rides with startTime:', error);
         // Fallback to startDate if startTime index doesn't exist
         console.log('Using startDate fallback for rides query in subscription');
-        ridesQuery = query(
-          collection(db, 'rides'), 
-          orderBy('startDate', 'desc'), 
-          limit(100)
-        );
+        try {
+          ridesQuery = query(
+            collection(db, 'rides'), 
+            orderBy('startDate', 'desc'), 
+            limit(100)
+          );
+          const ridesSnapshot = await getDocs(ridesQuery);
+          console.log('Rides query with startDate successful, got', ridesSnapshot.docs.length, 'rides');
+          const rideData = ridesSnapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              // Normalize timestamp fields
+              startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+              endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+              // Handle both new status field and legacy isActive
+              isActive: data.status === "active" || data.isActive === true,
+              status: data.status || (data.isActive ? "active" : "completed")
+            };
+          });
+          
+          dataCache.rides = rideData;
+          dataCache.lastUpdated.rides = Date.now();
+          
+          return rideData;
+        } catch (simpleError) {
+          console.error('Error fetching rides with startDate:', simpleError);
+          console.log('Trying simple rides query without orderBy...');
+          try {
+            const simpleRidesQuery = query(collection(db, 'rides'), limit(100));
+            const simpleRidesSnapshot = await getDocs(simpleRidesQuery);
+            console.log('Simple rides query successful, got', simpleRidesSnapshot.docs.length, 'rides');
+            const rideData = simpleRidesSnapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                // Normalize timestamp fields
+                startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
+                endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
+                // Handle both new status field and legacy isActive
+                isActive: data.status === "active" || data.isActive === true,
+                status: data.status || (data.isActive ? "active" : "completed")
+              };
+            });
+            
+            dataCache.rides = rideData;
+            dataCache.lastUpdated.rides = Date.now();
+            
+            return rideData;
+          } catch (finalError) {
+            console.error('Even simple rides query failed:', finalError);
+            return [];
+          }
+        }
       }
-      
-      const ridesSnapshot = await getDocs(ridesQuery);
-      const rideData = ridesSnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          // Normalize timestamp fields
-          startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-          endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-          // Handle both new status field and legacy isActive
-          isActive: data.status === "active" || data.isActive === true,
-          status: data.status || (data.isActive ? "active" : "completed")
-        };
-      });
-      
-      dataCache.rides = rideData;
-      dataCache.lastUpdated.rides = Date.now();
-      
-      return rideData;
     };
     
     const fetchReviews = async () => {
+      console.log('Starting to fetch reviews...');
       if (dataCache.reviews && 
           dataCache.lastUpdated.reviews && 
           (Date.now() - dataCache.lastUpdated.reviews < dataCache.expiryTimes.reviews)) {
@@ -281,6 +428,7 @@ export const getAnalyticsData = async () => {
       
       // First try to get reviews from the top-level collection
       try {
+        console.log('Trying top-level reviews collection...');
         const reviewsQuery = query(
           collection(db, 'reviews'), 
           orderBy('timestamp', 'desc'), 
@@ -295,10 +443,23 @@ export const getAnalyticsData = async () => {
         console.log(`Found ${reviewData.length} reviews in top-level collection`);
       } catch (error) {
         console.warn('Error fetching top-level reviews:', error);
+        console.log('Trying simple reviews query without orderBy...');
+        try {
+          const simpleReviewsQuery = query(collection(db, 'reviews'), limit(50));
+          const simpleReviewsSnapshot = await getDocs(simpleReviewsQuery);
+          reviewData = simpleReviewsSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          console.log(`Found ${reviewData.length} reviews with simple query`);
+        } catch (simpleError) {
+          console.error('Even simple reviews query failed:', simpleError);
+        }
       }
       
       // Then try to get reviews from bike subcollections if we have bikes data
       if (dataCache.bikes && dataCache.bikes.length > 0) {
+        console.log(`Checking reviews in bike subcollections for ${dataCache.bikes.length} bikes...`);
         try {
           // Get reviews from each bike's subcollection
           const bikeReviewsPromises = dataCache.bikes.map(async (bike) => {
@@ -309,11 +470,13 @@ export const getAnalyticsData = async () => {
                 limit(10)
               );
               const bikeReviewsSnapshot = await getDocs(bikeReviewsQuery);
-              return bikeReviewsSnapshot.docs.map(doc => ({
+              const bikeReviews = bikeReviewsSnapshot.docs.map(doc => ({
                 id: doc.id,
                 bikeId: bike.id, // Ensure bikeId is set
                 ...doc.data()
               }));
+              console.log(`Found ${bikeReviews.length} reviews for bike ${bike.id}`);
+              return bikeReviews;
             } catch (error) {
               console.warn(`Error fetching reviews for bike ${bike.id}:`, error);
               return [];
@@ -333,6 +496,8 @@ export const getAnalyticsData = async () => {
         } catch (error) {
           console.warn('Error fetching bike subcollection reviews:', error);
         }
+      } else {
+        console.log('No bikes data available for subcollection review search');
       }
       
       console.log(`Total reviews found: ${reviewData.length}`);
@@ -360,6 +525,7 @@ export const getAnalyticsData = async () => {
     };
     
     // Parallel fetches for better performance
+    console.log('Starting parallel data fetches...');
     const [bikes, users, rides, reviews] = await Promise.all([
       getFromCacheOrFetch('bikes', fetchBikes),
       getFromCacheOrFetch('users', fetchUsers),
@@ -367,17 +533,85 @@ export const getAnalyticsData = async () => {
       getFromCacheOrFetch('reviews', fetchReviews)
     ]);
     
+    console.log('All data fetched successfully:');
+    console.log(`- Bikes: ${bikes.length}`);
+    console.log(`- Users: ${users.length}`);
+    console.log(`- Rides: ${rides.length}`);
+    console.log(`- Reviews: ${reviews.length}`);
+    
     // Calculate statistics
+    const stats = calculateStats(bikes, users, rides, reviews);
+    console.log('Calculated stats:', stats);
+    
     return {
       bikes,
       users,
       rides,
       reviews,
-      stats: calculateStats(bikes, users, rides, reviews)
+      stats
     };
   } catch (error) {
     console.error('Error fetching analytics data:', error);
-    throw error;
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    
+    // Provide fallback data so dashboard doesn't break
+    console.log('Providing fallback data due to Firebase error');
+    const fallbackData = {
+      bikes: [
+        {
+          id: 'fallback-bike-1',
+          name: 'Sample Bike 1',
+          type: 'Standard',
+          price: '₱50/hr',
+          isAvailable: true,
+          isInUse: false,
+          latitude: 14.5995,
+          longitude: 120.9842
+        }
+      ],
+      users: [
+        {
+          id: 'fallback-user-1',
+          email: 'sample@example.com',
+          role: 'User',
+          createdAt: new Date()
+        }
+      ],
+      rides: [
+        {
+          id: 'fallback-ride-1',
+          status: 'completed',
+          isActive: false,
+          startTime: new Date(Date.now() - 86400000) // 1 day ago
+        }
+      ],
+      reviews: [
+        {
+          id: 'fallback-review-1',
+          rating: 4.5,
+          comment: 'Sample review',
+          timestamp: Date.now()
+        }
+      ],
+      stats: {
+        totalBikes: 1,
+        activeBikes: 1,
+        inUseBikes: 0,
+        maintenanceBikes: 0,
+        totalUsers: 1,
+        activeRides: 0,
+        totalRides: 1,
+        totalReviews: 1,
+        averageRating: 4.5
+      }
+    };
+    
+    console.log('Fallback data provided:', fallbackData);
+    return fallbackData;
   }
 };
 

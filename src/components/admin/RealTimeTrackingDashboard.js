@@ -7,6 +7,7 @@ import styled from 'styled-components';
 import { Marker, InfoWindow, Polyline, Circle, HeatmapLayer } from '@react-google-maps/api';
 import MapContainer from '../MapContainer';
 import { useDataContext } from '../../context/DataContext';
+import { auth } from '../../firebase';
 
 // Enhanced color theme
 const colors = {
@@ -277,9 +278,25 @@ const RealTimeTrackingDashboard = () => {
   const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 });
   const [mapZoom, setMapZoom] = useState(13);
   const [liveLocations, setLiveLocations] = useState({});
+  const [authError, setAuthError] = useState(null);
   
   const unsubscribeRefs = useRef([]);
   const realtimeListeners = useRef([]);
+
+  // Monitor authentication status
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        console.log('User is authenticated:', user.uid);
+        setAuthError(null);
+      } else {
+        console.warn('User is not authenticated');
+        setAuthError('User not authenticated');
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Setup real-time listeners for active rides using Realtime Database
   useEffect(() => {
@@ -289,25 +306,43 @@ const RealTimeTrackingDashboard = () => {
       // Listen for active rides from Realtime Database
       const activeRidesRef = ref(realtimeDb, 'activeRides');
       const activeRidesListener = onValue(activeRidesRef, (snapshot) => {
-        const activeRidesData = snapshot.val() || {};
-        const rides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
-          ...rideData,
-          userId: userId,
-          id: rideData.rideId || rideData.id
-        }));
-        
-        console.log('Active rides updated:', rides.length);
-        setActiveRides(rides);
-        calculateStats(rides);
-        checkForAlerts(rides);
+        try {
+          const activeRidesData = snapshot.val() || {};
+          const rides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
+            ...rideData,
+            userId: userId,
+            id: rideData.rideId || rideData.id
+          }));
+          
+          console.log('Active rides updated:', rides.length);
+          setActiveRides(rides);
+          calculateStats(rides);
+          checkForAlerts(rides);
+          setAuthError(null); // Clear auth error on successful data fetch
+        } catch (error) {
+          console.error('Error processing active rides data:', error);
+          setAuthError('Error loading active rides');
+        }
+      }, (error) => {
+        console.error('Firebase permission error for active rides:', error);
+        setAuthError('Permission denied for active rides');
       });
 
       // Listen for live locations from Realtime Database
       const liveLocationRef = ref(realtimeDb, 'liveLocation');
       const liveLocationListener = onValue(liveLocationRef, (snapshot) => {
-        const liveLocationData = snapshot.val() || {};
-        console.log('Live locations updated:', Object.keys(liveLocationData).length);
-        setLiveLocations(liveLocationData);
+        try {
+          const liveLocationData = snapshot.val() || {};
+          console.log('Live locations updated:', Object.keys(liveLocationData).length);
+          setLiveLocations(liveLocationData);
+          setAuthError(null); // Clear auth error on successful data fetch
+        } catch (error) {
+          console.error('Error processing live location data:', error);
+          setAuthError('Error loading live locations');
+        }
+      }, (error) => {
+        console.error('Firebase permission error for live locations:', error);
+        setAuthError('Permission denied for live locations');
       });
 
       realtimeListeners.current.push(
@@ -473,7 +508,57 @@ const RealTimeTrackingDashboard = () => {
       <Title>
         <LiveIndicator />
         Real-Time Tracking Dashboard
+        {authError && (
+          <span style={{ 
+            marginLeft: '15px',
+            padding: '4px 8px',
+            backgroundColor: colors.danger,
+            color: 'white',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontWeight: 'normal'
+          }}>
+            ⚠️ Auth Issue
+          </span>
+        )}
       </Title>
+
+      {/* Authentication Error Banner */}
+      {authError && (
+        <div style={{
+          backgroundColor: '#ffebee',
+          border: `2px solid ${colors.danger}`,
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '20px',
+          textAlign: 'center'
+        }}>
+          <div style={{ color: colors.danger, fontWeight: 'bold', marginBottom: '10px' }}>
+            🚨 Authentication Issue Detected
+          </div>
+          <div style={{ color: colors.mediumGray, fontSize: '14px', marginBottom: '15px' }}>
+            {authError} - Some data may not be available.
+          </div>
+          <button
+            onClick={() => {
+              console.log('Retrying data fetch...');
+              setAuthError(null);
+              window.location.reload();
+            }}
+            style={{
+              backgroundColor: colors.danger,
+              color: 'white',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 'bold'
+            }}
+          >
+            🔄 Reload Dashboard
+          </button>
+        </div>
+      )}
 
       {/* Stats Grid */}
       <StatsGrid>

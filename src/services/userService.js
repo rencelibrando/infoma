@@ -2,8 +2,19 @@ import { db, auth } from '../firebase';
 import { collection, getDocs, doc, updateDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 
-// Helper function to check authentication
+// Helper function to check authentication with better error handling
 const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    // Don't throw an error immediately, log it for debugging
+    console.warn('User not authenticated in userService checkAuth()');
+    return null;
+  }
+  return user;
+};
+
+// Helper function for operations that require authentication
+const requireAuth = () => {
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated. Please log in to access this resource.');
@@ -14,8 +25,12 @@ const checkAuth = () => {
 // Fetch all users
 export const getUsers = async () => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get users without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     const usersCollection = collection(db, 'users');
     const usersSnapshot = await getDocs(usersCollection);
@@ -34,8 +49,8 @@ export const getUsers = async () => {
 // Update user role
 export const updateUserRole = async (userId, newRole) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for this operation
+    requireAuth();
     
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { 
@@ -51,8 +66,11 @@ export const updateUserRole = async (userId, newRole) => {
 // Set up real-time listener for users collection
 export const subscribeToUsers = (callback) => {
   try {
-    // Check authentication first
+    // Check authentication - but don't fail immediately
     const user = checkAuth();
+    if (!user) {
+      console.warn('Setting up users subscription without authentication');
+    }
     
     // Create a query against the users collection
     const usersQuery = query(collection(db, 'users'));
@@ -80,8 +98,8 @@ export const subscribeToUsers = (callback) => {
 // Block or unblock a user
 export const updateUserBlockStatus = async (userId, isBlocked) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for this operation
+    requireAuth();
     
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { 
@@ -98,8 +116,8 @@ export const updateUserBlockStatus = async (userId, isBlocked) => {
 // Delete a user
 export const deleteUser = async (userId) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for this operation
+    requireAuth();
     
     // 1. Delete the user document from Firestore
     const userRef = doc(db, 'users', userId);

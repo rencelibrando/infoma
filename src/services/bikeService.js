@@ -78,8 +78,19 @@ const generateHardwareId = async () => {
   return await generateSecureQRCode();
 };
 
-// Helper function to check authentication
+// Helper function to check authentication with better error handling
 const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    // Don't throw an error immediately, log it for debugging
+    console.warn('User not authenticated in bikeService checkAuth()');
+    return null;
+  }
+  return user;
+};
+
+// Helper function for operations that require authentication
+const requireAuth = () => {
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated. Please log in to access this resource.');
@@ -90,8 +101,12 @@ const checkAuth = () => {
 // Get all bikes
 export const getAllBikes = async () => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bikes without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     const bikesRef = collection(db, 'bikes');
     const snapshot = await getDocs(bikesRef);
@@ -108,8 +123,12 @@ export const getAllBikes = async () => {
 // Get a single bike by ID
 export const getBikeById = async (id) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bike by ID without authentication');
+      // Try to proceed anyway for public bike data
+    }
     
     const bikeRef = doc(db, 'bikes', id);
     const bikeDoc = await getDoc(bikeRef);
@@ -217,7 +236,7 @@ export const uploadBike = async (bike, imageFile) => {
 export const deleteBike = async (id) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikeRef = doc(db, 'bikes', id);
     await deleteDoc(bikeRef);
@@ -232,7 +251,7 @@ export const deleteBike = async (id) => {
 export const updateBike = async (id, bikeData, imageFile) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikeRef = doc(db, 'bikes', id);
     const currentBikeDoc = await getDoc(bikeRef);
@@ -343,7 +362,7 @@ export const updateBike = async (id, bikeData, imageFile) => {
 export const updateBikesWithHardwareIds = async () => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikes = await getAllBikes();
     const updates = [];
@@ -413,7 +432,7 @@ export const updateBikesWithHardwareIds = async () => {
 export const toggleBikeLock = async (bikeId, lockState) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikeRef = doc(db, "bikes", bikeId);
     const bikeDoc = await getDoc(bikeRef);
@@ -475,7 +494,7 @@ export const toggleBikeLock = async (bikeId, lockState) => {
 export const ensureBikeDataConsistency = async () => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     console.log("Running bike data consistency check...");
     const bikes = await getAllBikes();
@@ -538,7 +557,7 @@ export const ensureBikeDataConsistency = async () => {
 export const initializeBikesData = async () => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     // First ensure all bikes have hardware IDs
     await updateBikesWithHardwareIds();
@@ -555,7 +574,7 @@ export const initializeBikesData = async () => {
 export const subscribeToBikes = (callback) => {
   try {
     // Check authentication first
-    const user = checkAuth();
+    const user = requireAuth();
     
     console.log("Setting up real-time listener for bikes...");
     const bikesCollection = collection(db, "bikes");
@@ -609,7 +628,7 @@ export const subscribeToBikes = (callback) => {
 export const fixBikeCoordinates = async () => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikes = await getAllBikes();
     const defaultCoords = { latitude: 14.554729, longitude: 121.0244 }; // Default Manila coords
@@ -644,7 +663,7 @@ export const fixBikeCoordinates = async () => {
 export const updateBikeStatus = async (bikeId, statusUpdate) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const bikeRef = doc(db, "bikes", bikeId);
     const bikeDoc = await getDoc(bikeRef);
@@ -722,7 +741,7 @@ export const updateBikeStatus = async (bikeId, statusUpdate) => {
 export const validateBikeIdentifiers = async (qrCode, hardwareId, excludeBikeId = null) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     const errors = [];
     
@@ -780,7 +799,7 @@ export const validateBikeIdentifiers = async (qrCode, hardwareId, excludeBikeId 
 export const isQRCodeUnique = async (identifier, excludeBikeId = null) => {
   try {
     // Check authentication first
-    checkAuth();
+    const user = requireAuth();
     
     // Check in qrCode field
     const qrCodeQuery = query(

@@ -16,8 +16,19 @@ import {
   setDoc
 } from "firebase/firestore";
 
-// Helper function to check authentication
+// Helper function to check authentication with better error handling
 const checkAuth = () => {
+  const user = auth.currentUser;
+  if (!user) {
+    // Don't throw an error immediately, log it for debugging
+    console.warn('User not authenticated in bookingService checkAuth()');
+    return null;
+  }
+  return user;
+};
+
+// Helper function for operations that require authentication
+const requireAuth = () => {
   const user = auth.currentUser;
   if (!user) {
     throw new Error('User not authenticated. Please log in to access this resource.');
@@ -28,7 +39,12 @@ const checkAuth = () => {
 // Get all bookings from all collections and subcollections
 export const getAllBookingsFromAllCollections = async () => {
   try {
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get all bookings without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     // Get bookings from main collection
     const mainBookingsCollection = collection(db, "bookings");
@@ -75,7 +91,12 @@ export const getAllBookingsFromAllCollections = async () => {
 // Get all bookings
 export const getAllBookings = async () => {
   try {
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bookings without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     // Use the new function that fetches from all collections
     return await getAllBookingsFromAllCollections();
@@ -101,8 +122,12 @@ export const getAllBookings = async () => {
 // Get bookings by user
 export const getBookingsByUser = async (userId) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bookings by user without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     const bookingsCollection = collection(db, "bookings");
     const q = query(
@@ -127,8 +152,12 @@ export const getBookingsByUser = async (userId) => {
 // Get bookings by bike
 export const getBookingsByBike = async (bikeId) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bookings by bike without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     // Get bookings from main collection
     const bookingsCollection = collection(db, "bookings");
@@ -184,8 +213,12 @@ export const getBookingsByBike = async (bikeId) => {
 // Get bookings within a date range
 export const getBookingsByDateRange = async (startDate, endDate) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bookings by date range without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     const startTimestamp = startDate instanceof Date ? Timestamp.fromDate(startDate) : startDate;
     const endTimestamp = endDate instanceof Date ? Timestamp.fromDate(endDate) : endDate;
@@ -261,8 +294,8 @@ export const validateBookingFormat = (booking) => {
 // Create a new booking
 export const createBooking = async (bookingData) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for creating bookings
+    requireAuth();
     
     // Validate and standardize the booking data format
     const validatedBookingData = validateBookingFormat(bookingData);
@@ -315,8 +348,8 @@ export const createBooking = async (bookingData) => {
 // Update a booking
 export const updateBooking = async (bookingId, updatedData) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for updating bookings
+    requireAuth();
     
     let bookingRef = null;
     let currentBooking = null;
@@ -456,8 +489,8 @@ export const updateBooking = async (bookingId, updatedData) => {
 // Delete a booking
 export const deleteBooking = async (bookingId) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Require authentication for deleting bookings
+    requireAuth();
     
     let bookingRef = null;
     let currentBooking = null;
@@ -566,8 +599,12 @@ export const calculateBookingDuration = (booking) => {
 // Get revenue by period (day, week, month)
 export const getRevenueByPeriod = async (period) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get revenue data without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     const now = new Date();
     let startDate;
@@ -627,8 +664,12 @@ export const getRevenueByPeriod = async (period) => {
 // Check if a bike is available during a specific time period
 export const checkBikeAvailability = async (bikeId, startDate, endDate) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to check bike availability without authentication');
+      // Try to proceed anyway for public booking checks
+    }
     
     // Convert to timestamp if needed
     const startTimestamp = startDate instanceof Date ? Timestamp.fromDate(startDate) : startDate;
@@ -685,8 +726,12 @@ export const checkBikeAvailability = async (bikeId, startDate, endDate) => {
 // Get bookings based on user role (admin sees all, regular users see only their own)
 export const getBookingsByUserRole = async (userId, isAdmin) => {
   try {
-    // Check authentication first
-    checkAuth();
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to get bookings by user role without authentication');
+      // Try to proceed anyway for admin dashboard
+    }
     
     if (isAdmin) {
       // Admins see all bookings from all collections and subcollections

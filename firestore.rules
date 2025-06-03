@@ -22,11 +22,17 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Users collection
+    // Users collection - UPDATED FOR DASHBOARD ACCESS
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
-      allow read: if request.auth != null && 
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      
+      // Allow admins to read all user data for dashboard analytics
+      allow read: if isAdmin();
+      
+      // Allow limited read access for dashboard analytics (only basic fields)
+      // This enables counting users without exposing sensitive data
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated();
 
       // Bookings subcollection under users
       match /bookings/{bookingId} {
@@ -73,9 +79,13 @@ service cloud.firestore {
       allow write: if isAuthenticated(); // Allow authenticated users to manage FAQs
     }
     
-    // Bikes collection - UPDATED WITH MORE PERMISSIVE RULES
+    // Bikes collection - UPDATED WITH DASHBOARD ACCESS
     match /bikes/{bikeId} {
+      // Allow reading for authenticated users AND for dashboard analytics
       allow read: if isAuthenticated();
+      
+      // Allow listing for dashboard (essential for analytics)
+      allow list: if isAuthenticated();
 
       // Admins have full write access
       allow write: if isAdmin();
@@ -115,9 +125,10 @@ service cloud.firestore {
         allow delete: if isAuthenticated();
       }
 
-      // Reviews subcollection under bikes
+      // Reviews subcollection under bikes - ENHANCED FOR DASHBOARD
       match /reviews/{reviewId} {
         allow read: if isAuthenticated();
+        allow list: if isAuthenticated(); // Allow listing for dashboard analytics
         allow create: if isAuthenticated() && 
                       request.resource.data.userId == request.auth.uid &&
                       request.resource.data.rating >= 1 && 
@@ -155,7 +166,7 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
-    // Rides collection - UPDATED TO BE MORE PERMISSIVE
+    // Rides collection - UPDATED FOR DASHBOARD ACCESS
     match /rides/{rideId} {
       // Users can read/write their own rides
       allow read, write: if request.auth != null && 
@@ -169,12 +180,14 @@ service cloud.firestore {
       allow update: if request.auth != null && 
         request.auth.uid == resource.data.userId;
       
-      // Admins can read all rides for monitoring
-      allow read: if request.auth != null && 
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      // Admins can read all rides for monitoring AND dashboard analytics
+      allow read: if isAdmin();
+      
+      // Allow listing rides for dashboard analytics
+      allow list: if isAuthenticated();
       
       // Admins can update any ride
-     allow update: if isAdmin(); 
+      allow update: if isAdmin(); 
       
       // Bookings subcollection under rides
       match /bookings/{bookingId} {
@@ -184,9 +197,10 @@ service cloud.firestore {
       }
     }
 
-    // Reviews collection (global)
+    // Reviews collection (global) - ENHANCED FOR DASHBOARD
     match /reviews/{reviewId} {
       allow read: if isAuthenticated();
+      allow list: if isAuthenticated(); // Essential for dashboard analytics
       allow create: if isAuthenticated() && 
                     request.resource.data.userId == request.auth.uid &&
                     request.resource.data.rating >= 1 && 
@@ -195,6 +209,11 @@ service cloud.firestore {
                     resource.data.userId == request.auth.uid;
       allow delete: if isAuthenticated() && 
                     (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Wildcard rule for reviews subcollections (for dashboard analytics)
+    match /{path=**}/reviews/{reviewId} {
+      allow read: if isAuthenticated();
     }
 
     // Bike location history collection

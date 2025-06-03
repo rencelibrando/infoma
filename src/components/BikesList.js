@@ -452,6 +452,13 @@ const BikesList = ({ onEditBike }) => {
   useEffect(() => {
     setLoading(true);
     
+    // DEBUG: Log the bikes data
+    console.log('🚴‍♂️ BIKES DEBUG - Total bikes from context:', bikes?.length || 0);
+    console.log('🚴‍♂️ BIKES DEBUG - Bikes data:', bikes);
+    console.log('🚴‍♂️ BIKES DEBUG - Search term:', searchTerm);
+    console.log('🚴‍♂️ BIKES DEBUG - Type filter:', typeFilter);
+    console.log('🚴‍♂️ BIKES DEBUG - Availability filter:', availabilityFilter);
+    
     // Apply filters
     const filtered = (bikes || []).filter(bike => {
       const matchesSearch = 
@@ -469,9 +476,17 @@ const BikesList = ({ onEditBike }) => {
         availabilityFilter === 'all' || 
         (availabilityFilter === 'available' && bike.isAvailable) ||
         (availabilityFilter === 'unavailable' && !bike.isAvailable);
+      
+      // DEBUG: Log individual bike filtering
+      if (bikes?.length <= 20) { // Only log for reasonable number of bikes
+        console.log(`🚴‍♂️ BIKE DEBUG - ${bike.name}: search=${matchesSearch}, type=${matchesType}, availability=${matchesAvailability}`);
+      }
         
       return matchesSearch && matchesType && matchesAvailability;
     });
+    
+    console.log('🚴‍♂️ BIKES DEBUG - Filtered bikes count:', filtered.length);
+    console.log('🚴‍♂️ BIKES DEBUG - Filtered bikes:', filtered.map(b => b.name));
     
     setFilteredBikes(filtered);
     setLoading(false);
@@ -596,6 +611,22 @@ const BikesList = ({ onEditBike }) => {
   return (
     <Container>
       <Title>Manage Bikes</Title>
+      
+      {/* DEBUG INFO */}
+      <div style={{
+        padding: '15px',
+        backgroundColor: '#fff3cd',
+        border: '1px solid #ffeaa7',
+        borderRadius: '8px',
+        marginBottom: '20px',
+        fontSize: '14px'
+      }}>
+        <strong>🔍 DEBUG INFO:</strong><br />
+        <span>📊 Total bikes from context: {bikes?.length || 0}</span><br />
+        <span>🔍 Filtered bikes shown: {filteredBikes.length}</span><br />
+        <span>🏷️ Current filters: Search="{searchTerm}", Type="{typeFilter}", Availability="{availabilityFilter}"</span><br />
+        <span>🕐 Last update: {lastUpdateTime.toLocaleTimeString()}</span>
+      </div>
       
       {showUpdateIndicator && (
         <RefreshIndicator>

@@ -160,6 +160,7 @@ const Dashboard = () => {
   const [selectedBike, setSelectedBike] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [authError, setAuthError] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -178,6 +179,10 @@ const Dashboard = () => {
         // User is authenticated - block back navigation to login
         blockBackNavigation();
         
+        // Monitor authentication state
+        console.log('User authenticated in dashboard:', user.uid);
+        setAuthError(null);
+        
         // Initialize data when dashboard loads
         const initializeData = async () => {
           try {
@@ -185,12 +190,18 @@ const Dashboard = () => {
             
             // Start preloading dashboard data in parallel with options data
             const preloadPromises = [
-              preloadOptionsData(),
-              preloadDashboardData()
+              preloadOptionsData().catch(error => {
+                console.warn('Failed to preload options data:', error.message);
+                return null; // Don't fail the entire initialization
+              }),
+              preloadDashboardData().catch(error => {
+                console.warn('Failed to preload dashboard data:', error.message);
+                return null; // Don't fail the entire initialization
+              })
             ];
             
             // Wait for all preloads to complete
-            await Promise.all(preloadPromises);
+            await Promise.allSettled(preloadPromises);
             
             setIsInitialized(true);
             console.log('Dashboard data initialized successfully');
@@ -345,6 +356,43 @@ const Dashboard = () => {
         </Sidebar>
         
         <Content sidebarOpen={sidebarOpen}>
+          {/* Authentication Error Banner */}
+          {authError && (
+            <div style={{
+              backgroundColor: '#ffebee',
+              border: '2px solid #d32f2f',
+              borderRadius: '8px',
+              padding: '15px',
+              marginBottom: '20px',
+              textAlign: 'center'
+            }}>
+              <div style={{ color: '#d32f2f', fontWeight: 'bold', marginBottom: '10px' }}>
+                🚨 Authentication Issue Detected
+              </div>
+              <div style={{ color: '#666666', fontSize: '14px', marginBottom: '15px' }}>
+                {authError} - Some dashboard features may be limited.
+              </div>
+              <button
+                onClick={() => {
+                  console.log('Retrying authentication...');
+                  setAuthError(null);
+                  window.location.reload();
+                }}
+                style={{
+                  backgroundColor: '#d32f2f',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontWeight: 'bold'
+                }}
+              >
+                🔄 Reload Dashboard
+              </button>
+            </div>
+          )}
+          
           <ContentSection>
             {activeTab === 'overview' && (
               <Analytics />
