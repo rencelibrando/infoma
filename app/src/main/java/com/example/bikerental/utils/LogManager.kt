@@ -37,6 +37,13 @@ object LogManager {
     }
     
     /**
+     * Set log level for dynamic configuration
+     */
+    fun setLogLevel(logLevel: LogLevel) {
+        configure(logLevel)
+    }
+    
+    /**
      * Log verbose message
      */
     fun v(tag: String, message: String) {
@@ -104,6 +111,35 @@ object LogManager {
         }
     }
     
+    // Convenience functions for easier usage
+    /**
+     * Log debug message - convenience function
+     */
+    fun logDebug(tag: String, message: String) {
+        d(tag, message)
+    }
+    
+    /**
+     * Log info message - convenience function
+     */
+    fun logInfo(tag: String, message: String) {
+        i(tag, message)
+    }
+    
+    /**
+     * Log warning message - convenience function
+     */
+    fun logWarning(tag: String, message: String, throwable: Throwable? = null) {
+        w(tag, message, throwable)
+    }
+    
+    /**
+     * Log error message - convenience function
+     */
+    fun logError(tag: String, message: String, throwable: Throwable? = null) {
+        e(tag, message, throwable)
+    }
+    
     /**
      * Log a message and handles chunking for long messages
      */
@@ -122,4 +158,10 @@ object LogManager {
             i++
         }
     }
-} 
+}
+
+// Top-level convenience functions for even easier access
+fun logDebug(tag: String, message: String) = LogManager.logDebug(tag, message)
+fun logInfo(tag: String, message: String) = LogManager.logInfo(tag, message)
+fun logWarning(tag: String, message: String, throwable: Throwable? = null) = LogManager.logWarning(tag, message, throwable)
+fun logError(tag: String, message: String, throwable: Throwable? = null) = LogManager.logError(tag, message, throwable) 

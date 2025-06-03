@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bikerental.models.BikeRide
+import com.example.bikerental.utils.toBikeRideSafe
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -64,7 +65,7 @@ class RideHistoryViewModel : ViewModel() {
                 
                 val rides = snapshot.documents.mapNotNull { document ->
                     try {
-                        document.toObject(BikeRide::class.java)
+                        document.toBikeRideSafe()
                     } catch (e: Exception) {
                         Log.e(TAG, "Error parsing ride data", e)
                         null
@@ -115,7 +116,7 @@ class RideHistoryViewModel : ViewModel() {
                     .await()
                 
                 if (rideDoc.exists()) {
-                    val ride = rideDoc.toObject(BikeRide::class.java)
+                    val ride = rideDoc.toBikeRideSafe()
                     if (ride != null) {
                         // Add to the ride history list
                         val updatedList = _rideHistory.value.toMutableList()

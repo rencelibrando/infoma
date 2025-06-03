@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.bikerental.BikeRentalApplication
 import com.example.bikerental.models.Bike
 import com.example.bikerental.models.BikeLocation
 import com.example.bikerental.models.BikeRide
@@ -11,34 +12,47 @@ import com.example.bikerental.models.Booking
 import com.example.bikerental.models.BookingStatus
 import com.example.bikerental.models.Review
 import com.example.bikerental.models.TrackableBike
-import com.example.bikerental.utils.QRCodeHelper
 import com.example.bikerental.utils.ErrorHandler
+import com.example.bikerental.utils.QRCodeHelper
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.*
-import com.google.firebase.firestore.CollectionReference
-import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.util.*
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.coroutines.suspendCoroutine
+import kotlinx.coroutines.withContext
+import java.util.Date
+import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.math.sqrt
-import kotlinx.coroutines.withContext
 
 class BikeViewModel : ViewModel() {
     private val TAG = "BikeViewModel"
+    
+    companion object {
+        @Volatile
+        private var INSTANCE: BikeViewModel? = null
+        
+        fun getInstance(): BikeViewModel? {
+            return INSTANCE
+        }
+        
+        fun setInstance(instance: BikeViewModel) {
+            INSTANCE = instance
+        }
+    }
     
     // Firebase references
     private val auth = FirebaseAuth.getInstance()
@@ -47,6 +61,8 @@ class BikeViewModel : ViewModel() {
     private val storage = FirebaseStorage.getInstance()
     private val bikesRef = database.getReference("bikes")
     private val ridesRef = database.getReference("rides")
+    private val activeRidesRef = database.getReference("activeRides")
+    private val liveLocationRef = database.getReference("liveLocation")
     
     // State for bikes from Firestore (new)
     private val _bikes = MutableStateFlow<List<Bike>>(emptyList())
@@ -64,7 +80,7 @@ class BikeViewModel : ViewModel() {
     private val _selectedBike = MutableStateFlow<Bike?>(null)
     val selectedBike: StateFlow<Bike?> = _selectedBike
     
-    // State for bikes
+    // State for bikes (TrackableBike for backward compatibility)
     private val _availableBikes = MutableStateFlow<List<TrackableBike>>(emptyList())
     val availableBikes: StateFlow<List<TrackableBike>> = _availableBikes
     
@@ -124,22 +140,115 @@ class BikeViewModel : ViewModel() {
     private val _unlockSuccess = MutableStateFlow(false)
     val unlockSuccess: StateFlow<Boolean> = _unlockSuccess
     
-    // QR Scanner state
-    private val _showQRScanner = MutableStateFlow(false)
-    val showQRScanner: StateFlow<Boolean> = _showQRScanner
+    // ENHANCED REAL-TIME TRACKING FUNCTIONALITY
     
-    private val _qrScanningError = MutableStateFlow<String?>(null)
-    val qrScanningError: StateFlow<String?> = _qrScanningError
+    // State for real-time ride tracking
+    private val _rideDistance = MutableStateFlow(0f)
+    val rideDistance: StateFlow<Float> = _rideDistance
     
-    // State for active rides (admin tracking)
-    private val _activeRides = MutableStateFlow<List<BikeRide>>(emptyList())
-    val activeRides: StateFlow<List<BikeRide>> = _activeRides
+    private val _currentSpeed = MutableStateFlow(0f)
+    val currentSpeed: StateFlow<Float> = _currentSpeed
+    
+    private val _ridePath = MutableStateFlow<List<LatLng>>(emptyList())
+    val ridePath: StateFlow<List<LatLng>> = _ridePath
+    
+    private val _userBearing = MutableStateFlow(0f)
+    val userBearing: StateFlow<Float> = _userBearing
+    
+    // Added missing _maxSpeed property
+    private val _maxSpeed = MutableStateFlow(0f)
+    val maxSpeed: StateFlow<Float> = _maxSpeed
+    
+    private val _showRideRating = MutableStateFlow(false)
+    val showRideRating: StateFlow<Boolean> = _showRideRating
+    
+    // State for completed ride data (for rating dialog)
+    private val _completedRide = MutableStateFlow<BikeRide?>(null)
+    val completedRide: StateFlow<BikeRide?> = _completedRide
     
     init {
+        setInstance(this)
         fetchAllBikes()
         fetchBikesFromFirestore()
         setupBikesRealtimeUpdates()
         checkForActiveRide()
+    }
+    
+    /**
+     * Fetch all available bikes from Firebase Realtime Database
+     */
+    private fun fetchAllBikes() {
+        availableBikesListener = bikesRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val bikesList = mutableListOf<TrackableBike>()
+                
+                for (bikeSnapshot in snapshot.children) {
+                    try {
+                        val bike = bikeSnapshot.getValue(TrackableBike::class.java)
+                        bike?.let {
+                            bikesList.add(it)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing bike data", e)
+                    }
+                }
+                
+                _availableBikes.value = bikesList
+            }
+            
+            override fun onCancelled(error: DatabaseError) {
+                Log.e(TAG, "Error fetching bikes", error.toException())
+            }
+        })
+    }
+    
+    /**
+     * Check if the user has an active ride
+     */
+    private fun checkForActiveRide() {
+        auth.currentUser?.let { user ->
+            ridesRef.orderByChild("userId").equalTo(user.uid)
+                .addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        var foundActiveRide = false
+                        
+                        for (rideSnapshot in snapshot.children) {
+                            val ride = rideSnapshot.getValue(BikeRide::class.java)
+                            
+                            // Only restore rides that are truly active and recent
+                            if (ride?.status == "active") {
+                                val currentTime = System.currentTimeMillis()
+                                val rideAge = currentTime - ride.startTime
+                                val maxRideAge = 24 * 60 * 60 * 1000L // 24 hours in milliseconds
+                                
+                                // Only restore rides that are less than 24 hours old
+                                if (rideAge < maxRideAge) {
+                                    Log.d(TAG, "Restoring active ride: ${ride.id}, started ${rideAge / 60000} minutes ago")
+                                    _activeRide.value = ride
+                                    startTrackingBike(ride.bikeId)
+                                    foundActiveRide = true
+                                    break
+                                } else {
+                                    // Auto-complete very old rides that might be stuck
+                                    Log.w(TAG, "Found stale active ride: ${ride.id}, auto-completing")
+                                    ridesRef.child(ride.id).child("status").setValue("completed")
+                                        .addOnSuccessListener {
+                                            Log.d(TAG, "Stale ride ${ride.id} marked as completed")
+                                        }
+                                }
+                            }
+                        }
+                        
+                        if (!foundActiveRide) {
+                            Log.d(TAG, "No active rides found for user")
+                        }
+                    }
+                    
+                    override fun onCancelled(error: DatabaseError) {
+                        Log.e(TAG, "Error checking for active rides", error.toException())
+                    }
+                })
+        }
     }
     
     // Fetch bikes from Firestore
@@ -203,37 +312,53 @@ class BikeViewModel : ViewModel() {
             // Cancel any existing listener to avoid duplicates
             firestoreBikesListener?.remove()
             
-            // Create a new listener for real-time updates
-            firestoreBikesListener = firestore.collection("bikes")
-                .addSnapshotListener { snapshot, error ->
-                    viewModelScope.launch {
+            try {
+                // Create a new listener for real-time updates
+                firestoreBikesListener = firestore.collection("bikes")
+                    .addSnapshotListener { snapshot, error ->
                         if (error != null) {
                             Log.e(TAG, "Error listening for bike updates", error)
-                            _error.value = "Failed to listen for updates: ${error.message}"
-                            return@launch
+                            viewModelScope.launch(Dispatchers.Main) {
+                                _error.value = "Failed to listen for updates: ${error.message}"
+                            }
+                            return@addSnapshotListener
                         }
                         
                         if (snapshot != null) {
-                            try {
-                                // Process documents on background thread
-                                val bikesList = withContext(Dispatchers.Default) {
-                                    snapshot.documents.mapNotNull { document -> 
+                            viewModelScope.launch(Dispatchers.Default) {
+                                try {
+                                    // Process documents on background thread
+                                    val bikesList = snapshot.documents.mapNotNull { document -> 
                                         try {
                                             document.toObject(Bike::class.java)?.copy(id = document.id)
                                         } catch (e: Exception) {
-                                            Log.e(TAG, "Error parsing bike data from Firestore", e)
+                                            Log.e(TAG, "Error parsing bike data from Firestore: ${document.id}", e)
                                             null
                                         }
                                     }
+                                    
+                                    // Update UI on main thread
+                                    withContext(Dispatchers.Main) {
+                                        _bikes.value = bikesList
+                                        Log.d(TAG, "Updated bikes list: ${bikesList.size} bikes")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error processing bike updates", e)
+                                    withContext(Dispatchers.Main) {
+                                        _error.value = "Error processing bike updates: ${e.message}"
+                                    }
                                 }
-                                
-                                _bikes.value = bikesList
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error processing bike updates", e)
                             }
                         }
                     }
+                
+                Log.d(TAG, "Real-time bike updates listener established")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting up real-time bike updates", e)
+                withContext(Dispatchers.Main) {
+                    _error.value = "Failed to setup real-time updates: ${e.message}"
                 }
+            }
         }
     }
     
@@ -276,7 +401,9 @@ class BikeViewModel : ViewModel() {
         }
     }
     
-    // Upload a new bike to Firestore with image (new)
+    /**
+     * Upload a new bike to Firestore with image (new)
+     */
     fun uploadBike(
         name: String,
         type: String,
@@ -295,7 +422,7 @@ class BikeViewModel : ViewModel() {
                 withContext(Dispatchers.IO) {
                     // 1. Upload image to Firebase Storage
                     val storageRef = storage.reference.child("bikes/${UUID.randomUUID()}.jpg")
-                    val uploadTask = storageRef.putFile(imageUri).await()
+                    storageRef.putFile(imageUri).await()
                     val downloadUrl = storageRef.downloadUrl.await().toString()
                     
                     // 2. Create bike object
@@ -303,14 +430,14 @@ class BikeViewModel : ViewModel() {
                         id = UUID.randomUUID().toString(),
                         name = name,
                         type = type,
-                        price = "₱${price}/hr",
+                        price = "₱$price/hr",
                         priceValue = price,
                         imageUrl = downloadUrl,
                         latitude = location.latitude,
                         longitude = location.longitude,
                         description = description,
-                        _isAvailable = true,
-                        _isInUse = false
+                        isAvailable = true,
+                        isInUse = false
                     )
                     
                     // 3. Save to Firestore
@@ -330,103 +457,146 @@ class BikeViewModel : ViewModel() {
         }
     }
     
-    // Fetch all available bikes from Firebase Realtime Database
-    private fun fetchAllBikes() {
-        availableBikesListener = bikesRef.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val bikesList = mutableListOf<TrackableBike>()
-                
-                for (bikeSnapshot in snapshot.children) {
-                    try {
-                        val bike = bikeSnapshot.getValue(TrackableBike::class.java)
-                        bike?.let {
-                            bikesList.add(it)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing bike data", e)
-                    }
-                }
-                
-                _availableBikes.value = bikesList
-            }
-            
-            override fun onCancelled(error: DatabaseError) {
-                Log.e(TAG, "Error fetching bikes", error.toException())
-            }
-        })
-    }
-    
-    // Check if the user has an active ride
-    private fun checkForActiveRide() {
-        auth.currentUser?.let { user ->
-            ridesRef.orderByChild("userId").equalTo(user.uid)
-                .addListenerForSingleValueEvent(object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        for (rideSnapshot in snapshot.children) {
-                            val ride = rideSnapshot.getValue(BikeRide::class.java)
-                            if (ride?.status == "active") {
-                                _activeRide.value = ride
-                                startTrackingBike(ride.bikeId)
-                                break
-                            }
-                        }
-                    }
-                    
-                    override fun onCancelled(error: DatabaseError) {
-                        Log.e(TAG, "Error checking for active rides", error.toException())
-                    }
-                })
-        }
-    }
-    
-    // Select a bike for potential rental
-    fun selectBike(bikeId: String) {
-        viewModelScope.launch {
-            try {
-                // Move database operation to IO dispatcher
-                val bike = withContext(Dispatchers.IO) {
-                    val bikeSnapshot = bikesRef.child(bikeId).get().await()
-                    bikeSnapshot.getValue(TrackableBike::class.java)
-                }
-                _selectedTrackableBike.value = bike
-            } catch (e: Exception) {
-                Log.e(TAG, "Error selecting bike", e)
-            }
-        }
-    }
-    
-    // Start tracking a specific bike's location (for real-time updates)
+    /**
+     * Start tracking a specific bike's location (for real-time updates)
+     * ENHANCED: Improved listener management and error handling
+     */
     fun startTrackingBike(bikeId: String) {
-        // Remove any existing listener
+        // Remove any existing listener first to prevent duplicates
         stopTrackingBike()
         
-        // Add a new listener
+        Log.d(TAG, "Starting bike tracking for: $bikeId")
+        
+        // Add a new listener with enhanced error handling
         bikeLocationListener = bikesRef.child(bikeId).addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 try {
+                    if (snapshot.exists()) {
                     val bike = snapshot.getValue(TrackableBike::class.java)
                     bike?.let {
                         _selectedTrackableBike.value = it
                         _bikeLocation.value = LatLng(it.latitude, it.longitude)
+                            Log.d(TAG, "Bike location updated: ${it.latitude}, ${it.longitude}")
+                        }
+                    } else {
+                        Log.w(TAG, "Bike data not found for ID: $bikeId")
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing bike location data", e)
+                    Log.e(TAG, "Error parsing bike location data for $bikeId", e)
+                    // Don't stop tracking due to parsing errors, just log them
                 }
             }
             
             override fun onCancelled(error: DatabaseError) {
-                Log.e(TAG, "Error tracking bike location", error.toException())
+                Log.e(TAG, "Error tracking bike location for $bikeId: ${error.message}", error.toException())
+                // Clean up listener reference on cancellation
+                bikeLocationListener = null
             }
         })
+        
+        Log.d(TAG, "Bike tracking listener added for: $bikeId")
     }
     
-    // Stop tracking the bike's location
+    /**
+     * Stop tracking the bike's location
+     * ENHANCED: Improved cleanup and null safety
+     */
     fun stopTrackingBike() {
-        bikeLocationListener?.let {
-            _selectedTrackableBike.value?.id?.let { bikeId ->
-                bikesRef.child(bikeId).removeEventListener(it)
+        bikeLocationListener?.let { listener ->
+            val currentBikeId = _selectedTrackableBike.value?.id
+            if (currentBikeId != null) {
+                try {
+                    bikesRef.child(currentBikeId).removeEventListener(listener)
+                    Log.d(TAG, "Bike tracking stopped for: $currentBikeId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping bike tracking for $currentBikeId", e)
+                }
             }
             bikeLocationListener = null
+        }
+        
+        // Clear selected bike data
+        _selectedTrackableBike.value = null
+        _bikeLocation.value = null
+    }
+    
+    // Calculate distance between two LatLng points
+    private fun calculateDistance(start: LatLng, end: LatLng): Float {
+        val results = FloatArray(1)
+        android.location.Location.distanceBetween(
+            start.latitude, start.longitude,
+            end.latitude, end.longitude,
+            results
+        )
+        return results[0] // Distance in meters
+    }
+    
+    // Add missing calculateDistance method with 4 double parameters (returns distance in kilometers)
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
+        val results = FloatArray(1)
+        android.location.Location.distanceBetween(lat1, lon1, lat2, lon2, results)
+        return results[0] / 1000f // Distance in kilometers
+    }
+    
+    // Add missing fetchReviewsForBike method
+    /**
+     * Fetch reviews for a specific bike
+     */
+    fun fetchReviewsForBike(bikeId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    synchronized(reviewsLock) {
+                        // Cancel any existing listener
+                        reviewsListener?.remove()
+                        
+                        // Create new listener for real-time reviews
+                        reviewsListener = firestore.collection("reviews")
+                            .whereEqualTo("bikeId", bikeId)
+                            .orderBy("timestamp", Query.Direction.DESCENDING)
+                            .addSnapshotListener { snapshot, error ->
+                                viewModelScope.launch {
+                                    if (error != null) {
+                                        Log.e(TAG, "Error listening for reviews", error)
+                                        return@launch
+                                    }
+                                    
+                                    if (snapshot != null) {
+                                        try {
+                                            val reviewsList = withContext(Dispatchers.Default) {
+                                                snapshot.documents.mapNotNull { document ->
+                                                    try {
+                                                        document.toObject(Review::class.java)?.copy(id = document.id)
+                                                    } catch (e: Exception) {
+                                                        Log.e(TAG, "Error parsing review data", e)
+                                                        null
+                                                    }
+                                                }
+                                            }
+                                            
+                                            _bikeReviews.value = reviewsList
+                                            
+                                            // Calculate average rating
+                                            val averageRating = if (reviewsList.isNotEmpty()) {
+                                                reviewsList.map { it.rating }.average().toFloat()
+                                            } else {
+                                                0f
+                                            }
+                                            _averageRating.value = averageRating
+                                            
+                                            Log.d(TAG, "Reviews updated: ${reviewsList.size} reviews, average rating: $averageRating")
+                                            
+                                        } catch (e: Exception) {
+                                            Log.e(TAG, "Error processing reviews", e)
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting up reviews listener", e)
+            }
         }
     }
     
@@ -439,40 +609,211 @@ class BikeViewModel : ViewModel() {
                 _unlockSuccess.value = false
                 
                 Log.d(TAG, "Starting QR code validation for: ${qrCode.take(20)}...")
+                Log.d(TAG, "User location: ${userLocation.latitude}, ${userLocation.longitude}")
                 
-                // Validate prerequisites
-                val validationResult = validateRidePrerequisites(qrCode, userLocation)
-                if (!validationResult.isValid) {
-                    _unlockError.value = validationResult.errorMessage
+                // Basic validation
+                if (qrCode.isBlank()) {
+                    _unlockError.value = "QR code is empty. Please scan a valid bike QR code."
                     return@launch
                 }
                 
-                val currentUser = validationResult.user!!
-                val bikeIdentifier = validationResult.bikeIdentifier!!
+                // Check user authentication
+                val currentUser = auth.currentUser
+                if (currentUser == null) {
+                    _unlockError.value = "Please log in to unlock a bike."
+                    return@launch
+                }
+                
+                Log.d(TAG, "User authenticated: ${currentUser.uid}")
+                
+                // SAFETY CHECK: Ensure no active ride exists before starting a new one
+                val currentActiveRide = _activeRide.value
+                if (currentActiveRide != null) {
+                    Log.w(TAG, "User already has an active ride: ${currentActiveRide.id}")
+                    _unlockError.value = "You already have an active ride. Please end your current ride first."
+                    return@launch
+                }
+                
+                // Double-check in Firebase for any active rides
+                Log.d(TAG, "Checking Firebase for existing active rides...")
+                val hasActiveRideInFirebase = checkForActiveRideInFirebase()
+                if (hasActiveRideInFirebase) {
+                    Log.w(TAG, "Found active ride in Firebase during QR validation")
+                    _unlockError.value = "You have an active ride in progress. Please end it first or contact support if this is incorrect."
+                    return@launch
+                }
+                
+                Log.d(TAG, "No active rides found, proceeding with bike unlock...")
+                
+                // Validate QR code format
+                if (!QRCodeHelper.isValidQRCodeFormat(qrCode)) {
+                    _unlockError.value = "Invalid QR code format. Please scan a valid bike QR code."
+                    return@launch
+                }
+                
+                // Extract bike identifier
+                val bikeIdentifier = QRCodeHelper.extractBikeIdentifierFromQRCode(qrCode)
+                if (bikeIdentifier.isNullOrBlank()) {
+                    _unlockError.value = "Could not read bike information from QR code. Please try again."
+                    return@launch
+                }
+                
+                Log.d(TAG, "Extracted bike identifier: $bikeIdentifier")
                 
                 // Find and validate bike
+                Log.d(TAG, "Searching for bike...")
                 val targetBike = findAndValidateBike(bikeIdentifier)
                 if (targetBike == null) {
-                    _unlockError.value = "Bike not found. Please try scanning again or contact support."
+                    _unlockError.value = "Bike not found with code '$bikeIdentifier'. Please check the QR code and try again."
+                    return@launch
+                }
+                
+                Log.d(TAG, "Found bike: ${targetBike.id} - ${targetBike.name}")
+                Log.d(TAG, "Bike status: Available=${targetBike.isAvailable}, InUse: ${targetBike.isInUse}, Locked=${targetBike.isLocked}")
+                
+                // Validate bike availability
+                if (!targetBike.isAvailable) {
+                    _unlockError.value = "This bike is currently not available for use."
+                    return@launch
+                }
+                
+                if (targetBike.isInUse) {
+                    _unlockError.value = "This bike is already being used by another rider."
+                    return@launch
+                }
+                
+                if (!targetBike.isLocked) {
+                    _unlockError.value = "This bike is not properly secured. Please contact support."
                     return@launch
                 }
                 
                 // Validate QR code against specific bike
                 if (!QRCodeHelper.validateQRCodeForBike(qrCode, targetBike.qrCode, targetBike.hardwareId)) {
-                    _unlockError.value = "QR code validation failed. This may not be a valid bike QR code."
+                    _unlockError.value = "QR code does not match this bike. Please scan the correct QR code."
                     return@launch
                 }
+                
+                Log.d(TAG, "All validations passed, starting ride...")
                 
                 // Execute bike unlock and ride start
                 val unlockResult = executeRideStart(targetBike, userLocation, currentUser.uid)
                 handleUnlockResult(unlockResult)
                 
             } catch (e: Exception) {
-                ErrorHandler.logError(TAG, "Error in QR code validation", e)
-                _unlockError.value = ErrorHandler.getErrorMessage(e)
+                Log.e(TAG, "Error in QR code validation", e)
+                _unlockError.value = "An error occurred while unlocking the bike: ${e.message}"
             } finally {
                 _isUnlockingBike.value = false
             }
+        }
+    }
+    
+    // OPTIMIZED: Check for active rides in Firebase to prevent duplicates
+    private suspend fun checkForActiveRideInFirebase(): Boolean {
+        return try {
+            val userId = auth.currentUser?.uid ?: return false
+            
+            Log.d(TAG, "Checking for active rides for user: $userId")
+            
+            // Check in Realtime Database first (faster)
+            val activeRideSnapshot = withContext(Dispatchers.IO) {
+                try {
+                    activeRidesRef.child(userId).get().await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to check Realtime Database, falling back to Firestore: ${e.message}")
+                    null
+                }
+            }
+            
+            if (activeRideSnapshot?.exists() == true) {
+                try {
+                    val activeRideData = activeRideSnapshot.getValue(Map::class.java) as? Map<String, Any>
+                    val status = activeRideData?.get("status") as? String
+                    
+                    if (status == "active") {
+                        Log.w(TAG, "Found active ride in Realtime Database")
+                        
+                        // Try to reconstruct ride data
+                        val rideId = activeRideData["rideId"] as? String ?: activeRideData["id"] as? String
+                        val bikeId = activeRideData["bikeId"] as? String
+                        val startTime = (activeRideData["startTime"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                        
+                        if (rideId != null && bikeId != null) {
+                            val restoredRide = BikeRide(
+                                id = rideId,
+                                bikeId = bikeId,
+                                userId = userId,
+                                startTime = startTime,
+                                status = "active"
+                            )
+                            
+                            // Restore the active ride to local state
+                            withContext(Dispatchers.Main) {
+                                _activeRide.value = restoredRide
+                                startTrackingBike(bikeId)
+                            }
+                            return true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing active ride data from Realtime Database", e)
+                }
+            }
+            
+            // Check Firestore for consistency
+            val firestoreSnapshot = withContext(Dispatchers.IO) {
+                try {
+                    firestore.collection("rides")
+                        .whereEqualTo("userId", userId)
+                        .whereEqualTo("status", "active")
+                        .limit(1)
+                        .get()
+                        .await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to check Firestore for active rides: ${e.message}")
+                    null
+                }
+            }
+            
+            if (firestoreSnapshot != null && !firestoreSnapshot.isEmpty) {
+                try {
+                    val rideDoc = firestoreSnapshot.documents[0]
+                    val rideData = rideDoc.data
+                    
+                    if (rideData != null) {
+                        Log.w(TAG, "Found active ride in Firestore: ${rideDoc.id}")
+                        
+                        val bikeId = rideData["bikeId"] as? String
+                        val startTime = (rideData["startTime"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                        
+                        if (bikeId != null) {
+                            val restoredRide = BikeRide(
+                                id = rideDoc.id,
+                                bikeId = bikeId,
+                                userId = userId,
+                                startTime = startTime,
+                                status = "active"
+                            )
+                            
+                            // Restore the active ride to local state
+                            withContext(Dispatchers.Main) {
+                                _activeRide.value = restoredRide
+                                startTrackingBike(bikeId)
+                            }
+                            return true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing active ride data from Firestore", e)
+                }
+            }
+            
+            Log.d(TAG, "No active rides found for user: $userId")
+            false
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking for active rides", e)
+            false
         }
     }
     
@@ -608,6 +949,7 @@ class BikeViewModel : ViewModel() {
                 userId = userId,
                 startTime = System.currentTimeMillis(),
                 startLocation = startLocation,
+                lastLocation = startLocation,
                 path = listOf(startLocation),
                 status = "active"
             )
@@ -615,12 +957,50 @@ class BikeViewModel : ViewModel() {
             // Save to Realtime Database for active tracking
             ridesRef.child(newRideId).setValue(ride).await()
             
+            // Save to Firestore with enhanced data structure for web dashboard
+            val firestoreRideData = mapOf(
+                "id" to newRideId,
+                "bikeId" to bikeId,
+                "userId" to userId,
+                "userName" to (auth.currentUser?.displayName ?: "Unknown User"),
+                "userEmail" to (auth.currentUser?.email ?: ""),
+                "startTime" to System.currentTimeMillis(),
+                "startLocation" to mapOf(
+                    "latitude" to userLocation.latitude,
+                    "longitude" to userLocation.longitude,
+                    "timestamp" to System.currentTimeMillis()
+                ),
+                "lastLocation" to mapOf(
+                    "latitude" to userLocation.latitude,
+                    "longitude" to userLocation.longitude,
+                    "timestamp" to System.currentTimeMillis()
+                ),
+                "currentLatitude" to userLocation.latitude,
+                "currentLongitude" to userLocation.longitude,
+                "lastLocationUpdate" to System.currentTimeMillis(),
+                "status" to "active",
+                "isActive" to true,
+                "currentSpeed" to 0.0,
+                "bearing" to 0.0,
+                "totalDistance" to 0.0,
+                "path" to listOf(mapOf(
+                    "latitude" to userLocation.latitude,
+                    "longitude" to userLocation.longitude,
+                    "timestamp" to System.currentTimeMillis()
+                )),
+                "createdAt" to com.google.firebase.Timestamp.now(),
+                "updatedAt" to com.google.firebase.Timestamp.now()
+            )
+            
+            firestore.collection("rides").document(newRideId).set(firestoreRideData).await()
+            
             // Update Realtime Database bike status for consistency
             val bikeUpdates = mapOf(
                 "isAvailable" to false,
                 "isInUse" to true,
                 "isLocked" to false,
                 "currentRider" to userId,
+                "currentRideId" to newRideId,
                 "lastUpdated" to com.google.firebase.database.ServerValue.TIMESTAMP
             )
             bikesRef.child(bikeId).updateChildren(bikeUpdates).await()
@@ -629,14 +1009,14 @@ class BikeViewModel : ViewModel() {
             withContext(Dispatchers.Main) {
                 _activeRide.value = ride
                 startTrackingBike(bikeId)
-            }
-            
-            // Save to Firestore for history (non-blocking)
-            viewModelScope.launch {
+                
+                // Start location tracking service
                 try {
-                    firestore.collection("rides").document(newRideId).set(ride.toMap()).await()
+                    val context = BikeRentalApplication.instance
+                    com.example.bikerental.services.LocationTrackingService.startLocationTracking(context, newRideId)
+                    Log.d(TAG, "Location tracking service started for ride: $newRideId")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to save ride to Firestore (non-critical): ${e.message}")
+                    Log.e(TAG, "Failed to start location tracking service: ${e.message}")
                 }
             }
             
@@ -703,66 +1083,6 @@ class BikeViewModel : ViewModel() {
         _isUnlockingBike.value = false
     }
     
-    // QR Scanner management methods
-    fun showQRScanner() {
-        _showQRScanner.value = true
-        _qrScanningError.value = null
-    }
-    
-    fun hideQRScanner() {
-        _showQRScanner.value = false
-        _qrScanningError.value = null
-    }
-    
-    fun onQRCodeScanned(qrCode: String, userLocation: LatLng) {
-        hideQRScanner()
-        validateQRCodeAndUnlockBike(qrCode, userLocation)
-    }
-    
-    fun resetQRScanningError() {
-        _qrScanningError.value = null
-    }
-    
-    // Start a new bike ride
-    fun startRide(bikeId: String, userLocation: LatLng) {
-        auth.currentUser?.let { user ->
-            val newRideId = ridesRef.push().key ?: UUID.randomUUID().toString()
-            
-            val startLocation = BikeLocation(
-                latitude = userLocation.latitude,
-                longitude = userLocation.longitude,
-                timestamp = System.currentTimeMillis()
-            )
-            
-            val ride = BikeRide(
-                id = newRideId,
-                bikeId = bikeId,
-                userId = user.uid,
-                startTime = System.currentTimeMillis(),
-                startLocation = startLocation,
-                path = listOf(startLocation),
-                status = "active"
-            )
-            
-            // Update the ride in Firebase
-            ridesRef.child(newRideId).setValue(ride)
-                .addOnSuccessListener {
-                    _activeRide.value = ride
-                    
-                    // Mark the bike as in use
-                    bikesRef.child(bikeId).child("isAvailable").setValue(false)
-                    bikesRef.child(bikeId).child("isInUse").setValue(true)
-                    bikesRef.child(bikeId).child("currentRider").setValue(user.uid)
-                    
-                    // Start tracking the bike
-                    startTrackingBike(bikeId)
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Error starting ride", e)
-                }
-        }
-    }
-    
     // Update bike location during a ride
     fun updateBikeLocation(bikeId: String, newLocation: LatLng) {
         val update = mapOf(
@@ -793,192 +1113,539 @@ class BikeViewModel : ViewModel() {
     // End the active ride
     fun endRide(finalLocation: LatLng) {
         _activeRide.value?.let { ride ->
-            val endLocation = BikeLocation(
-                latitude = finalLocation.latitude,
-                longitude = finalLocation.longitude,
-                timestamp = System.currentTimeMillis()
-            )
-            
-            // Calculate final ride statistics
-            val endTime = System.currentTimeMillis()
-            val durationMinutes = (endTime - ride.startTime) / 60000.0
-            
-            // Extract hourly rate from price string (e.g., "₱12/hr" -> 12.0)
-            val hourlyRate = _selectedTrackableBike.value?.price?.let {
-                val priceValue = it.replace(Regex("[^0-9]"), "")
-                priceValue.toDoubleOrNull() ?: 10.0 // Default to 10 if parsing fails
-            } ?: 10.0
-            
-            // Calculate cost based on duration (minimum 15 minutes)
-            val cost = maxOf(durationMinutes / 60.0, 0.25) * hourlyRate
-            
-            // Update ride in Firebase
-            val updates = mapOf(
-                "endTime" to endTime,
-                "endLocation" to endLocation,
-                "cost" to cost,
-                "status" to "completed"
-            )
-            
-            ridesRef.child(ride.id).updateChildren(updates)
-                .addOnSuccessListener {
-                    // Reset active ride
-                    _activeRide.value = null
+            viewModelScope.launch {
+                try {
+                    val endLocation = BikeLocation(
+                        latitude = finalLocation.latitude,
+                        longitude = finalLocation.longitude,
+                        timestamp = System.currentTimeMillis()
+                    )
                     
-                    // Make bike available again
-                    ride.bikeId.let { bikeId ->
-                        bikesRef.child(bikeId).child("isAvailable").setValue(true)
-                        bikesRef.child(bikeId).child("isInUse").setValue(false)
-                        bikesRef.child(bikeId).child("currentRider").setValue("")
-                        bikesRef.child(bikeId).child("latitude").setValue(finalLocation.latitude)
-                        bikesRef.child(bikeId).child("longitude").setValue(finalLocation.longitude)
-                    }
+                    // Calculate final ride statistics
+                    val endTime = System.currentTimeMillis()
+                    val durationMinutes = (endTime - ride.startTime) / 60000.0
                     
-                    // Stop tracking the bike
-                    stopTrackingBike()
+                    // Extract hourly rate from price string (e.g., "₱12/hr" -> 12.0)
+                    val hourlyRate = _selectedTrackableBike.value?.price?.let {
+                        val priceValue = it.replace(Regex("[^0-9]"), "")
+                        priceValue.toDoubleOrNull() ?: 50.0 // Default to 50 if parsing fails
+                    } ?: 50.0
                     
-                    // Also save ride record to Firestore for history
-                    saveRideToFirestore(ride.copy(
-                        endTime = endTime,
-                        endLocation = endLocation,
-                        cost = cost,
-                        status = "completed"
-                    ))
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Error ending ride", e)
-                }
-        }
-    }
-    
-    // Save completed ride to Firestore for user history
-    private fun saveRideToFirestore(ride: BikeRide) {
-        auth.currentUser?.let { user ->
-            try {
-                val rideData = ride.toMap()
-                firestore.collection("users")
-                    .document(user.uid)
-                    .collection("rideHistory")
-                    .document(ride.id)
-                    .set(rideData)
-                    .addOnSuccessListener {
-                        Log.d(TAG, "Ride history saved successfully")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e(TAG, "Error saving ride to history", e)
-                    }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error preparing ride data for Firestore", e)
-            }
-        }
-    }
-    
-    // Cancel a ride
-    fun cancelRide() {
-        _activeRide.value?.let { ride ->
-            ridesRef.child(ride.id).child("status").setValue("cancelled")
-                .addOnSuccessListener {
-                    // Make bike available again
-                    ride.bikeId.let { bikeId ->
-                        bikesRef.child(bikeId).child("isAvailable").setValue(true)
-                        bikesRef.child(bikeId).child("isInUse").setValue(false)
-                        bikesRef.child(bikeId).child("currentRider").setValue("")
-                    }
+                    // Calculate cost based on duration (minimum 15 minutes)
+                    val effectiveDuration = maxOf(durationMinutes, 15.0) // Minimum 15 minutes
+                    val cost = (effectiveDuration / 60.0) * hourlyRate
                     
-                    // Reset active ride
-                    _activeRide.value = null
-                    
-                    // Stop tracking
-                    stopTrackingBike()
-                }
-        }
-    }
-    
-    // Calculate distance between two points
-    fun calculateDistance(start: LatLng, end: LatLng): Float {
-        val results = FloatArray(1)
-        android.location.Location.distanceBetween(
-            start.latitude, start.longitude,
-            end.latitude, end.longitude,
-            results
-        )
-        return results[0] // Distance in meters
-    }
-    
-    // NEW METHODS FOR REVIEWS
-    
-    /**
-     * Fetch all reviews for a specific bike
-     */
-    fun fetchReviewsForBike(bikeId: String) {
-        // First remove any existing listener in a synchronized block
-        synchronized(reviewsLock) {
-            reviewsListener?.remove()
-            reviewsListener = null
-        }
-        
-        Log.d(TAG, "Starting to fetch reviews for bike: $bikeId")
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                // Set up real-time listener for reviews on IO thread
-                val listener = firestore.collection("bikes").document(bikeId)
-                    .collection("reviews")
-                    .addSnapshotListener { snapshot, error ->
-                        viewModelScope.launch(Dispatchers.IO) {
-                            if (error != null) {
-                                Log.e(TAG, "Error listening for review updates", error)
-                                return@launch
+                    withContext(Dispatchers.IO) {
+                        try {
+                            // Stop location tracking service first
+                            try {
+                                val context = BikeRentalApplication.instance
+                                com.example.bikerental.services.LocationTrackingService.stopLocationTracking(context)
+                                Log.d(TAG, "Location tracking service stopped")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to stop location tracking service: ${e.message}")
+                                // Continue with ride ending even if service stop fails
                             }
                             
-                            if (snapshot == null) {
-                                Log.d(TAG, "Null reviews snapshot received")
-                                return@launch
-                            }
+                            // FOCUS ON FIRESTORE ONLY - Avoid Realtime DB permission issues
+                            val bikeRef = firestore.collection("bikes").document(ride.bikeId)
                             
-                            Log.d(TAG, "Reviews snapshot received: ${snapshot.documents.size} reviews")
+                            // Use Firestore transaction for atomic bike status update
+                            firestore.runTransaction { transaction ->
+                                val bikeSnapshot = transaction.get(bikeRef)
+                                
+                                // Update bike status atomically in Firestore
+                                val bikeUpdates = mapOf(
+                                    "isAvailable" to true,
+                                    "isInUse" to false,
+                                    "isLocked" to true,
+                                    "currentRider" to "",
+                                    "currentRideId" to "",
+                                    "latitude" to finalLocation.latitude,
+                                    "longitude" to finalLocation.longitude,
+                                    "lastRideEnd" to com.google.firebase.Timestamp.now(),
+                                    "lastUpdated" to com.google.firebase.Timestamp.now()
+                                )
+                                
+                                transaction.update(bikeRef, bikeUpdates)
+                                null // Return value not needed
+                            }.await()
                             
-                            // Process documents on background thread
-                            val reviewsList = ArrayList<Review>()
-                            for (document in snapshot.documents) {
-                                try {
-                                    val review = document.toObject(Review::class.java)
-                                    if (review != null) {
-                                        reviewsList.add(review)
-                                        Log.d(TAG, "Parsed review: ${review.id} by ${review.userName}")
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Error parsing review data", e)
+                            // Update ride in Firestore
+                            val firestoreRideUpdates = mapOf(
+                                "endTime" to endTime,
+                                "endLocation" to mapOf(
+                                    "latitude" to endLocation.latitude,
+                                    "longitude" to endLocation.longitude,
+                                    "timestamp" to endLocation.timestamp
+                                ),
+                                "cost" to cost,
+                                "status" to "completed",
+                                "isActive" to false,
+                                "duration" to (endTime - ride.startTime),
+                                "totalDistance" to _rideDistance.value.toDouble(),
+                                "maxSpeed" to _maxSpeed.value.toDouble(),
+                                "averageSpeed" to if (durationMinutes > 0) (_rideDistance.value / 1000.0) / (durationMinutes / 60.0) else 0.0,
+                                "updatedAt" to com.google.firebase.Timestamp.now()
+                            )
+                            
+                            firestore.collection("rides").document(ride.id).update(firestoreRideUpdates).await()
+                            
+                            // TRY Realtime Database updates (but don't fail the ride ending for Realtime DB issues)
+                            try {
+                                // Update ride in Realtime Database (optional - for real-time tracking)
+                                val rideUpdates = mapOf(
+                                    "endTime" to endTime,
+                                    "endLocation" to endLocation.toMap(),
+                                    "cost" to cost,
+                                    "status" to "completed",
+                                    "isActive" to false,
+                                    "duration" to (endTime - ride.startTime)
+                                )
+                                
+                                ridesRef.child(ride.id).updateChildren(rideUpdates).await()
+                                
+                                // Clean up active rides and live location (optional)
+                                auth.currentUser?.uid?.let { userId ->
+                                    // Remove from active rides (don't await to avoid blocking)
+                                    activeRidesRef.child(userId).removeValue()
+                                    // Deactivate live location (don't await to avoid blocking)
+                                    liveLocationRef.child(userId).child("isActive").setValue(false)
                                 }
+                                
+                                Log.d(TAG, "Realtime Database updates completed successfully")
+                            } catch (realtimeError: Exception) {
+                                // Log but don't fail the ride ending for Realtime DB issues
+                                Log.w(TAG, "Realtime Database updates failed (non-critical): ${realtimeError.message}")
                             }
                             
-                            // Sort the reviews by timestamp (newest first)
-                            val sortedReviews = reviewsList.sortedByDescending { it.timestamp }
+                            // Add to user's ride history in Firestore
+                            try {
+                                auth.currentUser?.uid?.let { userId ->
+                                    firestore.collection("users")
+                                        .document(userId)
+                                        .collection("rideHistory")
+                                        .document(ride.id)
+                                        .set(mapOf(
+                                            "rideId" to ride.id,
+                                            "bikeId" to ride.bikeId,
+                                            "endTime" to endTime,
+                                            "cost" to cost,
+                                            "duration" to (endTime - ride.startTime),
+                                            "distance" to _rideDistance.value.toDouble()
+                                        ))
+                                        .await()
+                                }
+                            } catch (historyError: Exception) {
+                                Log.w(TAG, "Failed to save ride history (non-critical): ${historyError.message}")
+                            }
                             
-                            // Update state on main thread
-                            _bikeReviews.value = sortedReviews
-                            Log.d(TAG, "Updated reviews state with ${sortedReviews.size} reviews")
+                            Log.d(TAG, "Ride ended successfully with cost: ₱${String.format("%.2f", cost)}")
                             
-                            // Calculate and update average rating
-                            if (sortedReviews.isNotEmpty()) {
-                                val avgRating = sortedReviews.sumOf { it.rating.toDouble() } / sortedReviews.size
-                                _averageRating.value = avgRating.toFloat()
-                                Log.d(TAG, "Updated average rating to ${_averageRating.value}")
-                            } else {
-                                _averageRating.value = 0f
-                                Log.d(TAG, "No reviews found, setting average rating to 0")
+                            // Show ride rating dialog on main thread
+                            withContext(Dispatchers.Main) {
+                                val completedRide = ride.copy(
+                                    endTime = endTime,
+                                    endLocation = endLocation,
+                                    cost = cost,
+                                    status = "completed",
+                                    distanceTraveled = _rideDistance.value.toDouble(),
+                                    maxSpeed = _maxSpeed.value.toDouble()
+                                )
+                                _completedRide.value = completedRide
+                                _showRideRating.value = true
+                                
+                                // Clear active ride state
+                                _activeRide.value = null
+                                stopTrackingBike()
+                                
+                                // Clear tracking states
+                                _rideDistance.value = 0f
+                                _currentSpeed.value = 0f
+                                _maxSpeed.value = 0f
+                                _ridePath.value = emptyList()
+                                _userBearing.value = 0f
+                            }
+                    
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error ending ride", e)
+                            ErrorHandler.logError(TAG, "Failed to end ride properly", e)
+                            
+                            // Emergency cleanup - try to reset bike state at minimum using Firestore only
+                            try {
+                                val emergencyBikeUpdate = mapOf(
+                                    "isAvailable" to true,
+                                    "isInUse" to false,
+                                    "currentRider" to "",
+                                    "lastUpdated" to com.google.firebase.Timestamp.now()
+                                )
+                                firestore.collection("bikes").document(ride.bikeId).update(emergencyBikeUpdate).await()
+                                Log.d(TAG, "Emergency bike status reset completed")
+                                
+                                // Clear active ride state even if some operations failed
+                                withContext(Dispatchers.Main) {
+                                    _activeRide.value = null
+                                    stopTrackingBike()
+                                    _rideDistance.value = 0f
+                                    _currentSpeed.value = 0f
+                                    _maxSpeed.value = 0f
+                                    _ridePath.value = emptyList()
+                                    _userBearing.value = 0f
+                                }
+                            } catch (emergencyError: Exception) {
+                                Log.e(TAG, "Emergency bike reset also failed", emergencyError)
+                                // Still clear UI state to prevent stuck rides
+                                withContext(Dispatchers.Main) {
+                                    _activeRide.value = null
+                                    stopTrackingBike()
+                                    _rideDistance.value = 0f
+                                    _currentSpeed.value = 0f
+                                    _maxSpeed.value = 0f
+                                    _ridePath.value = emptyList()
+                                    _userBearing.value = 0f
+                                }
                             }
                         }
                     }
-                
-                // Store the listener in a synchronized block
-                synchronized(reviewsLock) {
-                    reviewsListener = listener
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Critical error during ride end", e)
+                    ErrorHandler.logError(TAG, "Critical ride end failure", e)
+                    
+                    // Force clear UI state to prevent stuck rides
+                    withContext(Dispatchers.Main) {
+                        _activeRide.value = null
+                        stopTrackingBike()
+                        _rideDistance.value = 0f
+                        _currentSpeed.value = 0f
+                        _maxSpeed.value = 0f
+                        _ridePath.value = emptyList()
+                        _userBearing.value = 0f
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error setting up reviews listener", e)
             }
         }
+    }
+    
+    /**
+     * Submit ride rating and feedback
+     */
+    fun submitRideRating(rating: Int, feedback: String) {
+        _completedRide.value?.let { ride ->
+            auth.currentUser?.let { user ->
+                viewModelScope.launch {
+                    try {
+                        val rideRating = mapOf(
+                            "rideId" to ride.id,
+                            "userId" to user.uid,
+                            "bikeId" to ride.bikeId,
+                            "rating" to rating,
+                            "feedback" to feedback,
+                            "timestamp" to System.currentTimeMillis()
+                        )
+                        
+                        // Save rating to Firestore
+                        firestore.collection("rideRatings")
+                            .document(ride.id)
+                            .set(rideRating)
+                            .await()
+                        
+                        // Update ride with rating in Firestore
+                        val rideUpdate = mapOf(
+                            "rating" to rating,
+                            "feedback" to feedback
+                        )
+                        firestore.collection("rides").document(ride.id).update(rideUpdate).await()
+                        
+                        // Try updating Realtime DB but don't fail if permission denied
+                        try {
+                            ridesRef.child(ride.id).updateChildren(rideUpdate).await()
+                        } catch (realtimeError: Exception) {
+                            Log.w(TAG, "Realtime DB rating update failed (non-critical): ${realtimeError.message}")
+                        }
+                        
+                        // Hide rating dialog
+                        withContext(Dispatchers.Main) {
+                            _showRideRating.value = false
+                            _completedRide.value = null
+                        }
+                        
+                        Log.d(TAG, "Ride rating submitted successfully")
+                    
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error submitting ride rating", e)
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Dismiss ride rating dialog
+     */
+    fun dismissRideRating() {
+        _showRideRating.value = false
+        _completedRide.value = null
+    }
+    
+    /**
+     * Clear error messages
+     */
+    fun clearError() {
+        _error.value = null
+        _unlockError.value = null
+        _bookingError.value = null
+    }
+    
+    /**
+     * Clear specific error types
+     */
+    fun clearUnlockError() {
+        _unlockError.value = null
+    }
+    
+    fun clearBookingError() {
+        _bookingError.value = null
+    }
+    
+    /**
+     * Update ride statistics during an active ride (called from LocationTrackingService)
+     * 
+     * ARCHITECTURE NOTE: 
+     * - This method handles UI state updates only (distance, speed, path for display)
+     * - All Firebase persistence is handled by LocationTrackingService to avoid duplication
+     * - LocationTrackingService is the single source of truth for ride data persistence
+     * - This separation ensures efficient Firebase usage and prevents duplicate writes
+     * 
+     * This method focuses on UI state updates only - Firebase persistence is handled by LocationTrackingService
+     */
+    fun updateRideStats(rideId: String, location: BikeLocation) {
+        viewModelScope.launch {
+            try {
+                val ride = _activeRide.value ?: return@launch
+                if (ride.id != rideId) return@launch
+                
+                // Calculate distance if we have a previous location
+                val lastLocation = ride.lastLocation
+                if (lastLocation.latitude != 0.0 && lastLocation.longitude != 0.0) {
+                    val distance = calculateDistance(
+                        lastLocation.latitude, lastLocation.longitude,
+                        location.latitude, location.longitude
+                    )
+                    // Convert to meters and add to total distance
+                    _rideDistance.value += distance * 1000f
+                }
+                
+                // Update speed statistics
+                val currentSpeed = location.speedKmh.toFloat()
+                if (currentSpeed > 0) {
+                    _currentSpeed.value = currentSpeed
+                    if (currentSpeed > _maxSpeed.value) {
+                        _maxSpeed.value = currentSpeed
+                    }
+                }
+                
+                // Update ride path for UI display
+                val currentPath = _ridePath.value.toMutableList()
+                currentPath.add(LatLng(location.latitude, location.longitude))
+                _ridePath.value = currentPath
+                
+                // Update local ride state for UI (no Firebase updates - handled by LocationTrackingService)
+                val updatedRide = ride.copy(
+                    lastLocation = location,
+                    distanceTraveled = _rideDistance.value.toDouble(),
+                    maxSpeed = _maxSpeed.value.toDouble()
+                )
+                _activeRide.value = updatedRide
+                
+                Log.d(TAG, "Ride stats updated - Distance: ${String.format("%.2f", _rideDistance.value/1000)}km, Speed: ${String.format("%.1f", currentSpeed)}km/h")
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating ride statistics", e)
+            }
+        }
+    }
+    
+    /**
+     * Get current ride statistics for real-time display
+     */
+    fun getCurrentRideStats(): Triple<Long, Float, Float> {
+        val ride = _activeRide.value
+        return if (ride != null) {
+            val duration = System.currentTimeMillis() - ride.startTime
+            Triple(
+                duration,
+                _rideDistance.value / 1000f, // distance in kilometers
+                _currentSpeed.value
+            )
+        } else {
+            Triple(0L, 0f, 0f)
+        }
+    }
+    
+    /**
+     * End ride with tracking service cleanup
+     */
+    fun endRideWithTracking(finalLocation: LatLng) {
+            viewModelScope.launch {
+                try {
+                // Stop location tracking service first
+                val context = BikeRentalApplication.instance
+                com.example.bikerental.services.LocationTrackingService.stopLocationTracking(context)
+                Log.d(TAG, "Location tracking service stopped")
+                
+                // Clear tracking states
+                _rideDistance.value = 0f
+                _currentSpeed.value = 0f
+                _maxSpeed.value = 0f
+                _ridePath.value = emptyList()
+                _userBearing.value = 0f
+                
+                // End the ride normally
+                endRide(finalLocation)
+                
+                } catch (e: Exception) {
+                Log.e(TAG, "Error ending ride with tracking", e)
+                // Fallback to normal end ride
+                endRide(finalLocation)
+            }
+        }
+    }
+    
+    /**
+     * Fetch bookings for a specific bike
+     */
+    fun fetchBookingsForBike(bikeId: String) {
+        viewModelScope.launch {
+            try {
+                _isBookingLoading.value = true
+                _bookingError.value = null
+                
+                val bookingsSnapshot = withContext(Dispatchers.IO) {
+                    firestore.collection("bookings")
+                        .whereEqualTo("bikeId", bikeId)
+                        .orderBy("startDate", Query.Direction.ASCENDING)
+                        .get()
+                        .await()
+                                }
+                
+                synchronized(bookingsLock) {
+                    val bookingsList = bookingsSnapshot.documents.mapNotNull { document ->
+                        try {
+                            document.toObject(Booking::class.java)?.copy(id = document.id)
+                            } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing booking data", e)
+                                null
+                        }
+                }
+                
+                    _bikeBookings.value = bookingsList
+                    Log.d(TAG, "Fetched ${bookingsList.size} bookings for bike: $bikeId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching bookings for bike", e)
+                _bookingError.value = "Failed to load bookings: ${e.message}"
+            } finally {
+                _isBookingLoading.value = false
+            }
+        }
+    }
+    
+    /**
+     * Get booked dates for a specific bike (for calendar display)
+     */
+    fun getBookedDatesForBike(bikeId: String): List<Date> {
+        return _bikeBookings.value
+            .filter { it.bikeId == bikeId && it.status == BookingStatus.CONFIRMED }
+            .flatMap { booking ->
+                // Generate list of dates between start and end date
+                val dates = mutableListOf<Date>()
+                val calendar = java.util.Calendar.getInstance()
+                calendar.time = Date(booking.startDate)
+                
+                while (!calendar.time.after(Date(booking.endDate))) {
+                    dates.add(Date(calendar.timeInMillis))
+                    calendar.add(java.util.Calendar.DAY_OF_MONTH, 1)
+                }
+                dates
+        }
+    }
+    
+    /**
+     * Create a new booking for a bike
+     */
+    fun createBooking(
+        bikeId: String,
+        startDate: Date,
+        endDate: Date,
+        totalCost: Double = 0.0,
+        onSuccess: (Booking) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        auth.currentUser?.let { user ->
+            viewModelScope.launch {
+                try {
+                    _isBookingLoading.value = true
+                    _bookingError.value = null
+                    
+                    val bookingId = UUID.randomUUID().toString()
+                    val booking = Booking(
+                        id = bookingId,
+                        bikeId = bikeId,
+                        userId = user.uid,
+                        userName = user.displayName ?: user.email ?: "Unknown User",
+                        startDate = startDate.time,
+                        endDate = endDate.time,
+                        status = BookingStatus.CONFIRMED,
+                        totalPrice = totalCost,
+                        createdAt = System.currentTimeMillis(),
+                        isHourly = false
+                    )
+                    
+                    withContext(Dispatchers.IO) {
+                        firestore.collection("bookings")
+                            .document(bookingId)
+                            .set(booking)
+                            .await()
+                    }
+                    
+                    // Refresh bookings list
+                    fetchBookingsForBike(bikeId)
+                    
+                    onSuccess(booking)
+                    Log.d(TAG, "Booking created successfully: $bookingId")
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error creating booking", e)
+                    _bookingError.value = "Failed to create booking: ${e.message}"
+                    onError(e.message ?: "Unknown error")
+                } finally {
+                    _isBookingLoading.value = false
+                }
+            }
+        } ?: run {
+            onError("User not authenticated")
+        }
+    }
+    
+    /**
+     * Overloaded version without totalCost parameter for compatibility
+     */
+    fun createBooking(
+        bikeId: String,
+        startDate: Date,
+        endDate: Date,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        createBooking(
+            bikeId = bikeId,
+            startDate = startDate,
+            endDate = endDate,
+            totalCost = 0.0,
+            onSuccess = { _ -> onSuccess() },
+            onError = onError
+        )
     }
     
     /**
@@ -991,602 +1658,94 @@ class BikeViewModel : ViewModel() {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _isLoading.value = true
-                
-                Log.d(TAG, "Starting review submission for bike: $bikeId with rating: $rating")
-                
-                val currentUser = auth.currentUser
-                if (currentUser == null) {
-                    Log.e(TAG, "Review submission failed: User not logged in")
-                    onError("You must be logged in to submit a review")
-                    return@launch
-                }
-                
-                // Get user name if available
-                val userName = try {
-                    val userDoc = firestore.collection("users").document(currentUser.uid).get().await()
-                    userDoc.getString("displayName") ?: currentUser.displayName ?: "Anonymous User"
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error fetching user name", e)
-                    currentUser.displayName ?: "Anonymous User"
-                }
-                
-                Log.d(TAG, "Creating review as user: $userName (${currentUser.uid})")
-                
-                // Create review object with a unique ID
-                val reviewId = UUID.randomUUID().toString()
-                val review = Review(
-                    id = reviewId,
-                    bikeId = bikeId,
-                    userId = currentUser.uid,
-                    userName = userName,
-                    rating = rating,
-                    comment = comment,
-                    timestamp = System.currentTimeMillis()
-                )
-                
-                // 1. Get references
-                val bikeRef = firestore.collection("bikes").document(bikeId)
-                val reviewRef = bikeRef.collection("reviews").document(reviewId)
-                
-                // 2. First save the review
-                reviewRef.set(review).await()
-                
-                // 3. Then fetch all reviews to calculate average
-                val reviewsQuery = bikeRef.collection("reviews").get().await()
-                val allReviews = ArrayList<Review>()
-                
-                // 4. Process all reviews
-                for (doc in reviewsQuery.documents) {
-                    doc.toObject(Review::class.java)?.let { reviewObject ->
-                        allReviews.add(reviewObject)
-                    }
-                }
-                
-                // 5. Calculate average rating
-                val averageRating = if (allReviews.isNotEmpty()) {
-                    allReviews.sumOf { it.rating.toDouble() } / allReviews.size
-                } else {
-                    rating.toDouble()
-                }.toFloat()
-                
-                Log.d(TAG, "Calculated average rating: $averageRating from ${allReviews.size} reviews")
-                
-                // 6. Update the bike's average rating
-                bikeRef.update("rating", averageRating).await()
-                
-                // Update UI state
-                _bikeReviews.value = allReviews.sortedByDescending { it.timestamp }
-                _averageRating.value = averageRating
-                
-                // Update the bike in the bikes list
-                _selectedBike.value = _selectedBike.value?.copy(rating = averageRating)
-                
-                // Update bikes list
-                val updatedBikes = _bikes.value.map { 
-                    if (it.id == bikeId) it.copy(rating = averageRating) else it 
-                }
-                _bikes.value = updatedBikes
-                
-                onSuccess()
-            } catch (e: Exception) {
-                Log.e(TAG, "Top level error submitting review", e)
-                onError("Failed to submit review: ${e.message ?: "Unknown error"}")
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-    
-    /**
-     * Update the average rating for a bike
-     * Thread-safe implementation using Firestore
-     */
-    private suspend fun updateBikeAverageRating(bikeId: String) {
-        try {
-            // Get references
-            val bikeRef = firestore.collection("bikes").document(bikeId)
-            val reviewsRef = bikeRef.collection("reviews")
-            
-            // Fetch reviews outside of synchronized block
-            val reviewsSnapshot = reviewsRef.get().await()
-            
-            // Process reviews
-            val reviewsList = ArrayList<Review>()
-            for (doc in reviewsSnapshot.documents) {
+        auth.currentUser?.let { user ->
+            viewModelScope.launch {
                 try {
-                    val review = doc.toObject(Review::class.java)
-                    if (review != null) {
-                        reviewsList.add(review)
+                    val reviewId = UUID.randomUUID().toString()
+                    val review = Review(
+                        id = reviewId,
+                        bikeId = bikeId,
+                        userId = user.uid,
+                        userName = user.displayName ?: user.email ?: "Anonymous",
+                        rating = rating,
+                        comment = comment,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    
+                    withContext(Dispatchers.IO) {
+                        firestore.collection("reviews")
+                            .document(reviewId)
+                            .set(review)
+                            .await()
                     }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing review during rating calculation", e)
-                }
-            }
-            
-            // Calculate average rating
-            val averageRating = if (reviewsList.isNotEmpty()) {
-                reviewsList.sumOf { it.rating.toDouble() } / reviewsList.size
-            } else {
-                0.0
-            }.toFloat()
-            
-            Log.d(TAG, "Calculated average rating: $averageRating from ${reviewsList.size} reviews")
-            
-            // Update bike document with average rating
-            bikeRef.update("rating", averageRating).await()
-            
-            // Synchronize only UI state updates
-            synchronized(reviewsLock) {
-                // Update local state
-                _averageRating.value = averageRating
-                
-                // Update the bike in the bikes list
-                _selectedBike.value = _selectedBike.value?.copy(rating = averageRating)
-                
-                // Update bikes list
-                val updatedBikes = _bikes.value.map { 
-                    if (it.id == bikeId) it.copy(rating = averageRating) else it 
-                }
-                _bikes.value = updatedBikes
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating bike average rating", e)
-        }
-    }
-    
-    /**
-     * Delete a review by ID
-     * Only the review owner can delete their own reviews
-     * This implementation is thread-safe
-     */
-    fun deleteReview(bikeId: String, reviewId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                _isLoading.value = true
-                
-                val currentUser = auth.currentUser
-                if (currentUser == null) {
-                    onError("You must be logged in to delete a review")
-                    return@launch
-                }
-                
-                // Get references
-                val bikeRef = firestore.collection("bikes").document(bikeId)
-                val reviewDocRef = bikeRef.collection("reviews").document(reviewId)
-                
-                // 1. Get the review to check ownership
-                val reviewSnapshot = reviewDocRef.get().await()
-                
-                if (!reviewSnapshot.exists()) {
-                    throw Exception("Review not found")
-                }
-                
-                val review = reviewSnapshot.toObject(Review::class.java)
-                
-                if (review == null) {
-                    throw Exception("Error reading review data")
-                }
-                
-                // 2. Check if current user is the owner of the review
-                if (review.userId != currentUser.uid) {
-                    throw Exception("You can only delete your own reviews")
-                }
-                
-                // 3. Delete the review document
-                reviewDocRef.delete().await()
-                
-                // 4. Get all remaining reviews for this bike to recalculate rating
-                val remainingReviewsRef = bikeRef.collection("reviews")
-                val remainingReviewsSnapshot = remainingReviewsRef.get().await()
-                
-                // 5. Process remaining reviews
-                val remainingReviews = ArrayList<Review>()
-                for (doc in remainingReviewsSnapshot.documents) {
-                    try {
-                        val reviewObj = doc.toObject(Review::class.java)
-                        if (reviewObj != null) {
-                            remainingReviews.add(reviewObj)
-                        }
+                    
+                    onSuccess()
+                    Log.d(TAG, "Review submitted successfully: $reviewId")
+                        
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing review during rating recalculation", e)
+                    Log.e(TAG, "Error submitting review", e)
+                    onError("Failed to submit review: ${e.message}")
                     }
                 }
-                
-                // 6. Calculate new average rating
-                val newAverageRating = if (remainingReviews.isNotEmpty()) {
-                    remainingReviews.sumOf { it.rating.toDouble() } / remainingReviews.size
-                } else {
-                    0.0 // No reviews left
-                }.toFloat()
-                
-                // 7. Update the bike's average rating
-                bikeRef.update("rating", newAverageRating).await()
-                
-                // 8. Update local state in synchronized block
-                synchronized(reviewsLock) {
-                    _bikeReviews.value = remainingReviews.sortedByDescending { it.timestamp }
-                    _averageRating.value = newAverageRating
-                    
-                    // Update the bike in the bikes list
-                    _selectedBike.value = _selectedBike.value?.copy(rating = newAverageRating)
-                    
-                    // Update bikes list
-                    val updatedBikes = _bikes.value.map { 
-                        if (it.id == bikeId) it.copy(rating = newAverageRating) else it 
-                    }
-                    _bikes.value = updatedBikes
-                }
-                
-                onSuccess()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error deleting review", e)
-                onError("Failed to delete review: ${e.message ?: "Unknown error"}")
-            } finally {
-                _isLoading.value = false
-            }
+            } ?: run {
+            onError("User not authenticated")
         }
     }
     
     /**
-     * Create a new booking for a bike
-     * Thread-safe implementation using Firestore
+     * Delete a review
      */
-    fun createBooking(
+    fun deleteReview(
         bikeId: String,
-        startDate: Date,
-        endDate: Date,
-        onSuccess: (Booking) -> Unit,
+        reviewId: String,
+        onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        viewModelScope.launch {
-            try {
-                _isBookingLoading.value = true
-                _bookingError.value = null
-                
-                Log.d(TAG, "Starting booking creation for bike: $bikeId")
-                
-                val currentUser = auth.currentUser
-                if (currentUser == null) {
-                    Log.e(TAG, "Booking creation failed: User not logged in")
-                    onError("You must be logged in to book a bike")
-                    return@launch
-                }
-                
-                Log.d(TAG, "User authenticated: ${currentUser.uid}")
-                
-                // Find the bike to get its price
-                val bike = _bikes.value.find { it.id == bikeId }
-                if (bike == null) {
-                    Log.e(TAG, "Booking creation failed: Bike not found")
-                    onError("Bike not found")
-                    return@launch
-                }
-                
-                Log.d(TAG, "Bike found: ${bike.id}, price: ${bike.priceValue}")
-                
-                // Get user's display name for the booking
-                val userName = currentUser.displayName ?: try {
-                    // Try to fetch user profile if display name is not available
-                    val userDoc = firestore.collection("users").document(currentUser.uid).get().await()
-                    userDoc.getString("fullName") ?: "User"
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not fetch user's name", e)
-                    "User" // Fallback name
-                }
-                
-                // Create booking object
-                val booking = Booking.createDaily(
-                    bikeId = bikeId,
-                    userId = currentUser.uid,
-                    userName = userName,
-                    startDate = startDate,
-                    endDate = endDate,
-                    pricePerHour = bike.priceValue
-                )
-                
-                Log.d(TAG, "Created booking object: ${booking.id} for dates ${booking.startDate} to ${booking.endDate}")
-                Log.d(TAG, "Booking details: userId=${booking.userId}, userName=${booking.userName}, totalPrice=${booking.totalPrice}")
-                
-                // References to Firestore collections
-                val bikeRef = firestore.collection("bikes").document(bikeId)
-                val userBookingsRef = firestore.collection("users").document(currentUser.uid)
-                    .collection("bookings")
-                val bikeBookingsRef = bikeRef.collection("bookings")
-                
-                Log.d(TAG, "Setting up Firestore paths: User path=${userBookingsRef.path}, Bike path=${bikeBookingsRef.path}")
-                
-                // Start a Firestore batch to ensure atomicity
-                val batch = firestore.batch()
-                
-                // Add booking to user's bookings collection
-                val userBookingDoc = userBookingsRef.document(booking.id)
-                batch.set(userBookingDoc, booking.toMap())
-                
-                // Add booking to bike's bookings collection
-                val bikeBookingDoc = bikeBookingsRef.document(booking.id)
-                batch.set(bikeBookingDoc, booking.toMap())
-                
-                Log.d(TAG, "Starting to commit batch transaction for booking: ${booking.id}")
-                
-                // Commit the batch
-                try {
-                    // Commit the batch
-                    batch.commit().await()
-                    Log.d(TAG, "Batch commit successful for booking: ${booking.id}")
-
-                    // Verify documents were created
-                    val userBookingExists = withContext(Dispatchers.IO) {
-                        try {
-                            val doc = userBookingDoc.get().await()
-                            doc.exists()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error verifying user booking document", e)
-                            false
-                        }
-                    }
-
-                    val bikeBookingExists = withContext(Dispatchers.IO) {
-                        try {
-                            val doc = bikeBookingDoc.get().await()
-                            doc.exists()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error verifying bike booking document", e)
-                            false
-                        }
-                    }
-
-                    Log.d(TAG, "Verification results - User booking: $userBookingExists, Bike booking: $bikeBookingExists")
-
-                    if (!userBookingExists || !bikeBookingExists) {
-                        Log.e(TAG, "Verification failed - One or both booking documents not created")
-                        throw Exception("Failed to save booking to all required locations")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Batch commit failed for booking: ${booking.id}", e)
-                    throw e // Rethrow to be caught by outer catch block
-                }
-                
-                // Update state safely
-                synchronized(bookingsLock) {
-                    val updatedBookings = _bikeBookings.value.toMutableList()
-                    updatedBookings.add(booking)
-                    _bikeBookings.value = updatedBookings
-                }
-                
-                Log.d(TAG, "Booking creation completed successfully: ${booking.id}")
-                onSuccess(booking)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error creating booking", e)
-                onError("Failed to create booking: ${e.message ?: "Unknown error"}")
-            } finally {
-                _isBookingLoading.value = false
-            }
-        }
-    }
-    
-    /**
-     * Get all bookings for a specific bike, used to show availability
-     */
-    fun fetchBookingsForBike(bikeId: String) {
-        viewModelScope.launch {
-            try {
-                _isBookingLoading.value = true
-                _bookingError.value = null
-                
-                Log.d(TAG, "Fetching bookings for bike: $bikeId")
-                
-                val bookingsSnapshot = firestore.collection("bikes").document(bikeId)
-                    .collection("bookings")
-                    .whereIn("status", listOf(
-                        BookingStatus.PENDING.name, 
-                        BookingStatus.CONFIRMED.name
-                    ))
-                    .get()
-                    .await()
-                
-                val bookingsList = bookingsSnapshot.documents.mapNotNull { doc ->
+                viewModelScope.launch {
                     try {
-                        val bookingMap = doc.data ?: return@mapNotNull null
-                        
-                        // Convert status string to enum
-                        val statusStr = bookingMap["status"] as? String ?: BookingStatus.PENDING.name
-                        val status = try {
-                            BookingStatus.valueOf(statusStr)
-                        } catch (e: IllegalArgumentException) {
-                            BookingStatus.PENDING
-                        }
-                        
-                        // Handle date conversion
-                        val startTimestamp = bookingMap["startDate"] as? com.google.firebase.Timestamp
-                        val endTimestamp = bookingMap["endDate"] as? com.google.firebase.Timestamp
-                        
-                        Booking(
-                            id = doc.id,
-                            bikeId = bookingMap["bikeId"] as? String ?: "",
-                            userId = bookingMap["userId"] as? String ?: "",
-                            startDate = startTimestamp?.toDate() ?: Date(),
-                            endDate = endTimestamp?.toDate() ?: Date(),
-                            status = status,
-                            totalPrice = (bookingMap["totalPrice"] as? Number)?.toDouble() ?: 0.0,
-                            createdAt = (bookingMap["createdAt"] as? Number)?.toLong() ?: 0L
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error parsing booking data for document ${doc.id}", e)
-                        null
-                    }
+                withContext(Dispatchers.IO) {
+                    firestore.collection("reviews")
+                        .document(reviewId)
+                        .delete()
+                            .await()
                 }
                 
-                Log.d(TAG, "Fetched ${bookingsList.size} bookings for bike $bikeId")
-                
-                synchronized(bookingsLock) {
-                    _bikeBookings.value = bookingsList
-                }
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error fetching bookings", e)
-                _bookingError.value = e.message
-            } finally {
-                _isBookingLoading.value = false
-            }
-        }
-    }
-    
-    /**
-     * Check if a date range is available for booking a specific bike
-     */
-    fun isDateRangeAvailable(bikeId: String, startDate: Date, endDate: Date): Boolean {
-        val bookings = _bikeBookings.value
-        
-        // If there are no bookings, the date range is available
-        if (bookings.isEmpty()) return true
-        
-        // Check if the requested date range overlaps with any existing booking
-        return bookings.none { booking ->
-            // Overlap occurs when:
-            // 1. The start date is before the booking's end date AND
-            // 2. The end date is after the booking's start date
-            startDate.before(booking.endDate) && endDate.after(booking.startDate)
-        }
-    }
-    
-    /**
-     * Get a list of dates that are already booked for a specific bike
-     */
-    fun getBookedDatesForBike(bikeId: String): List<Date> {
-        val bookedDates = mutableListOf<Date>()
-        val bookings = _bikeBookings.value.filter { it.bikeId == bikeId }
-        
-        for (booking in bookings) {
-            // Get all dates between start and end date (inclusive)
-            var currentDate = booking.startDate
-            while (!currentDate.after(booking.endDate)) {
-                bookedDates.add(Date(currentDate.time))
-                
-                // Move to next day
-                val calendar = Calendar.getInstance()
-                calendar.time = currentDate
-                calendar.add(Calendar.DAY_OF_MONTH, 1)
-                currentDate = calendar.time
-            }
-        }
-        
-        return bookedDates
-    }
-    
-    /**
-     * Cancel a booking
-     */
-    fun cancelBooking(bookingId: String, onSuccess: () -> Unit, onError: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                _isBookingLoading.value = true
-                
-                val currentUser = auth.currentUser
-                if (currentUser == null) {
-                    onError("You must be logged in to cancel a booking")
-                    return@launch
-                }
-                
-                // Find the booking in the current state
-                val booking = _bikeBookings.value.find { it.id == bookingId }
-                if (booking == null) {
-                    onError("Booking not found")
-                    return@launch
-                }
-                
-                // References to the booking documents
-                val userBookingRef = firestore.collection("users").document(currentUser.uid)
-                    .collection("bookings").document(bookingId)
-                val bikeBookingRef = firestore.collection("bikes").document(booking.bikeId)
-                    .collection("bookings").document(bookingId)
-                
-                // Update both documents in a batch
-                val batch = firestore.batch()
-                val updates = mapOf("status" to BookingStatus.CANCELLED.name)
-                
-                batch.update(userBookingRef, updates)
-                batch.update(bikeBookingRef, updates)
-                
-                batch.commit().await()
-                
-                // Update local state
-                synchronized(bookingsLock) {
-                    val updatedBookings = _bikeBookings.value.map { 
-                        if (it.id == bookingId) it.copy(status = BookingStatus.CANCELLED) else it 
-                    }
-                    _bikeBookings.value = updatedBookings
-                }
+                // Refresh reviews for the bike after deletion
+                fetchReviewsForBike(bikeId)
                 
                 onSuccess()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error cancelling booking", e)
-                onError("Failed to cancel booking: ${e.message ?: "Unknown error"}")
-            } finally {
-                _isBookingLoading.value = false
+                Log.d(TAG, "Review deleted successfully: $reviewId")
+                        
+                    } catch (e: Exception) {
+                Log.e(TAG, "Error deleting review", e)
+                onError("Failed to delete review: ${e.message}")
             }
         }
     }
     
     /**
-     * Fetch all active rides for admin tracking
+     * Clean up listeners and resources when ViewModel is destroyed
      */
-    fun fetchActiveRides() {
-        viewModelScope.launch {
-            try {
-                Log.d(TAG, "Fetching active rides from Firestore")
-                
-                // Query for active rides from Firestore 
-                val activeRidesSnapshot = withContext(Dispatchers.IO) {
-                    firestore.collection("rides")
-                        .whereEqualTo("isActive", true)
-                        .get()
-                        .await()
-                }
-                
-                val activeRidesList = withContext(Dispatchers.Default) {
-                    activeRidesSnapshot.documents.mapNotNull { doc ->
-                        try {
-                            doc.toObject(BikeRide::class.java)?.copy(id = doc.id)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing active ride data for document ${doc.id}", e)
-                            null
-                        }
-                    }
-                }
-                
-                Log.d(TAG, "Fetched ${activeRidesList.size} active rides")
-                _activeRides.value = activeRidesList
-                
-            } catch (e: Exception) {
-                Log.e(TAG, "Error fetching active rides", e)
-                _error.value = "Failed to fetch active rides: ${e.message}"
-            }
-        }
-    }
-    
     override fun onCleared() {
         super.onCleared()
         
-        // Clean up listeners with thread safety
+        // Remove all Firebase listeners
+        availableBikesListener?.let { listener ->
+            _selectedTrackableBike.value?.id?.let { bikeId ->
+                bikesRef.child(bikeId).removeEventListener(listener)
+            }
+        }
+        
+        firestoreBikesListener?.remove()
+        reviewsListener?.remove()
+        
+        // Stop tracking any bikes
         stopTrackingBike()
         
-        // Safely remove database listener
-        availableBikesListener?.let { listener ->
-            bikesRef.removeEventListener(listener)
-        }
+        // Clear singleton instance
+        INSTANCE = null
         
-        // Safely remove Firestore listeners
-        synchronized(Any()) {
-            firestoreBikesListener?.remove()
-        }
-        
-        // Safely remove reviews listener
-        synchronized(reviewsLock) {
-            reviewsListener?.remove()
-        }
+        Log.d(TAG, "BikeViewModel cleaned up")
     }
 }
 

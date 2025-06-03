@@ -1,7 +1,9 @@
 package com.example.bikerental.di
 
 import com.example.bikerental.data.repository.BikeRepositoryImpl
+import com.example.bikerental.data.repository.RideRepositoryImpl
 import com.example.bikerental.domain.repository.BikeRepository
+import com.example.bikerental.domain.repository.RideRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -17,4 +19,10 @@ abstract class RepositoryModule {
     abstract fun bindBikeRepository(
         bikeRepositoryImpl: BikeRepositoryImpl
     ): BikeRepository
+    
+    @Binds
+    @Singleton
+    abstract fun bindRideRepository(
+        rideRepositoryImpl: RideRepositoryImpl
+    ): RideRepository
 } 

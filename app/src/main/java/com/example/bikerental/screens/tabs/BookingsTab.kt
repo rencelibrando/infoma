@@ -112,6 +112,7 @@ import java.util.Locale
 // Booking filter categories
 enum class BookingCategory(val displayName: String) {
     ALL("All Bookings"),
+    ACTIVE("Active"),
     COMPLETED("Completed"),
     CANCELLED("Cancelled")
 }
@@ -149,6 +150,7 @@ fun BookingsTab(
     
     // Category counts state
     var allCount by remember { mutableStateOf(0) }
+    var activeCount by remember { mutableStateOf(0) }
     var completedCount by remember { mutableStateOf(0) }
     var cancelledCount by remember { mutableStateOf(0) }
     
@@ -161,8 +163,9 @@ fun BookingsTab(
                     // First apply category filter
                     val categoryMatch = when (selectedCategory) {
                         BookingCategory.ALL -> true
-                        BookingCategory.COMPLETED -> booking.status == BookingStatus.COMPLETED.toString()
-                        BookingCategory.CANCELLED -> booking.status == BookingStatus.CANCELLED.toString()
+                        BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
+                        BookingCategory.COMPLETED -> booking.status == "COMPLETED"
+                        BookingCategory.CANCELLED -> booking.status == "CANCELLED"
                     }
                     
                     // Then apply search filter if there's a query
@@ -182,12 +185,14 @@ fun BookingsTab(
                 
                 // Update counts
                 val newAllCount = bookings.size
-                val newCompletedCount = bookings.count { it.status == BookingStatus.COMPLETED.toString() }
-                val newCancelledCount = bookings.count { it.status == BookingStatus.CANCELLED.toString() }
+                val newActiveCount = bookings.count { it.status == "PENDING" || it.status == "CONFIRMED" }
+                val newCompletedCount = bookings.count { it.status == "COMPLETED" }
+                val newCancelledCount = bookings.count { it.status == "CANCELLED" }
                 
                 // Update UI on main thread
                 withContext(Dispatchers.Main) {
                     allCount = newAllCount
+                    activeCount = newActiveCount
                     completedCount = newCompletedCount
                     cancelledCount = newCancelledCount
                 }
@@ -198,8 +203,9 @@ fun BookingsTab(
                 // Apply category filter
                 val categoryMatch = when (selectedCategory) {
                     BookingCategory.ALL -> true
-                    BookingCategory.COMPLETED -> booking.status == BookingStatus.COMPLETED.toString()
-                    BookingCategory.CANCELLED -> booking.status == BookingStatus.CANCELLED.toString()
+                    BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
+                    BookingCategory.COMPLETED -> booking.status == "COMPLETED"
+                    BookingCategory.CANCELLED -> booking.status == "CANCELLED"
                 }
                 
                 // Apply search filter
@@ -359,7 +365,7 @@ fun BookingsTab(
                             onValueChange = { searchQuery = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
                             placeholder = { Text("Search bookings...") },
                             leadingIcon = { 
                                 Icon(
@@ -373,13 +379,14 @@ fun BookingsTab(
                         
                         // Category tabs with counts
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             items(BookingCategory.values()) { category ->
                                 val count = when (category) {
                                     BookingCategory.ALL -> allCount
+                                    BookingCategory.ACTIVE -> activeCount
                                     BookingCategory.COMPLETED -> completedCount
                                     BookingCategory.CANCELLED -> cancelledCount
                                 }
@@ -396,15 +403,16 @@ fun BookingsTab(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.End
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Button(
                                 onClick = { showBookingForm = true },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = DarkGreen
                                 ),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Add,
@@ -413,6 +421,48 @@ fun BookingsTab(
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Book a Bike")
+                            }
+                        }
+
+                        // Debug buttons (only in debug builds)
+                        if (BuildConfig.DEBUG) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        bookingViewModel.debugListAllBookings { result ->
+                                            Toast.makeText(context, "Check logs for booking details", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Debug: List All", fontSize = 10.sp)
+                                }
+                                
+                                OutlinedButton(
+                                    onClick = {
+                                        bookingViewModel.refreshBookings()
+                                        Toast.makeText(context, "Refreshing bookings...", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Force Refresh", fontSize = 10.sp)
+                                }
+                                
+                                OutlinedButton(
+                                    onClick = {
+                                        bookingViewModel.checkUserPermissions { result ->
+                                            Toast.makeText(context, "Check logs for permissions", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Check Perms", fontSize = 10.sp)
+                                }
                             }
                         }
 
@@ -452,8 +502,8 @@ fun BookingsTab(
                             // Show filtered bookings list
                             LazyColumn(
                                 modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                contentPadding = PaddingValues(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(filteredBookings) { booking ->
                                     BookingCard(
@@ -1367,15 +1417,15 @@ private fun BookingCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        shape = RoundedCornerShape(16.dp),
+            .padding(vertical = 2.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         onClick = onClick
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(12.dp)) {
             // Status and Type badges at the top
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1392,13 +1442,13 @@ private fun BookingCard(
                 }
                 
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(8.dp),
                     color = statusColor.copy(alpha = 0.15f),
                     modifier = Modifier.wrapContentWidth()
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Icon(
                             imageVector = when (booking.status) {
@@ -1410,12 +1460,12 @@ private fun BookingCard(
                             },
                             contentDescription = null,
                             tint = statusColor,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = booking.status.capitalize(),
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             color = statusColor,
                             fontWeight = FontWeight.Medium
                         )
@@ -1426,38 +1476,38 @@ private fun BookingCard(
                 if (booking.isHourly) {
                     Surface(
                         color = DarkGreen.copy(alpha = 0.15f),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = "Hourly",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = DarkGreen,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 } else {
                     Surface(
                         color = Color(0xFF6200EA).copy(alpha = 0.15f), // Deep Purple
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = "Daily",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFF6200EA),
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
             // Bike info with image
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Bike image
@@ -1468,8 +1518,8 @@ private fun BookingCard(
                         .build(),
                     contentDescription = booking.bikeName,
                     modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(8.dp)),
                     contentScale = ContentScale.Crop,
                     loading = {
                         Box(
@@ -1479,7 +1529,7 @@ private fun BookingCard(
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(20.dp),
                                 color = DarkGreen,
                                 strokeWidth = 2.dp
                             )
@@ -1494,7 +1544,7 @@ private fun BookingCard(
                         ) {
                             Text(
                                 text = booking.bikeName.firstOrNull()?.toString() ?: "B",
-                                style = MaterialTheme.typography.headlineMedium
+                                style = MaterialTheme.typography.titleMedium
                             )
                         }
                     }
@@ -1503,13 +1553,13 @@ private fun BookingCard(
                 // Booking details
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    verticalArrangement = Arrangement.spacedBy(1.dp)
                 ) {
                     // Bike name
                     Text(
                         text = booking.bikeName,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1517,7 +1567,7 @@ private fun BookingCard(
                     // Bike type
                     Text(
                         text = booking.bikeType ?: "Standard Bike",
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
@@ -1525,12 +1575,12 @@ private fun BookingCard(
                     // Display bike rate
                     Text(
                         text = booking.getFormattedHourlyRate(),
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = DarkGreen,
                         fontWeight = FontWeight.Medium
                     )
                     
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     
                     // Date range
                     Row(
@@ -1540,12 +1590,12 @@ private fun BookingCard(
                             imageVector = Icons.Default.DateRange,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(14.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
                         Text(
                             text = "$formattedStartDate${if (formattedStartDate != formattedEndDate) " - $formattedEndDate" else ""}",
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -1559,12 +1609,12 @@ private fun BookingCard(
                                 imageVector = Icons.Default.AccessTime,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(14.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
                                 text = timeRange,
-                                fontSize = 14.sp,
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1578,7 +1628,7 @@ private fun BookingCard(
                     // Price
                     Text(
                         text = booking.totalPrice ?: "N/A",
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = DarkGreen
                     )
@@ -1586,7 +1636,7 @@ private fun BookingCard(
                     // Duration
                     Text(
                         text = formattedDuration,
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -2131,6 +2181,7 @@ fun CategoryCard(
         ) {
             val displayText = when (category) {
                 BookingCategory.ALL -> "All Bookings${if (count > 0) " ($count)" else ""}"
+                BookingCategory.ACTIVE -> "Active${if (count > 0) " ($count)" else ""}"
                 BookingCategory.COMPLETED -> "Completed${if (count > 0) " ($count)" else ""}"
                 BookingCategory.CANCELLED -> "Cancelled${if (count > 0) " ($count)" else ""}"
             }

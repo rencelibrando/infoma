@@ -1,7 +1,5 @@
 package com.example.bikerental.models
 
-import com.example.bikerental.models.Bike
-import com.example.bikerental.models.Booking
 import java.util.*
 
 /**
@@ -12,8 +10,8 @@ data class BookingWithBikeDetails(
     val userId: String = "",
     val userName: String = "",
     val bikeId: String = "",
-    val startDate: Date = Date(),
-    val endDate: Date = Date(),
+    val startDate: Long = System.currentTimeMillis(),
+    val endDate: Long = System.currentTimeMillis(),
     val status: String = "active", // active, completed, cancelled
     val totalPrice: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
@@ -65,7 +63,7 @@ data class BookingWithBikeDetails(
         bikeId = booking.bikeId,
         startDate = booking.startDate,
         endDate = booking.endDate,
-        status = booking.status.toString(),
+        status = booking.status.name,
         totalPrice = booking.totalPrice.toString(),
         createdAt = booking.createdAt,
         bikeName = bikeName,
@@ -79,7 +77,7 @@ data class BookingWithBikeDetails(
      * Get a formatted duration string based on booking type
      */
     fun getFormattedDuration(): String {
-        val durationInMillis = endDate.time - startDate.time
+        val durationInMillis = endDate - startDate
         
         return if (isHourly) {
             // For hourly bookings, show hours and minutes
@@ -105,8 +103,8 @@ data class BookingWithBikeDetails(
         if (!isHourly) return ""
         
         val timeFormat = java.text.SimpleDateFormat("h:mm a", Locale.getDefault())
-        val startTimeStr = timeFormat.format(startDate)
-        val endTimeStr = timeFormat.format(endDate)
+        val startTimeStr = timeFormat.format(Date(startDate))
+        val endTimeStr = timeFormat.format(Date(endDate))
         
         return "$startTimeStr - $endTimeStr"
     }
@@ -125,8 +123,8 @@ data class BookingWithBikeDetails(
      */
     fun getFormattedBookingPeriod(): String {
         val dateFormat = java.text.SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-        val startStr = dateFormat.format(startDate)
-        val endStr = dateFormat.format(endDate)
+        val startStr = dateFormat.format(Date(startDate))
+        val endStr = dateFormat.format(Date(endDate))
         return "$startStr to $endStr"
     }
     

@@ -38,6 +38,20 @@ class BikeRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun getBike(bikeId: String): Result<Bike> {
+        return try {
+            val document = bikesCollection.document(bikeId).get().await()
+            val bike = document.toObject<Bike>()?.copy(id = document.id)
+            if (bike != null) {
+                Result.success(bike)
+            } else {
+                Result.failure(Exception("Bike not found"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun updateBikeLocation(bikeId: String, latitude: Double, longitude: Double) {
         bikesCollection.document(bikeId).update(
             mapOf(
@@ -49,5 +63,14 @@ class BikeRepositoryImpl @Inject constructor(
 
     override suspend fun updateBikeAvailability(bikeId: String, isAvailable: Boolean) {
         bikesCollection.document(bikeId).update("isAvailable", isAvailable).await()
+    }
+
+    override suspend fun updateBikeStatus(bikeId: String, status: String): Result<Unit> {
+        return try {
+            bikesCollection.document(bikeId).update("status", status).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 } 

@@ -26,8 +26,19 @@ class BikeRentalApplication : Application() {
     
     private var appCheckInitialized = false
     
+    companion object {
+        @Volatile
+        private var INSTANCE: BikeRentalApplication? = null
+        
+        val instance: BikeRentalApplication
+            get() = INSTANCE ?: throw IllegalStateException("Application not initialized")
+    }
+    
     override fun onCreate() {
         super.onCreate()
+        
+        // Set the static instance
+        INSTANCE = this
         
         LogManager.d(TAG, "Application onCreate - starting initialization")
         

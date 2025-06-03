@@ -33,33 +33,39 @@ data class Bike(
     // Additional tracking properties
     val rating: Float = 0f,
     val batteryLevel: Int = 100,
-    private val _isAvailable: Boolean = true,
-    private val _isInUse: Boolean = false,
-    private val _isLocked: Boolean = true,
+    
+    // Status fields - Changed to public vars for Firestore compatibility
+    var isAvailable: Boolean = true,
+    var isInUse: Boolean = false,
+    var isLocked: Boolean = true,
     val currentRider: String = "",  // User ID of the current rider
+    
+    // New fields that were missing and causing Firestore warnings
+    val currentRideId: String = "",  // ID of the current ride
+    private val _lastRideEnd: Any? = null,     // Last ride end timestamp
+    
+    // Timestamp fields
     private val _lastUpdated: Any? = null,      // Can be Long or Timestamp
+    private val _updatedAt: Any? = null,        // Can be Long or Timestamp
+    private val _lastRideStart: Any? = null,     // Can be Long or Timestamp
+    private val _createdAt: Any? = null,          // Can be Long or Timestamp
+    
     val stationId: String = "",     // ID of the station where the bike is docked (if applicable)
     val distanceToUser: String = "", // Not stored in Firebase, calculated on client
-    val description: String = "",    // Bike description
-    private val _lastRideStart: Any? = null,     // Can be Long or Timestamp
-    private val _createdAt: Any? = null          // Can be Long or Timestamp
+    val description: String = ""    // Bike description
 ) {
     
-    // Explicit getters and setters for Firestore compatibility
-    var isAvailable: Boolean
-        get() = _isAvailable
-        set(value) {}  // Data class doesn't allow setting, but Firebase needs the setter
-    
-    var isInUse: Boolean
-        get() = _isInUse
-        set(value) {}
-    
-    var isLocked: Boolean
-        get() = _isLocked
+    // Explicit getters and setters for timestamp fields for Firestore compatibility
+    var lastRideEnd: Any?
+        get() = _lastRideEnd
         set(value) {}
     
     var lastUpdated: Any?
         get() = _lastUpdated
+        set(value) {}
+    
+    var updatedAt: Any?
+        get() = _updatedAt
         set(value) {}
     
     var lastRideStart: Any?
@@ -72,10 +78,26 @@ data class Bike(
     
     // Helper properties for timestamp handling
     @get:Exclude
+    val lastRideEndTimestamp: Long
+        get() = when (_lastRideEnd) {
+            is Long -> _lastRideEnd
+            is Timestamp -> _lastRideEnd.toDate().time
+            else -> 0L
+        }
+    
+    @get:Exclude
     val lastUpdatedTimestamp: Long
         get() = when (_lastUpdated) {
             is Long -> _lastUpdated
             is Timestamp -> _lastUpdated.toDate().time
+            else -> 0L
+        }
+    
+    @get:Exclude
+    val updatedAtTimestamp: Long
+        get() = when (_updatedAt) {
+            is Long -> _updatedAt
+            is Timestamp -> _updatedAt.toDate().time
             else -> 0L
         }
     
@@ -112,11 +134,14 @@ data class Bike(
             "hardwareId" to hardwareId, // Keep for backward compatibility
             "rating" to rating,
             "batteryLevel" to batteryLevel,
-            "isAvailable" to _isAvailable,
-            "isInUse" to _isInUse,
-            "isLocked" to _isLocked,
+            "isAvailable" to isAvailable,
+            "isInUse" to isInUse,
+            "isLocked" to isLocked,
             "currentRider" to currentRider,
+            "currentRideId" to currentRideId,
+            "lastRideEnd" to _lastRideEnd,
             "lastUpdated" to _lastUpdated,
+            "updatedAt" to _updatedAt,
             "stationId" to stationId,
             "description" to description,
             "lastRideStart" to _lastRideStart,
@@ -158,9 +183,9 @@ data class Bike(
                 imageUrls = listOf(imageUrl),
                 latitude = location.latitude,
                 longitude = location.longitude,
-                _isAvailable = true,
-                _isInUse = false,
-                _isLocked = true,
+                isAvailable = true,
+                isInUse = false,
+                isLocked = true,
                 description = description
             )
         }
