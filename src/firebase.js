@@ -3,6 +3,7 @@ import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
+import { getDatabase } from "firebase/database";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE",
@@ -18,10 +19,11 @@ const firebaseConfig = {
 // Initialize Firebase first
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore, Storage, and Auth
+// Initialize Firestore, Storage, Auth, and Realtime Database
 const db = getFirestore(app);
 const storage = getStorage(app);
 const auth = getAuth(app);
+const realtimeDb = getDatabase(app);
 
 // Only initialize App Check in production environment
 // This allows local development to work without reCAPTCHA verification
@@ -39,4 +41,4 @@ if (process.env.NODE_ENV === 'production') {
   console.log('Firebase App Check disabled for development environment');
 }
 
-export { db, storage, auth };
+export { db, storage, auth, realtimeDb };

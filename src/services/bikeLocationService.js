@@ -1,5 +1,229 @@
-import { db } from '../firebase';
+import { db, realtimeDb } from '../firebase';
 import { collection, addDoc, updateDoc, doc, getDoc, query, where, getDocs, serverTimestamp } from "firebase/firestore";
+import { ref, onValue, off, push, set, update, remove } from "firebase/database";
+
+// Real-time location listeners
+const locationListeners = new Map();
+
+/**
+ * Start listening to real-time location updates for a specific user
+ * @param {string} userId - User ID to track
+ * @param {function} onLocationUpdate - Callback function for location updates
+ * @returns {function} Unsubscribe function
+ */
+export const startLocationTracking = (userId, onLocationUpdate) => {
+  try {
+    const locationRef = ref(realtimeDb, `liveLocation/${userId}`);
+    
+    const unsubscribe = onValue(locationRef, (snapshot) => {
+      const locationData = snapshot.val();
+      if (locationData && onLocationUpdate) {
+        onLocationUpdate(locationData);
+      }
+    });
+    
+    // Store the unsubscribe function
+    locationListeners.set(userId, unsubscribe);
+    
+    console.log(`Started tracking location for user: ${userId}`);
+    
+    return () => {
+      stopLocationTracking(userId);
+    };
+  } catch (error) {
+    console.error('Error starting location tracking:', error);
+    throw error;
+  }
+};
+
+/**
+ * Stop listening to location updates for a specific user
+ * @param {string} userId - User ID to stop tracking
+ */
+export const stopLocationTracking = (userId) => {
+  try {
+    const unsubscribe = locationListeners.get(userId);
+    if (unsubscribe) {
+      unsubscribe();
+      locationListeners.delete(userId);
+      console.log(`Stopped tracking location for user: ${userId}`);
+    }
+  } catch (error) {
+    console.error('Error stopping location tracking:', error);
+  }
+};
+
+/**
+ * Listen to all active rides in real-time
+ * @param {function} onActiveRidesUpdate - Callback function for active rides updates
+ * @returns {function} Unsubscribe function
+ */
+export const listenToActiveRides = (onActiveRidesUpdate) => {
+  try {
+    const activeRidesRef = ref(realtimeDb, 'activeRides');
+    
+    const unsubscribe = onValue(activeRidesRef, (snapshot) => {
+      const activeRidesData = snapshot.val() || {};
+      const activeRides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
+        ...rideData,
+        userId: userId,
+        id: rideData.rideId || rideData.id
+      }));
+      
+      if (onActiveRidesUpdate) {
+        onActiveRidesUpdate(activeRides);
+      }
+    });
+    
+    console.log('Started listening to active rides');
+    
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error listening to active rides:', error);
+    throw error;
+  }
+};
+
+/**
+ * Listen to all live locations in real-time
+ * @param {function} onLiveLocationsUpdate - Callback function for live locations updates
+ * @returns {function} Unsubscribe function
+ */
+export const listenToLiveLocations = (onLiveLocationsUpdate) => {
+  try {
+    const liveLocationRef = ref(realtimeDb, 'liveLocation');
+    
+    const unsubscribe = onValue(liveLocationRef, (snapshot) => {
+      const liveLocationData = snapshot.val() || {};
+      
+      if (onLiveLocationsUpdate) {
+        onLiveLocationsUpdate(liveLocationData);
+      }
+    });
+    
+    console.log('Started listening to live locations');
+    
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error listening to live locations:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get ride location history from Realtime Database
+ * @param {string} rideId - Ride ID to get history for
+ * @returns {Promise<Array>} Array of location points
+ */
+export const getRideLocationHistory = async (rideId) => {
+  try {
+    const historyRef = ref(realtimeDb, `rideLocationHistory/${rideId}`);
+    
+    return new Promise((resolve, reject) => {
+      onValue(historyRef, (snapshot) => {
+        const historyData = snapshot.val() || {};
+        const locationHistory = Object.values(historyData).sort((a, b) => a.timestamp - b.timestamp);
+        resolve(locationHistory);
+      }, { onlyOnce: true });
+    });
+  } catch (error) {
+    console.error('Error getting ride location history:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update ride status (for emergency alerts, etc.)
+ * @param {string} rideId - Ride ID to update
+ * @param {string} status - New status
+ * @returns {Promise<void>}
+ */
+export const updateRideStatus = async (rideId, status) => {
+  try {
+    // Update in Realtime Database
+    const rideRef = ref(realtimeDb, `rides/${rideId}`);
+    await update(rideRef, { status });
+    
+    // Also update in Firestore for persistence
+    await updateDoc(doc(db, 'rides', rideId), {
+      status,
+      updatedAt: serverTimestamp()
+    });
+    
+    console.log(`Updated ride ${rideId} status to: ${status}`);
+  } catch (error) {
+    console.error('Error updating ride status:', error);
+    throw error;
+  }
+};
+
+/**
+ * Send emergency alert for a ride
+ * @param {string} rideId - Ride ID
+ * @param {string} userId - User ID
+ * @param {object} location - Current location
+ * @returns {Promise<void>}
+ */
+export const sendEmergencyAlert = async (rideId, userId, location) => {
+  try {
+    const emergencyData = {
+      rideId,
+      userId,
+      location,
+      timestamp: Date.now(),
+      status: 'emergency',
+      responded: false
+    };
+    
+    // Save to Realtime Database for immediate alerts
+    const emergencyRef = ref(realtimeDb, `emergencyAlerts/${rideId}`);
+    await set(emergencyRef, emergencyData);
+    
+    // Update ride status
+    await updateRideStatus(rideId, 'emergency');
+    
+    console.log(`Emergency alert sent for ride: ${rideId}`);
+  } catch (error) {
+    console.error('Error sending emergency alert:', error);
+    throw error;
+  }
+};
+
+/**
+ * Respond to emergency alert
+ * @param {string} rideId - Ride ID
+ * @returns {Promise<void>}
+ */
+export const respondToEmergency = async (rideId) => {
+  try {
+    const emergencyRef = ref(realtimeDb, `emergencyAlerts/${rideId}`);
+    await update(emergencyRef, {
+      responded: true,
+      responseTime: Date.now()
+    });
+    
+    console.log(`Responded to emergency for ride: ${rideId}`);
+  } catch (error) {
+    console.error('Error responding to emergency:', error);
+    throw error;
+  }
+};
+
+/**
+ * Clean up all location listeners
+ */
+export const cleanupLocationListeners = () => {
+  try {
+    locationListeners.forEach((unsubscribe, userId) => {
+      unsubscribe();
+      console.log(`Cleaned up location listener for user: ${userId}`);
+    });
+    locationListeners.clear();
+    console.log('All location listeners cleaned up');
+  } catch (error) {
+    console.error('Error cleaning up location listeners:', error);
+  }
+};
 
 // Update a bike's location
 export const updateBikeLocation = async (bikeId, latitude, longitude) => {

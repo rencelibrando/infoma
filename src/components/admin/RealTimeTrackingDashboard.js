@@ -1,7 +1,8 @@
 /* global google */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, getDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { ref, onValue, off, child, get } from 'firebase/database';
+import { db, realtimeDb } from '../../firebase';
 import styled from 'styled-components';
 import { Marker, InfoWindow, Polyline, Circle, HeatmapLayer } from '@react-google-maps/api';
 import MapContainer from '../MapContainer';
@@ -235,9 +236,22 @@ const RideStatus = styled.span`
 
 const InfoWindowContent = styled.div`
   padding: 15px;
-  width: 300px;
-  max-height: 400px;
+  width: 350px;
+  max-height: 500px;
   overflow-y: auto;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
+    }
+    70% {
+      box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
+    }
+  }
 `;
 
 const RealTimeTrackingDashboard = () => {
@@ -262,79 +276,60 @@ const RealTimeTrackingDashboard = () => {
   });
   const [mapCenter, setMapCenter] = useState({ lat: 14.5995, lng: 120.9842 });
   const [mapZoom, setMapZoom] = useState(13);
+  const [liveLocations, setLiveLocations] = useState({});
   
   const unsubscribeRefs = useRef([]);
+  const realtimeListeners = useRef([]);
 
-  // Setup real-time listeners for active rides
+  // Setup real-time listeners for active rides using Realtime Database
   useEffect(() => {
     const setupRealTimeListeners = () => {
-      // Listen for active rides
-      const ridesQuery = query(
-        collection(db, 'rides'),
-        where('status', 'in', ['active', 'paused']),
-        orderBy('startTime', 'desc')
-      );
-
-      const unsubscribeRides = onSnapshot(ridesQuery, (snapshot) => {
-        const rides = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+      console.log('Setting up real-time listeners...');
+      
+      // Listen for active rides from Realtime Database
+      const activeRidesRef = ref(realtimeDb, 'activeRides');
+      const activeRidesListener = onValue(activeRidesRef, (snapshot) => {
+        const activeRidesData = snapshot.val() || {};
+        const rides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
+          ...rideData,
+          userId: userId,
+          id: rideData.rideId || rideData.id
         }));
         
+        console.log('Active rides updated:', rides.length);
         setActiveRides(rides);
         calculateStats(rides);
         checkForAlerts(rides);
-        
-        // Setup location listeners for each ride
-        setupLocationListeners(rides);
       });
 
-      unsubscribeRefs.current.push(unsubscribeRides);
+      // Listen for live locations from Realtime Database
+      const liveLocationRef = ref(realtimeDb, 'liveLocation');
+      const liveLocationListener = onValue(liveLocationRef, (snapshot) => {
+        const liveLocationData = snapshot.val() || {};
+        console.log('Live locations updated:', Object.keys(liveLocationData).length);
+        setLiveLocations(liveLocationData);
+      });
+
+      realtimeListeners.current.push(
+        { ref: activeRidesRef, listener: activeRidesListener },
+        { ref: liveLocationRef, listener: liveLocationListener }
+      );
     };
 
     setupRealTimeListeners();
 
     return () => {
+      // Clean up Realtime Database listeners
+      realtimeListeners.current.forEach(({ ref: dbRef, listener }) => {
+        off(dbRef, 'value', listener);
+      });
+      realtimeListeners.current = [];
+      
+      // Clean up Firestore listeners
       unsubscribeRefs.current.forEach(unsubscribe => unsubscribe());
+      unsubscribeRefs.current = [];
     };
   }, []);
-
-  const setupLocationListeners = (rides) => {
-    // Clear existing location listeners
-    unsubscribeRefs.current = unsubscribeRefs.current.filter(unsub => {
-      if (unsub.isLocationListener) {
-        unsub();
-        return false;
-      }
-      return true;
-    });
-
-    rides.forEach(ride => {
-      const locationQuery = query(
-        collection(db, 'rideLocations'),
-        where('rideId', '==', ride.id),
-        orderBy('timestamp', 'desc'),
-        limit(1)
-      );
-
-      const unsubscribeLocation = onSnapshot(locationQuery, (snapshot) => {
-        if (!snapshot.empty) {
-          const locationData = snapshot.docs[0].data();
-          
-          setActiveRides(prevRides => 
-            prevRides.map(r => 
-              r.id === ride.id 
-                ? { ...r, currentLocation: locationData }
-                : r
-            )
-          );
-        }
-      });
-
-      unsubscribeLocation.isLocationListener = true;
-      unsubscribeRefs.current.push(unsubscribeLocation);
-    });
-  };
 
   const calculateStats = (rides) => {
     const totalActiveRides = rides.length;
@@ -345,9 +340,9 @@ const RealTimeTrackingDashboard = () => {
 
     rides.forEach(ride => {
       if (ride.currentLocation) {
-        totalDistance += ride.currentLocation.totalDistance || 0;
-        if (ride.currentLocation.speed) {
-          totalSpeed += ride.currentLocation.speed;
+        totalDistance += ride.totalDistance || 0;
+        if (ride.currentSpeed) {
+          totalSpeed += ride.currentSpeed;
           speedCount++;
         }
         if (ride.status === 'emergency') {
@@ -368,14 +363,16 @@ const RealTimeTrackingDashboard = () => {
     const newAlerts = [];
 
     rides.forEach(ride => {
-      if (ride.currentLocation) {
-        const lastUpdate = new Date(ride.currentLocation.timestamp?.toDate?.() || ride.currentLocation.timestamp);
+      const liveLocation = liveLocations[ride.userId];
+      
+      if (liveLocation) {
+        const lastUpdate = new Date(liveLocation.timestamp || liveLocation.deviceTimestamp);
         const timeSinceUpdate = Date.now() - lastUpdate.getTime();
 
         // Check for stale location data
         if (timeSinceUpdate > 5 * 60 * 1000) { // 5 minutes
           newAlerts.push({
-            id: `stale-${ride.id}`,
+            id: `stale-${ride.userId}`,
             severity: 'medium',
             message: `No location update for ${ride.userName} in ${Math.round(timeSinceUpdate / 60000)} minutes`,
             rideId: ride.id,
@@ -386,7 +383,7 @@ const RealTimeTrackingDashboard = () => {
         // Check for emergency status
         if (ride.status === 'emergency') {
           newAlerts.push({
-            id: `emergency-${ride.id}`,
+            id: `emergency-${ride.userId}`,
             severity: 'high',
             message: `Emergency alert from ${ride.userName}`,
             rideId: ride.id,
@@ -395,11 +392,11 @@ const RealTimeTrackingDashboard = () => {
         }
 
         // Check for unusual speed
-        if (ride.currentLocation.speed > 50) { // 50 km/h
+        if (liveLocation.speed > 50) { // 50 km/h
           newAlerts.push({
-            id: `speed-${ride.id}`,
+            id: `speed-${ride.userId}`,
             severity: 'medium',
-            message: `${ride.userName} traveling at unusual speed: ${ride.currentLocation.speed.toFixed(1)} km/h`,
+            message: `${ride.userName} traveling at unusual speed: ${liveLocation.speed.toFixed(1)} km/h`,
             rideId: ride.id,
             timestamp: Date.now()
           });
@@ -412,10 +409,11 @@ const RealTimeTrackingDashboard = () => {
 
   const handleRideClick = (ride) => {
     setSelectedRide(ride);
-    if (ride.currentLocation) {
+    const liveLocation = liveLocations[ride.userId];
+    if (liveLocation) {
       setMapCenter({
-        lat: ride.currentLocation.latitude,
-        lng: ride.currentLocation.longitude
+        lat: liveLocation.latitude,
+        lng: liveLocation.longitude
       });
       setMapZoom(16);
     }
@@ -437,21 +435,33 @@ const RealTimeTrackingDashboard = () => {
 
   const getMarkerIcon = (ride) => {
     let color = colors.success;
-    if (ride.status === 'emergency') color = colors.danger;
-    else if (ride.status === 'paused') color = colors.warning;
+    let scale = 12;
+    
+    if (ride.status === 'emergency') {
+      color = colors.danger;
+      scale = 16; // Larger for emergency
+    } else if (ride.status === 'paused') {
+      color = colors.warning;
+      scale = 14;
+    }
 
+    // Create a more visible marker with bike icon
     return {
       path: google.maps.SymbolPath.CIRCLE,
-      scale: 8,
+      scale: scale,
       fillColor: color,
-      fillOpacity: 1,
+      fillOpacity: 0.9,
       strokeColor: colors.white,
-      strokeWeight: 2
+      strokeWeight: 3,
+      strokeOpacity: 1,
+      // Add a pulsing effect for active rides
+      anchor: new google.maps.Point(0, 0),
+      labelOrigin: new google.maps.Point(0, 0)
     };
   };
 
   const formatDuration = (startTime) => {
-    const start = new Date(startTime?.toDate?.() || startTime);
+    const start = new Date(startTime);
     const duration = Date.now() - start.getTime();
     const hours = Math.floor(duration / (1000 * 60 * 60));
     const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
@@ -554,6 +564,56 @@ const RealTimeTrackingDashboard = () => {
         >
           Heatmap View
         </ToggleButton>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '15px',
+          marginLeft: '20px',
+          padding: '10px',
+          backgroundColor: '#f8f9fa',
+          borderRadius: '8px',
+          fontSize: '12px'
+        }}>
+          <strong>Map Legend:</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: colors.success
+            }} />
+            <span>Active Ride</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: colors.danger
+            }} />
+            <span>Emergency</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{
+              width: '0',
+              height: '0',
+              borderLeft: '6px solid transparent',
+              borderRight: '6px solid transparent',
+              borderBottom: `12px solid ${colors.teal}`
+            }} />
+            <span>Available Bike</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <div style={{
+              width: '0',
+              height: '0',
+              borderLeft: '6px solid transparent',
+              borderRight: '6px solid transparent',
+              borderBottom: `12px solid ${colors.mediumGray}`
+            }} />
+            <span>Unavailable Bike</span>
+          </div>
+        </div>
       </ControlsContainer>
 
       {/* Map */}
@@ -563,55 +623,339 @@ const RealTimeTrackingDashboard = () => {
           zoom={mapZoom}
           onLoad={() => console.log('Map loaded')}
         >
-          {/* Render active ride markers */}
-          {activeRides.map(ride => (
-            ride.currentLocation && (
+          {/* Render all bike markers - available bikes */}
+          {bikes && bikes.map(bike => {
+            // Don't show bikes that are currently in use (they'll be shown as active rides)
+            const isInActiveRide = activeRides.some(ride => ride.bikeId === bike.id);
+            
+            return !isInActiveRide && (
               <Marker
-                key={ride.id}
+                key={`bike-${bike.id}`}
                 position={{
-                  lat: ride.currentLocation.latitude,
-                  lng: ride.currentLocation.longitude
+                  lat: bike.latitude,
+                  lng: bike.longitude
+                }}
+                icon={{
+                  path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                  scale: 6,
+                  fillColor: bike.isAvailable ? colors.teal : colors.mediumGray,
+                  fillOpacity: 0.8,
+                  strokeColor: colors.white,
+                  strokeWeight: 2,
+                  strokeOpacity: 1,
+                  rotation: 0
+                }}
+                title={`${bike.name} - ${bike.isAvailable ? 'Available' : 'Unavailable'}`}
+                onClick={() => {
+                  // Show bike info
+                  setSelectedRide({
+                    userName: bike.isAvailable ? 'Available Bike' : 'Unavailable Bike',
+                    bikeId: bike.id,
+                    status: bike.isAvailable ? 'available' : 'unavailable',
+                    bikeName: bike.name,
+                    bikeData: bike,
+                    isStaticBike: true
+                  });
+                  setMapCenter({ lat: bike.latitude, lng: bike.longitude });
+                  setMapZoom(16);
+                }}
+              />
+            );
+          })}
+
+          {/* Render active ride markers using live locations */}
+          {activeRides.map(ride => {
+            const liveLocation = liveLocations[ride.userId];
+            const fallbackLocation = ride.currentLocation; // From activeRides data
+            
+            // Use live location first, fallback to currentLocation from ride data
+            const markerLocation = liveLocation || fallbackLocation;
+            
+            return markerLocation && markerLocation.latitude && markerLocation.longitude && (
+              <Marker
+                key={`active-ride-${ride.userId}`}
+                position={{
+                  lat: parseFloat(markerLocation.latitude),
+                  lng: parseFloat(markerLocation.longitude)
                 }}
                 icon={getMarkerIcon(ride)}
                 onClick={() => handleRideClick(ride)}
+                title={`${ride.userName} - ${ride.status.toUpperCase()} - ${liveLocation ? 'LIVE' : 'LAST KNOWN'}`}
+                zIndex={1000} // Higher z-index for active rides
               />
-            )
-          ))}
+            );
+          })}
 
-          {/* Show info window for selected ride */}
-          {selectedRide && selectedRide.currentLocation && (
+          {/* Show info window for selected ride or bike */}
+          {selectedRide && (selectedRide.isStaticBike ? 
+            // Static bike info window
             <InfoWindow
               position={{
-                lat: selectedRide.currentLocation.latitude,
-                lng: selectedRide.currentLocation.longitude
+                lat: selectedRide.bikeData.latitude,
+                lng: selectedRide.bikeData.longitude
               }}
               onCloseClick={() => setSelectedRide(null)}
             >
               <InfoWindowContent>
-                <h3>{selectedRide.userName}</h3>
-                <p><strong>Bike:</strong> {selectedRide.bikeId}</p>
-                <p><strong>Duration:</strong> {formatDuration(selectedRide.startTime)}</p>
-                <p><strong>Distance:</strong> {((selectedRide.currentLocation.totalDistance || 0) / 1000).toFixed(2)} km</p>
-                <p><strong>Speed:</strong> {(selectedRide.currentLocation.speed || 0).toFixed(1)} km/h</p>
-                <p><strong>Status:</strong> 
-                  <RideStatus status={selectedRide.status}>{selectedRide.status}</RideStatus>
-                </p>
-                <p><strong>Last Update:</strong> {new Date(selectedRide.currentLocation.timestamp?.toDate?.() || selectedRide.currentLocation.timestamp).toLocaleTimeString()}</p>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '10px', 
+                  marginBottom: '15px',
+                  borderBottom: '2px solid #e0e0e0',
+                  paddingBottom: '10px'
+                }}>
+                  <div style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    backgroundColor: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray
+                  }} />
+                  <h3 style={{ margin: 0, color: colors.darkGray }}>
+                    🚲 {selectedRide.bikeData.name}
+                  </h3>
+                  <span style={{
+                    backgroundColor: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray,
+                    color: 'white',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase'
+                  }}>
+                    {selectedRide.bikeData.isAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}
+                  </span>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
+                  <div>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🆔 Bike ID:</strong><br />
+                      <span style={{ color: colors.mediumGray }}>{selectedRide.bikeData.id}</span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🚴‍♀️ Type:</strong><br />
+                      <span style={{ color: colors.pineGreen }}>{selectedRide.bikeData.type || 'Standard'}</span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>💰 Price:</strong><br />
+                      <span style={{ color: colors.info, fontWeight: 'bold' }}>
+                        {selectedRide.bikeData.price || 'N/A'}
+                      </span>
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>📍 Location:</strong><br />
+                      <span style={{ color: colors.mediumGray, fontSize: '11px' }}>
+                        {selectedRide.bikeData.latitude.toFixed(4)}, {selectedRide.bikeData.longitude.toFixed(4)}
+                      </span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🔒 Status:</strong><br />
+                      <span style={{ color: selectedRide.bikeData.isLocked ? colors.danger : colors.success }}>
+                        {selectedRide.bikeData.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                      </span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>⚙️ In Use:</strong><br />
+                      <span style={{ color: selectedRide.bikeData.isInUse ? colors.warning : colors.success }}>
+                        {selectedRide.bikeData.isInUse ? '🟡 Yes' : '🟢 No'}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+                
+                {selectedRide.bikeData.description && (
+                  <div style={{ 
+                    backgroundColor: '#f8f9fa', 
+                    padding: '10px', 
+                    borderRadius: '8px',
+                    marginBottom: '10px'
+                  }}>
+                    <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
+                      <strong>📝 Description:</strong><br />
+                      {selectedRide.bikeData.description}
+                    </p>
+                  </div>
+                )}
+                
+                <div style={{ 
+                  backgroundColor: selectedRide.bikeData.isAvailable ? '#e8f5e8' : '#fff3cd',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  border: `2px solid ${selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray}`,
+                  textAlign: 'center'
+                }}>
+                  <span style={{ 
+                    fontSize: '12px', 
+                    fontWeight: 'bold',
+                    color: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray
+                  }}>
+                    {selectedRide.bikeData.isAvailable ? '✅ READY FOR RENT' : '❌ NOT AVAILABLE'}
+                  </span>
+                </div>
               </InfoWindowContent>
             </InfoWindow>
-          )}
+            :
+            // Active ride info window  
+            (liveLocations[selectedRide.userId] || selectedRide.currentLocation) && (
+            <InfoWindow
+              position={{
+                lat: (liveLocations[selectedRide.userId] || selectedRide.currentLocation).latitude,
+                lng: (liveLocations[selectedRide.userId] || selectedRide.currentLocation).longitude
+              }}
+              onCloseClick={() => setSelectedRide(null)}
+            >
+              <InfoWindowContent>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '10px', 
+                  marginBottom: '15px',
+                  borderBottom: '2px solid #e0e0e0',
+                  paddingBottom: '10px'
+                }}>
+                  <div style={{
+                    width: '12px',
+                    height: '12px',
+                    borderRadius: '50%',
+                    backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
+                                   selectedRide.status === 'paused' ? colors.warning : colors.success,
+                    animation: 'pulse 2s infinite'
+                  }} />
+                  <h3 style={{ margin: 0, color: colors.darkGray }}>
+                    🚴‍♂️ {selectedRide.userName}
+                  </h3>
+                  <span style={{
+                    backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
+                                   selectedRide.status === 'paused' ? colors.warning : colors.success,
+                    color: 'white',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase'
+                  }}>
+                    {selectedRide.status}
+                  </span>
+                  <span style={{
+                    backgroundColor: liveLocations[selectedRide.userId] ? colors.success : colors.warning,
+                    color: 'white',
+                    padding: '1px 6px',
+                    borderRadius: '8px',
+                    fontSize: '9px',
+                    fontWeight: 'bold'
+                  }}>
+                    {liveLocations[selectedRide.userId] ? 'LIVE' : 'CACHED'}
+                  </span>
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
+                  <div>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🚲 Bike ID:</strong><br />
+                      <span style={{ color: colors.mediumGray }}>{selectedRide.bikeId}</span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>⏱️ Duration:</strong><br />
+                      <span style={{ color: colors.pineGreen, fontWeight: 'bold' }}>
+                        {formatDuration(selectedRide.lastLocationUpdate)}
+                      </span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>📍 Distance:</strong><br />
+                      <span style={{ color: colors.info, fontWeight: 'bold' }}>
+                        {((selectedRide.totalDistance || 0) / 1000).toFixed(2)} km
+                      </span>
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🏃‍♂️ Current Speed:</strong><br />
+                      <span style={{ color: colors.success, fontWeight: 'bold' }}>
+                        {((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.speed || 0).toFixed(1)} km/h
+                      </span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🎯 Accuracy:</strong><br />
+                      <span style={{ color: colors.mediumGray }}>
+                        ±{((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.accuracy || 0).toFixed(0)} m
+                      </span>
+                    </p>
+                    <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                      <strong>🧭 Bearing:</strong><br />
+                      <span style={{ color: colors.mediumGray }}>
+                        {((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.bearing || 0).toFixed(0)}°
+                      </span>
+                    </p>
+                  </div>
+                </div>
+                
+                <div style={{ 
+                  backgroundColor: '#f8f9fa', 
+                  padding: '10px', 
+                  borderRadius: '8px',
+                  marginBottom: '10px'
+                }}>
+                  <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
+                    <strong>📧 User Email:</strong> {selectedRide.userEmail || 'N/A'}<br />
+                    <strong>🔄 Updates:</strong> {(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.locationCount || 0}<br />
+                    <strong>🕐 Last Update:</strong> {new Date((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.timestamp || Date.now()).toLocaleTimeString()}
+                  </p>
+                </div>
+                
+                <div style={{ 
+                  backgroundColor: (liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? '#e8f5e8' : '#fff3cd',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  border: `2px solid ${(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? colors.success : colors.warning}`,
+                  textAlign: 'center'
+                }}>
+                  <span style={{ 
+                    fontSize: '12px', 
+                    fontWeight: 'bold',
+                    color: (liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? colors.success : colors.warning
+                  }}>
+                    {(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? '🟢 LIVE TRACKING' : '🟡 TRACKING PAUSED'}
+                  </span>
+                </div>
+                
+                {selectedRide.status === 'emergency' && (
+                  <div style={{ 
+                    backgroundColor: '#ffebee', 
+                    border: `2px solid ${colors.danger}`,
+                    padding: '10px', 
+                    borderRadius: '8px',
+                    marginTop: '10px',
+                    textAlign: 'center'
+                  }}>
+                    <span style={{ 
+                      color: colors.danger, 
+                      fontWeight: 'bold',
+                      fontSize: '13px'
+                    }}>
+                      🚨 EMERGENCY ALERT ACTIVE
+                    </span>
+                  </div>
+                )}
+              </InfoWindowContent>
+            </InfoWindow>
+          ))}
 
           {/* Heatmap layer */}
           {showHeatmap && (
             <HeatmapLayer
-              data={activeRides
-                .filter(ride => ride.currentLocation)
-                .map(ride => ({
+              data={Object.values(liveLocations)
+                .filter(location => location.isActive)
+                .map(location => ({
                   location: new google.maps.LatLng(
-                    ride.currentLocation.latitude,
-                    ride.currentLocation.longitude
+                    location.latitude,
+                    location.longitude
                   ),
-                  weight: ride.currentLocation.speed || 1
+                  weight: location.speed || 1
                 }))
               }
             />
@@ -622,25 +966,33 @@ const RealTimeTrackingDashboard = () => {
       {/* Active Rides List */}
       <RidesList>
         <h3 style={{ marginBottom: '15px', color: colors.darkGray }}>Active Rides</h3>
-        {activeRides.map(ride => (
-          <RideItem key={ride.id} onClick={() => handleRideClick(ride)}>
-            <RideInfo>
-              <div style={{ fontWeight: 'bold' }}>{ride.userName}</div>
-              <div style={{ fontSize: '14px', color: colors.mediumGray }}>
-                Bike: {ride.bikeId} • Duration: {formatDuration(ride.startTime)}
+        {activeRides.map(ride => {
+          const liveLocation = liveLocations[ride.userId];
+          return (
+            <RideItem key={ride.userId} onClick={() => handleRideClick(ride)}>
+              <RideInfo>
+                <div style={{ fontWeight: 'bold' }}>{ride.userName}</div>
+                <div style={{ fontSize: '14px', color: colors.mediumGray }}>
+                  Bike: {ride.bikeId} • Duration: {formatDuration(ride.lastLocationUpdate)}
+                </div>
+              </RideInfo>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <RideStatus status={ride.status}>{ride.status}</RideStatus>
+                <div style={{ fontSize: '14px' }}>
+                  {ride.totalDistance ? 
+                    `${((ride.totalDistance || 0) / 1000).toFixed(1)} km` : 
+                    'No location'
+                  }
+                </div>
+                {liveLocation && (
+                  <div style={{ fontSize: '12px', color: colors.success }}>
+                    LIVE • {liveLocation.speed?.toFixed(1) || 0} km/h
+                  </div>
+                )}
               </div>
-            </RideInfo>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <RideStatus status={ride.status}>{ride.status}</RideStatus>
-              <div style={{ fontSize: '14px' }}>
-                {ride.currentLocation ? 
-                  `${((ride.currentLocation.totalDistance || 0) / 1000).toFixed(1)} km` : 
-                  'No location'
-                }
-              </div>
-            </div>
-          </RideItem>
-        ))}
+            </RideItem>
+          );
+        })}
         {activeRides.length === 0 && (
           <div style={{ textAlign: 'center', color: colors.mediumGray, padding: '20px' }}>
             No active rides at the moment

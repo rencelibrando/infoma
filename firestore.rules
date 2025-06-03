@@ -165,16 +165,16 @@ service cloud.firestore {
       allow create: if request.auth != null && 
         request.auth.uid == request.resource.data.userId;
       
+      // Users can update their own rides (including ending them)
+      allow update: if request.auth != null && 
+        request.auth.uid == resource.data.userId;
+      
       // Admins can read all rides for monitoring
       allow read: if request.auth != null && 
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
       
-      // Allow updates to location fields during active rides
-      allow update: if request.auth != null && 
-        request.auth.uid == resource.data.userId &&
-        resource.data.status == 'active' &&
-        request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['lastLocation', 'lastLocationUpdate', 'totalDistance']);
+      // Admins can update any ride
+     allow update: if isAdmin(); 
       
       // Bookings subcollection under rides
       match /bookings/{bookingId} {
