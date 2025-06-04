@@ -1,10 +1,10 @@
 package com.example.bikerental.data.repository
 
-import com.example.bikerental.data.models.Bike
+import android.util.Log
+import com.example.bikerental.models.Bike
 import com.example.bikerental.domain.repository.BikeRepository
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ktx.snapshots
-import com.google.firebase.firestore.ktx.toObject
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
@@ -17,6 +17,7 @@ class BikeRepositoryImpl @Inject constructor(
 ) : BikeRepository {
 
     private val bikesCollection = firestore.collection("bikes")
+    private val TAG = "BikeRepositoryImpl"
 
     override fun getAvailableBikes(): Flow<List<Bike>> {
         return bikesCollection
@@ -24,7 +25,17 @@ class BikeRepositoryImpl @Inject constructor(
             .snapshots()
             .map { snapshot ->
                 snapshot.documents.mapNotNull { document ->
-                    document.toObject<Bike>()?.copy(id = document.id)
+                    try {
+                        val data = document.data
+                        if (data != null) {
+                            createBikeFromData(document.id, data)
+                        } else {
+                            null
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error parsing bike ${document.id}: ${e.message}")
+                        null
+                    }
                 }
             }
     }
@@ -32,8 +43,14 @@ class BikeRepositoryImpl @Inject constructor(
     override suspend fun getBikeById(bikeId: String): Bike? {
         return try {
             val document = bikesCollection.document(bikeId).get().await()
-            document.toObject<Bike>()?.copy(id = document.id)
+            val data = document.data
+            if (data != null) {
+                createBikeFromData(document.id, data)
+            } else {
+                null
+            }
         } catch (e: Exception) {
+            Log.e(TAG, "Error fetching bike $bikeId: ${e.message}")
             null
         }
     }
@@ -41,8 +58,9 @@ class BikeRepositoryImpl @Inject constructor(
     override suspend fun getBike(bikeId: String): Result<Bike> {
         return try {
             val document = bikesCollection.document(bikeId).get().await()
-            val bike = document.toObject<Bike>()?.copy(id = document.id)
-            if (bike != null) {
+            val data = document.data
+            if (data != null) {
+                val bike = createBikeFromData(document.id, data)
                 Result.success(bike)
             } else {
                 Result.failure(Exception("Bike not found"))
@@ -50,6 +68,41 @@ class BikeRepositoryImpl @Inject constructor(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Creates a Bike object from Firestore document data with proper type handling
+     */
+    private fun createBikeFromData(documentId: String, data: Map<String, Any>): Bike {
+        return Bike(
+            id = documentId,
+            name = data["name"] as? String ?: "",
+            type = data["type"] as? String ?: "",
+            price = data["price"] as? String ?: "",
+            priceValue = (data["priceValue"] as? Number)?.toDouble() ?: 0.0,
+            imageUrl = data["imageUrl"] as? String ?: "",
+            imageRes = (data["imageRes"] as? Number)?.toInt() ?: 0,
+            imageUrls = data["imageUrls"] as? List<String> ?: emptyList(),
+            _latitude = data["latitude"] ?: 0.0,
+            _longitude = data["longitude"] ?: 0.0,
+            qrCode = data["qrCode"] as? String ?: "",
+            hardwareId = data["hardwareId"] as? String ?: "",
+            rating = (data["rating"] as? Number)?.toFloat() ?: 0f,
+            batteryLevel = (data["batteryLevel"] as? Number)?.toInt() ?: 100,
+            isAvailable = data["isAvailable"] as? Boolean ?: true,
+            isInUse = data["isInUse"] as? Boolean ?: false,
+            isLocked = data["isLocked"] as? Boolean ?: true,
+            currentRider = data["currentRider"] as? String ?: "",
+            currentRideId = data["currentRideId"] as? String ?: "",
+            _lastRideEnd = data["lastRideEnd"],
+            _lastUpdated = data["lastUpdated"],
+            _updatedAt = data["updatedAt"],
+            _lastRideStart = data["lastRideStart"],
+            _createdAt = data["createdAt"],
+            stationId = data["stationId"] as? String ?: "",
+            distanceToUser = "", // This is calculated on client
+            description = data["description"] as? String ?: ""
+        )
     }
 
     override suspend fun updateBikeLocation(bikeId: String, latitude: Double, longitude: Double) {

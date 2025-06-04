@@ -107,8 +107,8 @@ class MainActivity : ComponentActivity() {
     @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // Start performance tracking
-        PerformanceMonitor.startTimer("total_startup")
-        PerformanceMonitor.startTimer("main_activity_creation")
+        PerformanceMonitor.startTiming("total_startup")
+        PerformanceMonitor.startTiming("main_activity_creation")
         
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         
-        PerformanceMonitor.endTimer("main_activity_creation")
+        PerformanceMonitor.endTiming("main_activity_creation")
         
         // Set up UI immediately for better perceived performance
         setContent {
@@ -137,9 +137,7 @@ class MainActivity : ComponentActivity() {
                     // Reduced splash time and simplified
                     kotlinx.coroutines.delay(500) // Reduced from 800ms to 500ms
                     showSplash = false
-                    PerformanceMonitor.endTimer("total_startup")
-                    PerformanceMonitor.checkStartupPerformance()
-                    PerformanceMonitor.benchmarkResults()
+                    PerformanceMonitor.endTiming("total_startup")
                 }
                 
                 // Simplified navigation logic with better Loading state handling

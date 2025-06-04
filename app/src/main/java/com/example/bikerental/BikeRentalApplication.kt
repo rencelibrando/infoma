@@ -17,7 +17,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dagger.hilt.android.HiltAndroidApp
+import android.util.Log
 
+/**
+ * Main Application class for the Bike Rental app.
+ * Configures logging and other global settings.
+ */
 @HiltAndroidApp
 class BikeRentalApplication : Application() {
     
@@ -70,14 +75,23 @@ class BikeRentalApplication : Application() {
     }
     
     private fun initializeLogging() {
-        val logLevel = if (BuildConfig.DEBUG) {
-            LogManager.LogLevel.DEBUG
-        } else {
-            LogManager.LogLevel.INFO
+        try {
+            // Reduce excessive logging from various Google services
+            // This helps with the "Too many Flogger logs" issue
+            
+            // Set system properties to reduce log verbosity
+            System.setProperty("java.util.logging.manager", "com.google.common.flogger.backend.android.AndroidLoggingBackend")
+            System.setProperty("flogger.backend_factory", "com.google.common.flogger.backend.android.AndroidLoggerBackendFactory#getInstance")
+            
+            // Configure log levels for specific packages
+            java.util.logging.Logger.getLogger("com.google.firebase").level = java.util.logging.Level.WARNING
+            java.util.logging.Logger.getLogger("com.google.android.gms").level = java.util.logging.Level.WARNING
+            java.util.logging.Logger.getLogger("ProxyAndroidLoggerBackend").level = java.util.logging.Level.SEVERE
+            
+            Log.d("BikeRentalApp", "Logging configuration completed")
+        } catch (e: Exception) {
+            Log.w("BikeRentalApp", "Failed to configure logging: ${e.message}")
         }
-        
-        LogManager.configure(logLevel)
-        LogManager.i(TAG, "Application starting, logging system initialized")
     }
     
     private suspend fun configureFirestore() {

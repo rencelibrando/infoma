@@ -72,6 +72,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import java.lang.Math.pow
+import kotlin.math.pow
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,13 +96,53 @@ fun EmailVerificationScreen(
     var errorState by remember { mutableStateOf<String?>(null) }
     var apiErrorCount by remember { mutableIntStateOf(0) }
     var lastCheckTime by remember { mutableLongStateOf(0L) }
+    var resendAttempts by remember { mutableIntStateOf(0) }
+    var lastResendTime by remember { mutableLongStateOf(0L) }
+    var showExpiredLinkDialog by remember { mutableStateOf(false) }
     
     // State for email dialog
     var showEmailDialog by remember { mutableStateOf(false) }
     var emailInput by remember { mutableStateOf("") }
     
-    // Track if the user verified their email during this session (properly scoped to this composable)
+    // Track if the user verified their email during this session
     var verifiedDuringSession by remember { mutableStateOf(false) }
+    
+    // Rate limiting constants
+    val MIN_CHECK_INTERVAL = 10000L // 10 seconds minimum between checks
+    val MAX_CHECK_INTERVAL = 60000L // 60 seconds maximum
+    val RESEND_COOLDOWN_BASE = 60000L // 1 minute base cooldown
+    val MAX_API_ERRORS = 3
+    val MAX_RESEND_ATTEMPTS = 5
+    
+    // Calculate dynamic resend cooldown with exponential backoff
+    val getResendCooldown = remember {
+        { attempts: Int ->
+            RESEND_COOLDOWN_BASE * pow(2.0, attempts.coerceAtMost(4).toDouble()).toLong()
+        }
+    }
+    
+    // Check if we should show expired link dialog based on URL intent or error messages
+    LaunchedEffect(Unit) {
+        // Check if the app was opened with a verification link that expired
+        // This would typically come from the intent or navigation arguments
+        val hasExpiredLink = navController.currentBackStackEntry?.arguments?.getBoolean("expired_link") ?: false
+        if (hasExpiredLink) {
+            showExpiredLinkDialog = true
+        }
+    }
+    
+    // Expired link dialog
+    if (showExpiredLinkDialog) {
+        ExpiredLinkDialog(
+            onDismiss = { showExpiredLinkDialog = false },
+            onSendNewLink = {
+                showExpiredLinkDialog = false
+                // Automatically send a new verification email
+                viewModel.resendEmailVerification()
+                Toast.makeText(context, "Sending you a fresh verification link...", Toast.LENGTH_LONG).show()
+            }
+        )
+    }
     
     // Email dialog
     if (showEmailDialog) {
@@ -110,7 +153,6 @@ fun EmailVerificationScreen(
             onConfirm = {
                 showEmailDialog = false
                 if (emailInput.isNotEmpty()) {
-                    // Update user's email and then send verification
                     coroutineScope.launch {
                         try {
                             FirebaseAuth.getInstance().currentUser?.updateEmail(emailInput)?.await()
@@ -127,16 +169,21 @@ fun EmailVerificationScreen(
         )
     }
     
-    // Create a lifecycle-aware verification check
+    // Lifecycle-aware verification check with rate limiting
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
-                    // Check verification status when screen comes into foreground
-                    if (System.currentTimeMillis() - lastCheckTime > 5000) { // Avoid too frequent checks
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastCheckTime > MIN_CHECK_INTERVAL && 
+                        apiErrorCount < MAX_API_ERRORS && 
+                        !verifiedDuringSession) {
+                        Log.d("EmailVerificationScreen", "ON_RESUME: Triggering verification check")
                         isCheckingVerification = true
-                        lastCheckTime = System.currentTimeMillis()
+                        lastCheckTime = currentTime
+                    } else {
+                        Log.d("EmailVerificationScreen", "ON_RESUME: Skipping check due to rate limiting")
                     }
                 }
                 else -> { /* handle other events if needed */ }
@@ -149,22 +196,25 @@ fun EmailVerificationScreen(
         }
     }
     
-    // Auto-check verification when the checking flag is set
+    // Controlled verification check with rate limiting
     LaunchedEffect(isCheckingVerification) {
-        if (isCheckingVerification) {
+        if (isCheckingVerification && !verifiedDuringSession) {
             try {
                 delay(500) // Small delay for UI feedback
                 
-                // REMOVED: Check for application and call to application.checkAndUpdateEmailVerification()
-                // ALWAYS use the ViewModel's check now
-                Log.d("EmailVerificationScreen", "LaunchedEffect(isCheckingVerification): Calling viewModel.checkEmailVerification()")
+                Log.d("EmailVerificationScreen", "Performing controlled verification check")
                 viewModel.checkEmailVerification()
-                // The result will be observed via the emailVerified StateFlow
-
+                
             } catch (e: Exception) {
                 if (e !is CancellationException) {
                     Log.e("EmailVerificationScreen", "Error checking verification: ${e.message}")
-                    errorState = "Verification check failed"
+                    errorState = when {
+                        e.message?.contains("too many", ignoreCase = true) == true -> 
+                            "Rate limited. Please wait before checking again."
+                        e.message?.contains("network", ignoreCase = true) == true -> 
+                            "Network error. Please check your connection."
+                        else -> "Verification check failed. Please try again later."
+                    }
                     apiErrorCount++
                 }
             } finally {
@@ -174,10 +224,12 @@ fun EmailVerificationScreen(
         }
     }
     
-    // Handle countdown for resend button
-    LaunchedEffect(canResendEmail) {
+    // Handle countdown for resend button with dynamic cooldown
+    LaunchedEffect(canResendEmail, resendAttempts) {
         if (!canResendEmail) {
-            countdown = 60 // 60 seconds cooldown
+            val cooldownTime = getResendCooldown(resendAttempts)
+            countdown = (cooldownTime / 1000).toInt()
+            
             while (countdown > 0) {
                 delay(1000)
                 countdown--
@@ -186,68 +238,41 @@ fun EmailVerificationScreen(
         }
     }
     
-    // Handle email verification state from the ViewModel - improved navigation logic
+    // Handle email verification state changes
     LaunchedEffect(emailVerified) {
-        if (emailVerified == true) {
+        if (emailVerified == true && !verifiedDuringSession) {
             verifiedDuringSession = true
             errorState = null
             
-            // Resume navigation to home when verification is detected
-            Log.d("EmailVerificationScreen", 
-                "Email verification successful, navigating to home")
+            Log.d("EmailVerificationScreen", "Email verification successful, navigating to home")
             try {
-                // Use NavigationUtils for consistent navigation
+                delay(1000) // Give user time to see the success state
                 NavigationUtils.navigateToHome(navController)
             } catch (e: Exception) {
-                Log.e("EmailVerificationScreen", 
-                    "Error navigating to home after verification: ${e.message}", e)
-                // Fallback navigation
-                try {
-                    navController.navigate(Screen.Home.route) {
-                        popUpTo(0) { inclusive = true }
-                    }
-                } catch (e2: Exception) {
-                     Log.e("EmailVerificationScreen", "All navigation attempts failed: ${e2.message}", e2)
-                     Toast.makeText(context, "Navigation error. Please try again.", Toast.LENGTH_SHORT).show()
-                }
-            }
-            Log.d("EmailVerificationScreen", "Navigation initiated after email verification")
-        }
-    }
-    
-    // Add a direct check for Firebase verification status changes
-    LaunchedEffect(firebaseUser) {
-        if (firebaseUser?.isEmailVerified == true) {
-            Log.d("EmailVerificationScreen", "Direct Firebase check: Email is verified, navigating to home")
-            verifiedDuringSession = true
-            // Update app state
-            viewModel.checkEmailVerification()
-            // Small delay to let state updates propagate
-            delay(500)
-            // Ensure we're on the main thread
-            withContext(Dispatchers.Main) {
-                try {
-                    NavigationUtils.navigateToHome(navController)
-                } catch (e: Exception) {
-                    Log.e("EmailVerificationScreen", "Error in direct Firebase navigation: ${e.message}")
-                    // Fallback navigation
-                    try {
-                        navController.navigate(Screen.Home.route) {
-                            popUpTo(0) { inclusive = true }
-                        }
-                    } catch (e2: Exception) {
-                        Log.e("EmailVerificationScreen", "All direct navigation attempts failed: ${e2.message}")
-                    }
-                }
+                Log.e("EmailVerificationScreen", "Error navigating to home: ${e.message}", e)
+                Toast.makeText(context, "Navigation error. Please try again.", Toast.LENGTH_SHORT).show()
             }
         }
     }
     
-    // Add a periodic check for verification status
+    // Single consolidated background verification check with exponential backoff
     LaunchedEffect(Unit) {
-        var checkInterval = 5000L
-        verificationLoop@ while (!verifiedDuringSession) {
+        if (verifiedDuringSession) return@LaunchedEffect
+        
+        var checkInterval = MIN_CHECK_INTERVAL
+        var consecutiveErrors = 0
+        
+        Log.d("EmailVerificationScreen", "Starting background verification loop")
+        
+        while (!verifiedDuringSession && apiErrorCount < MAX_API_ERRORS) {
             delay(checkInterval)
+            
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastCheckTime < MIN_CHECK_INTERVAL) {
+                Log.d("EmailVerificationScreen", "Skipping check due to rate limiting")
+                continue
+            }
+            
             try {
                 withContext(Dispatchers.IO) {
                     FirebaseAuth.getInstance().currentUser?.reload()?.await()
@@ -255,24 +280,43 @@ fun EmailVerificationScreen(
                 val currentUser = FirebaseAuth.getInstance().currentUser
                 
                 if (currentUser?.isEmailVerified == true) {
-                    Log.d("EmailVerificationScreen", "Email verified detected")
+                    Log.d("EmailVerificationScreen", "Background check: Email verified detected")
                     verifiedDuringSession = true
-                    viewModel.checkEmailVerification()
-                    delay(500)
                     withContext(Dispatchers.Main) {
-                        NavigationUtils.navigateToHome(navController)
+                        viewModel.checkEmailVerification()
                     }
-                    break@verificationLoop
+                    break
                 }
+                
+                // Reset consecutive errors on success
+                consecutiveErrors = 0
+                // Gradually increase interval but reset on success
+                checkInterval = min(checkInterval * 1.1, MAX_CHECK_INTERVAL.toDouble()).toLong()
+                
             } catch (e: Exception) {
                 if (e !is CancellationException) {
-                    Log.e("EmailVerificationScreen", "Error: ${e.message}")
+                    consecutiveErrors++
+                    Log.w("EmailVerificationScreen", "Background check error: ${e.message}")
+                    
+                    if (e.message?.contains("too many", ignoreCase = true) == true) {
+                        Log.w("EmailVerificationScreen", "Rate limited, increasing interval significantly")
+                        apiErrorCount++
+                        checkInterval = MAX_CHECK_INTERVAL
+                    } else {
+                        // Exponential backoff for other errors
+                        checkInterval = min(
+                            checkInterval * pow(1.5, consecutiveErrors.toDouble()),
+                            MAX_CHECK_INTERVAL.toDouble()
+                        ).toLong()
+                    }
                 }
             }
             
-            if (checkInterval < 30000L) {
-                checkInterval = (checkInterval * 1.2).toLong().coerceAtMost(30000L)
-            }
+            lastCheckTime = currentTime
+        }
+        
+        if (apiErrorCount >= MAX_API_ERRORS) {
+            Log.w("EmailVerificationScreen", "Background verification stopped due to too many errors")
         }
     }
     
@@ -280,23 +324,28 @@ fun EmailVerificationScreen(
     LaunchedEffect(authState) {
         when (authState) {
             is AuthState.Authenticated -> {
-                if (emailVerified == true) {
-                    // Email verification successful, navigate to home
-                    Log.d("EmailVerificationScreen", "Email verified, navigating to home")
+                if (emailVerified == true && !verifiedDuringSession) {
+                    Log.d("EmailVerificationScreen", "Auth state: Email verified, navigating to home")
+                    verifiedDuringSession = true
                     NavigationUtils.navigateToHome(navController)
                 }
             }
             is AuthState.VerificationEmailSent -> {
                 Toast.makeText(context, "Verification email sent!", Toast.LENGTH_LONG).show()
-                canResendEmail = false // Start cooldown
-                errorState = null // Clear error state on success
+                canResendEmail = false
+                resendAttempts++
+                lastResendTime = System.currentTimeMillis()
+                errorState = null
             }
             is AuthState.Error -> {
                 val message = (authState as AuthState.Error).message
                 Log.e("EmailVerificationScreen", "Auth error: $message")
                 
-                // More specific error messages based on the error type
                 errorState = when {
+                    message.contains("too many", ignoreCase = true) -> {
+                        apiErrorCount++
+                        "Too many requests. Please wait ${countdown}s before trying again."
+                    }
                     message.contains("network", ignoreCase = true) -> 
                         "Network error. Please check your internet connection."
                     message.contains("verification", ignoreCase = true) -> 
@@ -312,76 +361,22 @@ fun EmailVerificationScreen(
                 }
             }
             else -> {
-                // Handle other states or just log them
                 Log.d("EmailVerificationScreen", "AuthState: $authState")
             }
         }
     }
-    
-    // One-time initial check on screen load
-    LaunchedEffect(Unit) {
-        Log.d("EmailVerificationScreen", "Initial check triggered")
-        isCheckingVerification = true
-        coroutineScope.launch {
-            try {
-                // Replace call to application function with ViewModel function
-                viewModel.checkEmailVerification()
-            } finally {
-                isCheckingVerification = false
-            }
-        }
-    }
-    
-    // Set up lightweight background polling with increasing intervals and failsafe
-    LaunchedEffect(Unit) {
-        try {
-            var checkInterval = 5000L // Start with 5 seconds
-            
-            while (apiErrorCount < 3 && !verifiedDuringSession) {
-                delay(checkInterval)
-                
-                // Only perform check if not already checking and enough time has passed
-                if (!isCheckingVerification && System.currentTimeMillis() - lastCheckTime > checkInterval) {
-                    try {
-                        isCheckingVerification = true
-                    } catch (e: Exception) {
-                        if (e !is CancellationException) {
-                            Log.e("EmailVerificationScreen", "Automatic check failed: ${e.message}")
-                            apiErrorCount++
-                            // Increase interval on failure with exponential backoff
-                            checkInterval = (checkInterval * 1.5).toLong().coerceAtMost(30000L) // Max 30 seconds
-                        }
-                    }
-                }
-                
-                // Progressively increase interval to reduce API load
-                if (checkInterval < 30000L) { // Cap at 30 seconds
-                    checkInterval = (checkInterval * 1.2).toLong().coerceAtMost(30000L)
-                }
-            }
-        } catch (e: Exception) {
-            if (e !is CancellationException) {
-                Log.e("EmailVerificationScreen", "Verification check loop stopped: ${e.message}")
-            }
-        }
-    }
-    
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Email Verification") },
                 navigationIcon = {
                     IconButton(onClick = { 
-                        // Check if user is authenticated before navigating
                         if (verifiedDuringSession) {
-                            // If email verified, go to home
                             NavigationUtils.navigateToHome(navController)
                         } else if (firebaseUser != null) {
-                            // If authenticated but not verified, go to home
-                            // The app will redirect to verification if needed
                             NavigationUtils.navigateToHome(navController)
                         } else {
-                            // If not authenticated, go to login
                             NavigationUtils.navigateToLogin(navController)
                         }
                     }) {
@@ -404,14 +399,14 @@ fun EmailVerificationScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Show success banner when verified - now moved to be absolutely positioned at the top
+            // Show success banner when verified
             AnimatedVisibility(
                 visible = verifiedDuringSession,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .zIndex(10f) // Ensure it stays on top of other content
+                    .zIndex(10f)
             ) {
                 Card(
                     modifier = Modifier
@@ -440,7 +435,7 @@ fun EmailVerificationScreen(
                 }
             }
             
-            // Show error banner if we have persistent API errors
+            // Show error banner with rate limiting info
             AnimatedVisibility(
                 visible = errorState != null,
                 enter = fadeIn(),
@@ -468,11 +463,20 @@ fun EmailVerificationScreen(
                             contentDescription = "Warning",
                             tint = MaterialTheme.colorScheme.error
                         )
-                        Text(
-                            text = errorState ?: "An error occurred",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Column {
+                            Text(
+                                text = errorState ?: "An error occurred",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (apiErrorCount >= MAX_API_ERRORS) {
+                                Text(
+                                    text = "Automatic checking disabled due to rate limiting",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -485,19 +489,17 @@ fun EmailVerificationScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Email icon - conditionally show only if not verified
                 if (!verifiedDuringSession) {
-                Icon(
-                    imageVector = Icons.Default.Email,
-                    contentDescription = "Email Verification",
-                    modifier = Modifier.size(80.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                
-                Spacer(modifier = Modifier.height(24.dp))
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = "Email Verification",
+                        modifier = Modifier.size(80.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
                 
-                // Title
                 Text(
                     text = "Verify Your Email",
                     style = MaterialTheme.typography.headlineMedium.copy(
@@ -508,7 +510,6 @@ fun EmailVerificationScreen(
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // Description
                 Text(
                     text = when {
                         !user?.email.isNullOrEmpty() -> "We've sent a verification email to:\n${user?.email}"
@@ -523,7 +524,7 @@ fun EmailVerificationScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
-                    text = "Please check your inbox and click the verification link to enable all app features.",
+                    text = "Please check your inbox and click the verification link to enable all app features.\n\nIf your verification link has expired, simply request a new one using the button below.",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
                 )
@@ -533,17 +534,45 @@ fun EmailVerificationScreen(
                 EmailVerificationControls(
                     navController = navController,
                     isLoading = isCheckingVerification,
-                    canResendEmail = canResendEmail,
-                    onCheckVerification = { isCheckingVerification = true },
+                    canResendEmail = canResendEmail && resendAttempts < MAX_RESEND_ATTEMPTS,
+                    countdown = countdown,
+                    onCheckVerification = { 
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastCheckTime > MIN_CHECK_INTERVAL && apiErrorCount < MAX_API_ERRORS) {
+                            isCheckingVerification = true
+                            lastCheckTime = currentTime
+                        } else {
+                            Toast.makeText(
+                                context, 
+                                "Please wait before checking again", 
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
                     onResendEmail = {
-                        // Check if Firebase Auth has an email before attempting to resend
+                        val currentTime = System.currentTimeMillis()
+                        if (resendAttempts >= MAX_RESEND_ATTEMPTS) {
+                            Toast.makeText(
+                                context,
+                                "Maximum resend attempts reached. Please contact support.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@EmailVerificationControls
+                        }
+                        
+                        if (currentTime - lastResendTime < getResendCooldown(resendAttempts)) {
+                            Toast.makeText(
+                                context,
+                                "Please wait ${countdown} seconds before resending",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            return@EmailVerificationControls
+                        }
+                        
                         val currentEmail = FirebaseAuth.getInstance().currentUser?.email
                         if (currentEmail.isNullOrEmpty() && user?.email.isNullOrEmpty()) {
                             Log.e("EmailVerificationScreen", "Cannot resend: No email address found")
-                            
-                            // Show dialog to update email
                             showEmailDialog = true
-                            
                             Toast.makeText(
                                 context,
                                 "No email address found. Please update your profile with an email address.",
@@ -554,15 +583,15 @@ fun EmailVerificationScreen(
                         }
                     },
                     emailVerified = emailVerified,
-                    viewModel = viewModel
+                    viewModel = viewModel,
+                    apiErrorCount = apiErrorCount,
+                    maxErrors = MAX_API_ERRORS
                 )
                 
                 Spacer(modifier = Modifier.height(24.dp))
                 
-                // Back to app button
                 TextButton(
                     onClick = { 
-                        // Check authentication state first
                         if (firebaseUser != null) {
                             NavigationUtils.navigateToHome(navController)
                         } else {
@@ -576,7 +605,6 @@ fun EmailVerificationScreen(
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                // Warning about restricted features
                 Text(
                     text = "Note: Some features may be restricted until your email is verified",
                     style = MaterialTheme.typography.bodySmall,
@@ -593,10 +621,13 @@ private fun EmailVerificationControls(
     navController: NavController,
     isLoading: Boolean,
     canResendEmail: Boolean,
+    countdown: Int,
     onCheckVerification: () -> Unit,
     onResendEmail: () -> Unit,
     emailVerified: Boolean?,
-    viewModel: AuthViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    viewModel: AuthViewModel = androidx.hilt.navigation.compose.hiltViewModel(),
+    apiErrorCount: Int = 0,
+    maxErrors: Int = 3
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -608,25 +639,23 @@ private fun EmailVerificationControls(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Check if email is verified
         if (emailVerified == true) {
             VerifiedSuccessCard(navController)
         } else {
-            // Action buttons
             ResponsiveButton(
-                text = "I've Verified My Email",
+                text = if (isLoading) "Checking..." else "I've Verified My Email",
                 onClick = {
                     onCheckVerification()
                     coroutineScope.launch {
                         try {
-                            Log.d("EmailVerificationScreen", "Performing verification check")
+                            Log.d("EmailVerificationScreen", "Manual verification check")
                             withContext(Dispatchers.IO) {
                                 FirebaseAuth.getInstance().currentUser?.reload()?.await()
                             }
                             val user = FirebaseAuth.getInstance().currentUser
                             
                             if (user?.isEmailVerified == true) {
-                                Log.d("EmailVerificationScreen", "Verification check successful")
+                                Log.d("EmailVerificationScreen", "Manual check successful")
                                 viewModel.checkEmailVerification()
                                 delay(500)
                                 withContext(Dispatchers.Main) {
@@ -638,14 +667,19 @@ private fun EmailVerificationControls(
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.e("EmailVerificationScreen", "Error: ${e.message}")
+                            Log.e("EmailVerificationScreen", "Manual check error: ${e.message}")
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Error checking verification", Toast.LENGTH_SHORT).show()
+                                val message = if (e.message?.contains("too many", ignoreCase = true) == true) {
+                                    "Too many requests. Please wait before checking again."
+                                } else {
+                                    "Error checking verification"
+                                }
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                 },
-                enabled = !isLoading,
+                enabled = !isLoading && apiErrorCount < maxErrors,
                 isLoading = isLoading,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -654,14 +688,17 @@ private fun EmailVerificationControls(
             
             Button(
                 onClick = onResendEmail,
-                enabled = canResendEmail && !isLoading,
+                enabled = canResendEmail && !isLoading && apiErrorCount < maxErrors,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                 )
             ) {
-                Text("Resend Verification Email")
+                Text(
+                    if (canResendEmail) "Get Fresh Verification Link" 
+                    else "Get Fresh Link (${countdown}s)"
+                )
             }
             
             val user = FirebaseAuth.getInstance().currentUser
@@ -670,10 +707,48 @@ private fun EmailVerificationControls(
             if (!email.isNullOrEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Verification email will be sent to: $email",
+                    text = "Fresh verification link will be sent to: $email",
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            // Add helpful text about expired links
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "💡 Tip",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "If your verification link says it's expired or already used, just click 'Get Fresh Verification Link' above to receive a new one.",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            
+            if (apiErrorCount >= maxErrors) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Automatic verification disabled due to rate limiting. Please check your email manually.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.error
                 )
             }
         }
@@ -736,6 +811,51 @@ private fun VerifiedSuccessCard(navController: NavController) {
             }
         }
     }
+}
+
+@Composable
+private fun ExpiredLinkDialog(
+    onDismiss: () -> Unit,
+    onSendNewLink: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = "Warning",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Verification Link Expired")
+            }
+        },
+        text = { 
+            Column {
+                Text("Your email verification link has expired or has already been used.")
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Would you like us to send you a fresh verification link?")
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onSendNewLink,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("Send New Link")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

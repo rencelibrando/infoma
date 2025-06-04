@@ -2,7 +2,7 @@ package com.example.bikerental.viewmodels
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bikerental.data.models.Bike
+import com.example.bikerental.models.Bike
 import com.example.bikerental.domain.repository.BikeRepository
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel

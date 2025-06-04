@@ -9,41 +9,48 @@ import com.google.firebase.firestore.PropertyName
 /**
  * User model representing a user in the application.
  * This model is used for Firestore deserialization and must have default values for all properties.
+ * All fields are properly configured for Firestore compatibility.
  */
 @IgnoreExtraProperties
 data class User(
     @get:DocumentId
-    val id: String = "",
-    val email: String = "",
-    val fullName: String = "",
-    val phoneNumber: String = "",
-    val createdAt: Long = 0,
+    var id: String = "",
+    var email: String = "",
+    var fullName: String = "",
+    var phoneNumber: String = "",
+    var createdAt: Long = 0,
     
     // Make this a constructor parameter so data class can generate correct copy method
     @get:PropertyName("isEmailVerified") 
     @set:PropertyName("isEmailVerified")
     var isEmailVerified: Boolean = false,
     
-    val profilePictureUrl: String? = null,
-    val givenName: String? = null,
-    val familyName: String? = null,
-    val displayName: String? = null,
-    val provider: String? = null,
-    val googleId: String? = null,
-    val facebookId: String? = null,
-    val twitterId: String? = null,
-    val lastSignInTime: Long? = null,
-    val verificationSentAt: Long? = null,
-    val verificationToken: String? = null,
-    val hasCompletedAppVerification: Boolean = false,
-    val lastUpdated: Timestamp = Timestamp.now(),
-    val street: String? = null,
-    val barangay: String? = null,
-    val city: String? = null,
-    val verificationMethod: String? = null,
-    val isPhoneVerified: Boolean = false,
-    val authProvider: String? = null
+    var profilePictureUrl: String? = null,
+    var givenName: String? = null,
+    var familyName: String? = null,
+    var displayName: String? = null,
+    var provider: String? = null,
+    var googleId: String? = null,
+    var facebookId: String? = null,
+    var twitterId: String? = null,
+    var lastSignInTime: Long? = null,
+    var verificationSentAt: Long? = null,
+    var verificationToken: String? = null,
+    var hasCompletedAppVerification: Boolean = false,
+    var lastUpdated: Timestamp = Timestamp.now(),
+    var street: String? = null,
+    var barangay: String? = null,
+    var city: String? = null,
+    var verificationMethod: String? = null,
+    
+    // Handle both phoneVerified and isPhoneVerified field names for compatibility
+    @get:PropertyName("isPhoneVerified")
+    @set:PropertyName("isPhoneVerified")
+    var isPhoneVerified: Boolean = false,
+    
+    var authProvider: String? = null
 ) {
+    
     /**
      * Convert user to a map for Firestore updates
      */
@@ -74,6 +81,7 @@ data class User(
             "city" to city,
             "verificationMethod" to verificationMethod,
             "isPhoneVerified" to isPhoneVerified,
+            "phoneVerified" to isPhoneVerified,  // Write to both fields for compatibility
             "authProvider" to authProvider
         )
     }

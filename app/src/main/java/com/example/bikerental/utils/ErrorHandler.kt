@@ -65,4 +65,8 @@ object ErrorHandler {
     fun logInfo(tag: String, message: String) {
         Log.i(tag, message)
     }
+    
+    fun logWarning(tag: String, message: String) {
+        Log.w(tag, message)
+    }
 } 

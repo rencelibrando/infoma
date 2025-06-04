@@ -68,6 +68,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,6 +91,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
+import coil.memory.MemoryCache
+import coil.disk.DiskCache
 import com.example.bikerental.components.BookingCalendar
 import com.example.bikerental.components.RatingBar
 import com.example.bikerental.components.ReviewForm
@@ -101,7 +106,8 @@ import com.example.bikerental.navigation.Screen
 import com.example.bikerental.navigation.NavigationUtils
 import com.example.bikerental.ui.theme.DarkGreen
 import com.example.bikerental.utils.LocationManager
-import com.example.bikerental.viewmodels.BikeViewModel
+import com.example.bikerental.utils.ImageLoadingUtils
+import com.example.bikerental.utils.PerformanceMonitor
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
@@ -111,14 +117,42 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.res.painterResource
+import com.example.bikerental.R
+import com.example.bikerental.viewmodels.BikeViewModel
 
+
+// Performance optimization: Enhanced caching with expiration
+private val bikeStatusCache = ConcurrentHashMap<String, BikeStatus>()
+private val distanceCache = ConcurrentHashMap<String, CachedDistance>()
+
+// Data class for cached bike status
+private data class BikeStatus(
+    val isAvailable: Boolean,
+    val statusText: String,
+    val statusColor: Color,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun isExpired(): Boolean = System.currentTimeMillis() - timestamp > 5000 // 5 second cache
+}
+
+// Data class for cached distance calculations
+private data class CachedDistance(
+    val distance: Float,
+    val timestamp: Long = System.currentTimeMillis()
+) {
+    fun isExpired(): Boolean = System.currentTimeMillis() - timestamp > 30000 // 30 second cache for distances
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -133,34 +167,55 @@ fun BikesTab(
     val locationManager = remember { LocationManager.getInstance(context) }
     val scope = rememberCoroutineScope()
     
-    // Introduce a dedicated IO scope for background operations
+    // Optimized coroutine scope management
     val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    
-    // Create a processing scope for computation-heavy tasks
     val processingScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
     
-    // Collect bikes from Firestore
+    // Collect bikes from Firestore with performance optimization
     val bikes by bikeViewModel.bikes.collectAsState()
     val isLoading by bikeViewModel.isLoading.collectAsState()
     val error by bikeViewModel.error.collectAsState()
+    
+    // Performance: Derive filtered bikes to avoid recomputation
+    val filteredBikes by remember {
+        derivedStateOf {
+            bikes.filter { bike ->
+                val status = getBikeStatusCached(bike)
+                // Only show available bikes by default, can be expanded later
+                status.isAvailable || !bike.isInUse
+            }
+        }
+    }
     
     // Bottom sheet state
     var selectedBike by remember { mutableStateOf<Bike?>(null) }
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     var showBottomSheet by remember { mutableStateOf(false) }
 
-    // Pull-to-refresh state
+    // Pull-to-refresh state with debounced refresh
+    var isRefreshing by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullRefreshState(
-        refreshing = isLoading,
+        refreshing = isRefreshing,
         onRefresh = {
-            // Use IO scope for Firestore operations
-            ioScope.launch {
-                bikeViewModel.fetchBikesFromFirestore()
+            if (!isRefreshing) {
+                isRefreshing = true
+                PerformanceMonitor.startTiming("pull_refresh")
+                ioScope.launch {
+                    try {
+                        PerformanceMonitor.timeOperation("pull_refresh_fetch") {
+                            bikeViewModel.fetchBikesFromFirestore()
+                        }
+                        delay(500) // Minimum refresh time to prevent spam
+                    } finally {
+                        isRefreshing = false
+                        PerformanceMonitor.endTiming("pull_refresh")
+                        PerformanceMonitor.logMemoryUsage("BikesTab_Refresh")
+                    }
+                }
             }
         }
     )
     
-    // Remove bookingBike state - we'll navigate instead
     val isBookingLoading by bikeViewModel.isBookingLoading.collectAsState()
     
     // QR Scanning state
@@ -172,40 +227,63 @@ fun BikesTab(
     val unlockError by bikeViewModel.unlockError.collectAsState()
     val unlockSuccess by bikeViewModel.unlockSuccess.collectAsState()
     
-    // Get location using the IO scope
-    LaunchedEffect(fusedLocationProviderClient) {
-        locationManager.getLastLocation(
-            onSuccess = { location: LatLng ->
-                // Update UI state on main thread
-                scope.launch {
+    // Performance: Use produceState for location to avoid unnecessary recompositions
+    val locationState by produceState<LatLng?>(null, fusedLocationProviderClient) {
+        if (fusedLocationProviderClient != null) {
+            locationManager.getLastLocation(
+                onSuccess = { location -> 
+                    value = location
                     currentLocation = location
-                }
-            },
-            onFailure = {
-                    // Handle failure
-            }
-        )
-
+                },
+                onFailure = { /* Handle failure */ }
+            )
+        }
     }
     
-    // Refresh bikes from Firestore when the screen is shown - use IO scope
+    // Performance monitoring for initial load
+    LaunchedEffect(Unit) {
+        PerformanceMonitor.startTiming("bikes_tab_init")
+        logCachePerformance()
+    }
+    
+    // Initialize data loading with performance monitoring
     LaunchedEffect(Unit) {
         ioScope.launch {
-            bikeViewModel.fetchBikesFromFirestore()
-            bikeViewModel.setupBikesRealtimeUpdates()
+            PerformanceMonitor.timeOperation("fetch_bikes_initial") {
+                bikeViewModel.fetchBikesFromFirestore()
+            }
+            PerformanceMonitor.timeOperation("setup_realtime_updates") {
+                bikeViewModel.setupBikesRealtimeUpdates()
+            }
+        }
+        PerformanceMonitor.endTiming("bikes_tab_init")
+        PerformanceMonitor.logMemoryUsage("BikesTab_Init")
+    }
+    
+    // Cache cleanup every 2 minutes
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(120000) // 2 minutes
+            cleanupExpiredCaches()
         }
     }
 
     // Handle successful bike unlock - auto-navigate or show success
     LaunchedEffect(unlockSuccess) {
         if (unlockSuccess) {
-            // Reset states
             bikeViewModel.resetUnlockStates()
             showQRScanner = false
             showStartRideDialog = false
-            
-            // Optionally navigate to map or show success message
             Toast.makeText(context, "Bike unlocked successfully! Your ride has started.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Cleanup on dispose
+    DisposableEffect(Unit) {
+        onDispose {
+            // Clear caches when component is disposed
+            bikeStatusCache.clear()
+            distanceCache.clear()
         }
     }
 
@@ -219,175 +297,88 @@ fun BikesTab(
                 .fillMaxSize()
                 .padding(16.dp)
         ) {
-            // Animated header
-            AnimatedVisibility(
-                visible = true,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+            // Optimized header - removed heavy animations
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Text(
+                    text = "Available Bikes",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
+                )
+                
+                Button(
+                    onClick = { showStartRideDialog = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkGreen),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !isUnlockingBike,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = "Available Bikes",
-                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                            modifier = Modifier.weight(1f)
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = "Start Ride",
+                            modifier = Modifier.size(18.dp),
+                            tint = Color.White
                         )
-                        
-                        // Start Ride button
-                        Button(
-                            onClick = { showStartRideDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = DarkGreen
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = !isUnlockingBike
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.QrCodeScanner,
-                                    contentDescription = "Start Ride",
-                                    modifier = Modifier.size(20.dp),
-                                    tint = Color.White
-                                )
-                                Text(
-                                    text = "Start Ride",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                        Text(
+                            text = "Start Ride",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
                     }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
+            
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // Content based on loading state
-            if (isLoading && bikes.isEmpty()) {
-                // Loading state - show shimmer placeholders
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(6) {
-                        ShimmerBikeCard()
-                    }
+            // Performance optimized content rendering
+            when {
+                isLoading && bikes.isEmpty() -> {
+                    OptimizedShimmerGrid()
                 }
-            } else if (error != null && bikes.isEmpty()) {
-                // Error state
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Error,
-                            contentDescription = "Error",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Oops! Something went wrong",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            text = error ?: "Failed to load bikes. Please try again later.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(
-                            onClick = {
-                                ioScope.launch {
-                                    bikeViewModel.fetchBikesFromFirestore()
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            )
-                        ) {
-                            Text("Try Again")
+                error != null && bikes.isEmpty() -> {
+                    ErrorStateContent(
+                        error = error,
+                        onRetry = {
+                            ioScope.launch {
+                                bikeViewModel.fetchBikesFromFirestore()
+                            }
                         }
-                    }
+                    )
                 }
-            } else if (bikes.isEmpty()) {
-                // Empty state
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "No bikes available at the moment",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Pull down to refresh and check again",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                filteredBikes.isEmpty() -> {
+                    EmptyStateContent()
                 }
-            } else {
-                // Bike grid with filtered results
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    contentPadding = PaddingValues(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    itemsIndexed(bikes) { index, bike ->
-                        BikeCard(
-                            bike = bike,
-                            currentLocation = currentLocation,
-                            onBikeClick = {
-                                selectedBike = it
-                                showBottomSheet = true
-                            },
-                            onBook = { bikeItem ->
-                                // Navigate to Bookings tab with the bike ID
-                                NavigationUtils.navigateToBookings(navController!!, bikeItem.id)
-                            },
-                            onCompleteProfile = {
-                                navController?.navigate("editProfile")
-                            },
-                            modifier = Modifier
-                        )
-                    }
+                else -> {
+                    // Performance optimized bike grid
+                    OptimizedBikeGrid(
+                        bikes = filteredBikes,
+                        currentLocation = locationState,
+                        onBikeClick = { bike ->
+                            selectedBike = bike
+                            showBottomSheet = true
+                        },
+                        onBook = { bike ->
+                            NavigationUtils.navigateToBookings(navController!!, bike.id)
+                        },
+                        onCompleteProfile = {
+                            navController?.navigate("editProfile")
+                        }
+                    )
                 }
             }
         }
 
-        // Pull refresh indicator with custom styling
+        // Pull refresh indicator
         PullRefreshIndicator(
-            refreshing = isLoading,
+            refreshing = isRefreshing,
             state = pullRefreshState,
             modifier = Modifier.align(Alignment.TopCenter),
             backgroundColor = MaterialTheme.colorScheme.surface,
@@ -396,7 +387,7 @@ fun BikesTab(
         )
     }
     
-    // Half-screen bottom sheet
+    // Bottom sheet with performance optimizations
     if (showBottomSheet && selectedBike != null) {
         ModalBottomSheet(
             onDismissRequest = { 
@@ -428,12 +419,11 @@ fun BikesTab(
             BikeDetailSheet(
                 bike = selectedBike!!,
                 isVisible = showBottomSheet,
-                isAvailable = true, // You might want to dynamically determine this
+                isAvailable = getBikeStatusCached(selectedBike!!).isAvailable,
                 onViewDetails = {
                     navigateToBikeDetails(selectedBike!!.id, navController!!)
                 },
                 onBook = { bikeItem ->
-                    // Navigate to Bookings tab with the bike ID
                     showBottomSheet = false
                     selectedBike = null
                     NavigationUtils.navigateToBookings(navController!!, bikeItem.id)
@@ -449,7 +439,7 @@ fun BikesTab(
         }
     }
     
-    // Start Ride Dialog
+    // Dialog components remain the same
     StartRideDialog(
         isVisible = showStartRideDialog,
         onDismiss = { showStartRideDialog = false },
@@ -459,7 +449,6 @@ fun BikesTab(
         }
     )
     
-    // QR Scanner Dialog
     QRScannerDialog(
         isVisible = showQRScanner,
         onDismiss = { showQRScanner = false },
@@ -471,7 +460,6 @@ fun BikesTab(
         }
     )
     
-    // Show unlock dialog when bike is being unlocked
     BikeUnlockDialog(
         isVisible = isUnlockingBike,
         onDismiss = { 
@@ -479,19 +467,136 @@ fun BikesTab(
         }
     )
     
-    // Error display for unlock errors
     unlockError?.let { error ->
         LaunchedEffect(error) {
             Toast.makeText(context, error, Toast.LENGTH_LONG).show()
-            kotlinx.coroutines.delay(3000)
+            delay(3000)
             bikeViewModel.resetUnlockStates()
         }
     }
 }
 
+// Performance optimized composables
+@Composable
+private fun OptimizedShimmerGrid() {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(6) {
+            ShimmerBikeCard()
+        }
+    }
+}
+
+@Composable
+private fun ErrorStateContent(error: String?, onRetry: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Error,
+                contentDescription = "Error",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Oops! Something went wrong",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.error
+            )
+            Text(
+                text = error ?: "Failed to load bikes. Please try again later.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onRetry,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Try Again")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyStateContent() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(64.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "No bikes available at the moment",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "Pull down to refresh and check again",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun OptimizedBikeGrid(
+    bikes: List<Bike>,
+    currentLocation: LatLng?,
+    onBikeClick: (Bike) -> Unit,
+    onBook: (Bike) -> Unit,
+    onCompleteProfile: () -> Unit
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        itemsIndexed(
+            items = bikes,
+            key = { _, bike -> bike.id } // Performance: Add key for efficient recomposition
+        ) { index, bike ->
+            OptimizedBikeCard(
+                bike = bike,
+                currentLocation = currentLocation,
+                onBikeClick = onBikeClick,
+                onBook = onBook,
+                onCompleteProfile = onCompleteProfile
+            )
+        }
+    }
+}
+
+// Performance optimized BikeCard
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BikeCard(
+private fun OptimizedBikeCard(
     bike: Bike,
     currentLocation: LatLng?,
     onBikeClick: (Bike) -> Unit,
@@ -499,20 +604,42 @@ fun BikeCard(
     onCompleteProfile: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Determine bike availability based on database fields
-    val isAvailable = remember(bike) { 
-        bike.isAvailable && !bike.isInUse 
+    // Performance: Cache bike status to avoid recalculation
+    val bikeStatus = remember(bike.isAvailable, bike.isInUse, bike.currentRider) { 
+        getBikeStatusCached(bike)
     }
     
-    // Haptic feedback
+    // Performance: Cache distance calculation
+    val distance = remember(currentLocation, bike.latitude, bike.longitude) {
+        if (currentLocation != null) {
+            val cacheKey = "${bike.id}_${currentLocation.latitude}_${currentLocation.longitude}"
+            val cached = distanceCache[cacheKey]
+            
+            if (cached != null && !cached.isExpired()) {
+                cached.distance
+            } else {
+                val calculated = calculateDistanceOptimized(
+                    lat1 = currentLocation.latitude,
+                    lon1 = currentLocation.longitude,
+                    lat2 = bike.latitude,
+                    lon2 = bike.longitude
+                )
+                distanceCache[cacheKey] = CachedDistance(calculated)
+                calculated
+            }
+        } else {
+            null
+        }
+    }
+    
     val haptic = LocalHapticFeedback.current
     
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .height(220.dp),  // Fixed height for all cards
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-        shape = RoundedCornerShape(16.dp),
+            .height(200.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        shape = RoundedCornerShape(12.dp),
         onClick = {
             onBikeClick(bike)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -521,20 +648,22 @@ fun BikeCard(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Bike Image - fixed height
+            // Optimized image loading
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)  // Fixed height for all images
+                    .height(110.dp)
             ) {
                 SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(bike.imageUrl)
-                        .crossfade(true)
-                        .build(),
+                    model = ImageLoadingUtils.createThumbnailImageRequest(
+                        context = LocalContext.current,
+                        imageUrl = bike.imageUrl,
+                        bikeId = bike.id
+                    ),
                     contentDescription = bike.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
+                    imageLoader = ImageLoadingUtils.getOptimizedImageLoader(LocalContext.current),
                     loading = {
                         ShimmerLoadingAnimation(
                             modifier = Modifier
@@ -558,47 +687,43 @@ fun BikeCard(
                     }
                 )
                 
-                // Availability badge on top of image
+                // Status badge
                 Surface(
-                    color = if (isAvailable) 
-                        Color(0xFF4CAF50).copy(alpha = 0.9f) // Available - Green
-                    else 
-                        Color(0xFFE53935).copy(alpha = 0.9f), // Unavailable - Red
+                    color = bikeStatus.statusColor.copy(alpha = 0.9f),
                     modifier = Modifier
-                        .padding(8.dp)
+                        .padding(6.dp)
                         .align(Alignment.TopEnd),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(6.dp)
                 ) {
                     Text(
-                        text = if (isAvailable) "Available" else "Unavailable",
-                        fontSize = 10.sp,
+                        text = bikeStatus.statusText,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
             }
 
-            // Card content - fixed padding and layout
+            // Card content
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Content top section
-                Column {
-                    // Bike Name - fixed height
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Text(
                         text = bike.name,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.fillMaxWidth()
                     )
                     
-                    // Bike Type
                     Text(
                         text = bike.type,
                         fontSize = 12.sp,
@@ -608,57 +733,163 @@ fun BikeCard(
                     )
                 }
                 
-                // Middle section - Rating
-                if (bike.rating > 0) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    ) {
-                        RatingBar(
-                            rating = bike.rating,
-                            modifier = Modifier.height(12.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = String.format("%.1f", bike.rating),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                
-                // Bottom section
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Bike Price
-                    Text(
-                        text = bike.price,
-                        fontSize = 14.sp,
-                        color = DarkGreen,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    // Distance from user
-                    currentLocation?.let { location ->
-                        val distance = calculateDistance(
-                            lat1 = location.latitude,
-                            lon1 = location.longitude,
-                            lat2 = bike.latitude,
-                            lon2 = bike.longitude
-                        )
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
                         Text(
-                            text = "%.1f km".format(distance),
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = bike.price,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = DarkGreen
                         )
+                        
+                        if (bike.rating > 0) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    text = "★",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFFFC107)
+                                )
+                                Text(
+                                    text = String.format("%.1f", bike.rating),
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        distance?.let {
+                            Text(
+                                text = "%.1f km".format(it),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        if (bike.batteryLevel > 0 && bike.type.contains("E-bike", ignoreCase = true)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "🔋",
+                                    fontSize = 9.sp
+                                )
+                                Text(
+                                    text = "${bike.batteryLevel}%",
+                                    fontSize = 10.sp,
+                                    color = if (bike.batteryLevel > 20) Color(0xFF4CAF50) else Color(0xFFE53935),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+// Performance helper functions
+private fun getBikeStatusCached(bike: Bike): BikeStatus {
+    val cacheKey = "${bike.id}_${bike.isAvailable}_${bike.isInUse}_${bike.currentRider}"
+    val cached = bikeStatusCache[cacheKey]
+    
+    if (cached != null && !cached.isExpired()) {
+        return cached
+    }
+    
+    val isAvailable = bike.isAvailable && !bike.isInUse && bike.currentRider.isEmpty()
+    val statusText = if (isAvailable) "Available" else "In Use"
+    val statusColor = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
+    
+    val status = BikeStatus(isAvailable, statusText, statusColor)
+    bikeStatusCache[cacheKey] = status
+    return status
+}
+
+// Optimized distance calculation using more efficient math
+private fun calculateDistanceOptimized(
+    lat1: Double,
+    lon1: Double,
+    lat2: Double,
+    lon2: Double
+): Float {
+    // Use more efficient approximation for short distances
+    val earthRadius = 6371000.0 // Earth's radius in meters
+    
+    val lat1Rad = Math.toRadians(lat1)
+    val lat2Rad = Math.toRadians(lat2)
+    val deltaLatRad = Math.toRadians(lat2 - lat1)
+    val deltaLonRad = Math.toRadians(lon2 - lon1)
+    
+    // Haversine formula optimized for performance
+    val a = sin(deltaLatRad / 2) * sin(deltaLatRad / 2) +
+            cos(lat1Rad) * cos(lat2Rad) *
+            sin(deltaLonRad / 2) * sin(deltaLonRad / 2)
+    
+    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    val distance = earthRadius * c
+    
+    return (distance / 1000).toFloat() // Convert to kilometers
+}
+
+// Cache management functions
+private suspend fun cleanupExpiredCaches() {
+    withContext(Dispatchers.Default) {
+        PerformanceMonitor.timeOperationSync("cache_cleanup") {
+            // Clean distance cache
+            val distanceIterator = distanceCache.entries.iterator()
+            var distanceRemoved = 0
+            while (distanceIterator.hasNext()) {
+                val entry = distanceIterator.next()
+                if (entry.value.isExpired()) {
+                    distanceIterator.remove()
+                    distanceRemoved++
+                }
+            }
+            
+            // Clean bike status cache
+            val statusIterator = bikeStatusCache.entries.iterator()
+            var statusRemoved = 0
+            while (statusIterator.hasNext()) {
+                val entry = statusIterator.next()
+                if (entry.value.isExpired()) {
+                    statusIterator.remove()
+                    statusRemoved++
+                }
+            }
+            
+            PerformanceMonitor.logCacheCleanup(
+                distanceRemoved = distanceRemoved,
+                statusRemoved = statusRemoved,
+                remainingDistance = distanceCache.size,
+                remainingStatus = bikeStatusCache.size
+            )
+        }
+    }
+}
+
+// Performance monitoring for cache usage
+private fun logCachePerformance() {
+    PerformanceMonitor.logCacheUsage(
+        distanceCacheSize = distanceCache.size,
+        statusCacheSize = bikeStatusCache.size
+    )
 }
 
 @Composable
@@ -682,6 +913,23 @@ fun BikeDetailSheet(
     // Review form state
     var showReviewForm by remember { mutableStateOf(false) }
     var isSubmittingReview by remember { mutableStateOf(false) }
+    
+    // Improved status calculation with real-time synchronization
+    val bikeStatus = remember(bike.isAvailable, bike.isInUse, bike.currentRider) {
+        when {
+            !bike.isAvailable -> "Unavailable"
+            bike.isInUse || bike.currentRider.isNotEmpty() -> "In Use"
+            else -> "Available"
+        }
+    }
+    
+    val statusColor = remember(bikeStatus) {
+        when (bikeStatus) {
+            "Available" -> Color(0xFF4CAF50)
+            "In Use" -> Color(0xFFFF9800)
+            else -> Color(0xFFE53935)
+        }
+    }
     
     // Get current user ID
     val currentUser = FirebaseAuth.getInstance().currentUser
@@ -714,7 +962,7 @@ fun BikeDetailSheet(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp) // Reduced padding
     ) {
         // This part will be scrollable
         Column(
@@ -722,11 +970,11 @@ fun BikeDetailSheet(
                 .weight(1f)
                 .verticalScroll(scrollState)
         ) {
-            // Image with parallax effect
+            // Compact image
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
+                    .height(160.dp) // Reduced from 200dp
             ) {
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -736,7 +984,7 @@ fun BikeDetailSheet(
                     contentDescription = bike.name,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp),
+                        .height(160.dp),
                     contentScale = ContentScale.Crop,
                     loading = {
                         ShimmerLoadingAnimation(
@@ -754,14 +1002,14 @@ fun BikeDetailSheet(
                         ) {
                             Text(
                                 text = bike.name.firstOrNull()?.toString() ?: "B",
-                                style = MaterialTheme.typography.headlineLarge,
+                                style = MaterialTheme.typography.headlineMedium, // Smaller
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
                 )
                 
-                // Add gradient overlay for better text visibility
+                // Simplified gradient overlay
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -769,7 +1017,7 @@ fun BikeDetailSheet(
                             brush = Brush.verticalGradient(
                                 colors = listOf(
                                     Color.Transparent,
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
                                 ),
                                 startY = 0f,
                                 endY = Float.POSITIVE_INFINITY
@@ -778,111 +1026,120 @@ fun BikeDetailSheet(
                 )
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp)) // Reduced spacing
             
-            // Header section with name and availability status
+            // Compact header section with name and status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Bike name
+                // Bike name - more compact
                 Text(
                     text = bike.name,
-                    fontSize = 24.sp,
+                    fontSize = 18.sp, // Reduced from 24sp
                     fontWeight = FontWeight.Bold,
                     color = DarkGreen,
                     modifier = Modifier.weight(1f)
                 )
                 
-                // Availability status chip
+                // Improved status chip with real-time data
                 Surface(
-                    color = if (isAvailable) Color(0xFFEDF7ED) else Color(0xFFFDEDED),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
-                    )
+                    color = statusColor.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, statusColor)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         // Status indicator dot
                         Surface(
-                            color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935),
-                            shape = RoundedCornerShape(4.dp),
-                            modifier = Modifier.size(8.dp)
+                            color = statusColor,
+                            shape = RoundedCornerShape(3.dp),
+                            modifier = Modifier.size(6.dp)
                         ) {}
                         
                         Text(
-                            text = if (isAvailable) "Available" else "Unavailable",
-                            fontSize = 12.sp,
+                            text = bikeStatus,
+                            fontSize = 11.sp, // Slightly smaller
                             fontWeight = FontWeight.Medium,
-                            color = if (isAvailable) Color(0xFF4CAF50) else Color(0xFFE53935)
+                            color = statusColor
                         )
                     }
                 }
             }
             
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp)) // Reduced spacing
             
-            // Price with larger text
-            Text(
-                text = bike.price,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            // Type and distance info
+            // Compact price and type row
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Bike Type with icon
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown, // Replace with appropriate icon
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = bike.type,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = bike.price,
+                    fontSize = 18.sp, // Reduced from 20sp
+                    fontWeight = FontWeight.Bold,
+                    color = DarkGreen
+                )
                 
+                Text(
+                    text = bike.type,
+                    fontSize = 14.sp, // Reduced from 16sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp)) // Reduced spacing
+            
+            // Compact info row with distance and battery
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 // Distance
                 currentLocation?.let { location ->
-                    val distance = calculateDistance(
+                    val distance = calculateDistanceOptimized(
                         lat1 = location.latitude,
                         lon1 = location.longitude,
                         lat2 = bike.latitude,
                         lon2 = bike.longitude
                     )
                     Row(
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown, // Replace with appropriate icon
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        Text(
+                            text = "📍",
+                            fontSize = 10.sp
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "%.1f km away".format(distance),
-                            fontSize = 14.sp,
+                            fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                
+                // Battery level for e-bikes
+                if (bike.batteryLevel > 0 && bike.type.contains("E-bike", ignoreCase = true)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = "🔋",
+                            fontSize = 10.sp
+                        )
+                        Text(
+                            text = "${bike.batteryLevel}% battery",
+                            fontSize = 12.sp,
+                            color = if (bike.batteryLevel > 20) Color(0xFF4CAF50) else Color(0xFFE53935),
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }

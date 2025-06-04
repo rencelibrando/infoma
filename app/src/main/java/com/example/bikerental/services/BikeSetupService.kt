@@ -2,6 +2,9 @@ package com.example.bikerental.services
 
 import android.util.Log
 import com.example.bikerental.models.Bike
+import com.example.bikerental.models.BikeLocation
+import com.example.bikerental.utils.ErrorHandler
+import com.example.bikerental.utils.FirestoreUtils
 import com.example.bikerental.utils.QRCodeHelper
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.firestore.FirebaseFirestore
@@ -20,50 +23,68 @@ class BikeSetupService {
      */
     suspend fun addHardwareIdsToExistingBikes(): Result<Int> {
         return try {
-            Log.d(TAG, "Starting to add hardware IDs to existing bikes")
+            ErrorHandler.logInfo(TAG, "Starting to add hardware IDs to existing bikes")
             
             // Get all bikes from Firestore
             val bikesSnapshot = firestore.collection("bikes").get().await()
             var updatedCount = 0
             
             // Get existing hardware IDs to prevent duplicates
-            val existingHardwareIds = bikesSnapshot.documents
-                .mapNotNull { it.toObject(Bike::class.java)?.hardwareId }
-                .filter { it.isNotBlank() }
-                .toSet()
-            
+            val existingHardwareIds = mutableSetOf<String>()
             for (document in bikesSnapshot.documents) {
-                val bike = document.toObject(Bike::class.java)?.copy(id = document.id)
-                
-                if (bike != null && bike.hardwareId.isBlank()) {
-                    // Generate a unique hardware ID for this bike
-                    var hardwareId: String
-                    var attempts = 0
-                    do {
-                        hardwareId = QRCodeHelper.generateUniqueHardwareId(bike.id)
-                        attempts++
-                    } while (existingHardwareIds.contains(hardwareId) && attempts < 10)
-                    
-                    if (attempts >= 10) {
-                        Log.w(TAG, "Could not generate unique hardware ID for bike ${bike.id} after 10 attempts")
-                        continue
+                try {
+                    val data = document.data
+                    if (data != null) {
+                        val bike = FirestoreUtils.createBikeFromData(document.id, data)
+                        if (bike.hardwareId.isNotBlank()) {
+                            existingHardwareIds.add(bike.hardwareId)
+                        }
                     }
-                    
-                    // Update the bike document
-                    firestore.collection("bikes")
-                        .document(bike.id)
-                        .update("hardwareId", hardwareId)
-                        .await()
-                    
-                    Log.d(TAG, "Added hardware ID '$hardwareId' to bike ${bike.id}")
-                    updatedCount++
+                } catch (e: Exception) {
+                    ErrorHandler.logError(TAG, "Error parsing bike document ${document.id} for hardware ID check", e)
                 }
             }
             
-            Log.d(TAG, "Successfully added hardware IDs to $updatedCount bikes")
+            for (document in bikesSnapshot.documents) {
+                try {
+                    val data = document.data
+                    if (data != null) {
+                        val bike = FirestoreUtils.createBikeFromData(document.id, data)
+                        
+                        if (bike.hardwareId.isBlank()) {
+                            // Generate a unique hardware ID for this bike
+                            var hardwareId: String
+                            var attempts = 0
+                            do {
+                                hardwareId = QRCodeHelper.generateUniqueHardwareId(bike.id)
+                                attempts++
+                            } while (existingHardwareIds.contains(hardwareId) && attempts < 10)
+                            
+                            if (attempts >= 10) {
+                                ErrorHandler.logWarning(TAG, "Could not generate unique hardware ID for bike ${bike.id} after 10 attempts")
+                                continue
+                            }
+                            
+                            // Update the bike document
+                            firestore.collection("bikes")
+                                .document(bike.id)
+                                .update("hardwareId", hardwareId)
+                                .await()
+                            
+                            ErrorHandler.logInfo(TAG, "Added hardware ID '$hardwareId' to bike ${bike.id}")
+                            existingHardwareIds.add(hardwareId)
+                            updatedCount++
+                        }
+                    }
+                } catch (e: Exception) {
+                    ErrorHandler.logError(TAG, "Error processing bike document ${document.id}", e)
+                }
+            }
+            
+            ErrorHandler.logInfo(TAG, "Successfully added hardware IDs to $updatedCount bikes")
             Result.success(updatedCount)
         } catch (e: Exception) {
-            Log.e(TAG, "Error adding hardware IDs to bikes", e)
+            ErrorHandler.logError(TAG, "Error adding hardware IDs to bikes", e)
             Result.failure(e)
         }
     }
@@ -73,7 +94,7 @@ class BikeSetupService {
      */
     suspend fun createSampleBikesWithHardwareIds(): Result<List<Bike>> {
         return try {
-            Log.d(TAG, "Creating sample bikes with hardware IDs")
+            ErrorHandler.logInfo(TAG, "Creating sample bikes with hardware IDs")
             
             val sampleBikes = listOf(
                 Bike.createSimple(
@@ -134,13 +155,13 @@ class BikeSetupService {
                     .set(bike.toMap())
                     .await()
                 
-                Log.d(TAG, "Created bike ${bike.id} with hardware ID: ${bike.hardwareId}")
+                ErrorHandler.logInfo(TAG, "Created bike ${bike.id} with hardware ID: ${bike.hardwareId}")
             }
             
-            Log.d(TAG, "Successfully created ${sampleBikes.size} sample bikes")
+            ErrorHandler.logInfo(TAG, "Successfully created ${sampleBikes.size} sample bikes")
             Result.success(sampleBikes)
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating sample bikes", e)
+            ErrorHandler.logError(TAG, "Error creating sample bikes", e)
             Result.failure(e)
         }
     }
@@ -150,38 +171,46 @@ class BikeSetupService {
      */
     suspend fun verifyBikeHardwareIds(): Result<List<String>> {
         return try {
-            Log.d(TAG, "Verifying bike hardware IDs")
+            ErrorHandler.logInfo(TAG, "Verifying bike hardware IDs")
             
             val bikesSnapshot = firestore.collection("bikes").get().await()
             val issues = mutableListOf<String>()
             
             for (document in bikesSnapshot.documents) {
-                val bike = document.toObject(Bike::class.java)?.copy(id = document.id)
-                
-                if (bike != null) {
-                    when {
-                        bike.hardwareId.isBlank() -> {
-                            issues.add("Bike ${bike.id} has no hardware ID")
+                try {
+                    val data = document.data
+                    if (data != null) {
+                        val bike = FirestoreUtils.createBikeFromData(document.id, data)
+                        
+                        when {
+                            bike.hardwareId.isBlank() -> {
+                                issues.add("Bike ${bike.id} has no hardware ID")
+                            }
+                            !QRCodeHelper.isValidQRCodeFormat(bike.hardwareId) -> {
+                                issues.add("Bike ${bike.id} has invalid hardware ID format: ${bike.hardwareId}")
+                            }
+                            else -> {
+                                ErrorHandler.logDebug(TAG, "Bike ${bike.id} has valid hardware ID: ${bike.hardwareId}")
+                            }
                         }
-                        !QRCodeHelper.isValidQRCodeFormat(bike.hardwareId) -> {
-                            issues.add("Bike ${bike.id} has invalid hardware ID format: ${bike.hardwareId}")
-                        }
-                        else -> {
-                            Log.d(TAG, "Bike ${bike.id} has valid hardware ID: ${bike.hardwareId}")
-                        }
+                    } else {
+                        issues.add("Bike ${document.id} has null data")
                     }
+                } catch (e: Exception) {
+                    ErrorHandler.logError(TAG, "Error parsing bike document ${document.id}", e)
+                    issues.add("Bike ${document.id} could not be parsed: ${e.message}")
                 }
             }
             
             if (issues.isEmpty()) {
-                Log.d(TAG, "All bikes have valid hardware IDs")
+                ErrorHandler.logInfo(TAG, "All bikes have valid hardware IDs")
             } else {
-                Log.w(TAG, "Found ${issues.size} issues with bike hardware IDs")
+                ErrorHandler.logWarning(TAG, "Found ${issues.size} issues with bike hardware IDs")
             }
             
             Result.success(issues)
         } catch (e: Exception) {
-            Log.e(TAG, "Error verifying bike hardware IDs", e)
+            ErrorHandler.logError(TAG, "Error verifying bike hardware IDs", e)
             Result.failure(e)
         }
     }
@@ -192,11 +221,11 @@ class BikeSetupService {
     fun printTestQRCodes() {
         val sampleHardwareIds = QRCodeHelper.generateSampleHardwareIds()
         
-        Log.d(TAG, "=== TEST QR CODES ===")
+        ErrorHandler.logInfo(TAG, "=== TEST QR CODES ===")
         sampleHardwareIds.forEach { (bikeId, hardwareId) ->
-            Log.d(TAG, "Bike: $bikeId -> QR Code: $hardwareId")
+            ErrorHandler.logInfo(TAG, "Bike: $bikeId -> QR Code: $hardwareId")
         }
-        Log.d(TAG, "==================")
+        ErrorHandler.logInfo(TAG, "==================")
     }
     
     /**
@@ -204,29 +233,39 @@ class BikeSetupService {
      */
     suspend fun checkAndResolveDuplicateHardwareIds(): Result<Int> {
         return try {
-            Log.d(TAG, "Checking for duplicate hardware IDs")
+            ErrorHandler.logInfo(TAG, "Checking for duplicate hardware IDs")
             
             val bikesSnapshot = firestore.collection("bikes").get().await()
-            val hardwareIdGroups = bikesSnapshot.documents
-                .mapNotNull { document ->
-                    val bike = document.toObject(Bike::class.java)?.copy(id = document.id)
-                    bike?.let { it.id to it.hardwareId }
-                }
-                .filter { it.second.isNotBlank() }
-                .groupBy { it.second }
+            val hardwareIdPairs = mutableListOf<Pair<String, String>>()
             
+            // Parse documents safely using FirestoreUtils
+            for (document in bikesSnapshot.documents) {
+                try {
+                    val data = document.data
+                    if (data != null) {
+                        val bike = FirestoreUtils.createBikeFromData(document.id, data)
+                        if (bike.hardwareId.isNotBlank()) {
+                            hardwareIdPairs.add(bike.id to bike.hardwareId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    ErrorHandler.logError(TAG, "Error parsing bike document ${document.id}", e)
+                }
+            }
+            
+            val hardwareIdGroups = hardwareIdPairs.groupBy { it.second }
             val duplicates = hardwareIdGroups.filter { it.value.size > 1 }
             var resolvedCount = 0
             
             if (duplicates.isEmpty()) {
-                Log.d(TAG, "No duplicate hardware IDs found")
+                ErrorHandler.logInfo(TAG, "No duplicate hardware IDs found")
                 return Result.success(0)
             }
             
-            Log.w(TAG, "Found ${duplicates.size} duplicate hardware IDs")
+            ErrorHandler.logWarning(TAG, "Found ${duplicates.size} duplicate hardware IDs")
             
             for ((hardwareId, bikes) in duplicates) {
-                Log.w(TAG, "Duplicate hardware ID '$hardwareId' found in bikes: ${bikes.map { it.first }}")
+                ErrorHandler.logWarning(TAG, "Duplicate hardware ID '$hardwareId' found in bikes: ${bikes.map { it.first }}")
                 
                 // Keep the first bike with this hardware ID, regenerate for others
                 for (i in 1 until bikes.size) {
@@ -238,15 +277,15 @@ class BikeSetupService {
                         .update("hardwareId", newHardwareId)
                         .await()
                     
-                    Log.d(TAG, "Updated bike '$bikeId' with new hardware ID: '$newHardwareId'")
+                    ErrorHandler.logInfo(TAG, "Updated bike '$bikeId' with new hardware ID: '$newHardwareId'")
                     resolvedCount++
                 }
             }
             
-            Log.d(TAG, "Resolved $resolvedCount duplicate hardware IDs")
+            ErrorHandler.logInfo(TAG, "Resolved $resolvedCount duplicate hardware IDs")
             Result.success(resolvedCount)
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking/resolving duplicate hardware IDs", e)
+            ErrorHandler.logError(TAG, "Error checking/resolving duplicate hardware IDs", e)
             Result.failure(e)
         }
     }

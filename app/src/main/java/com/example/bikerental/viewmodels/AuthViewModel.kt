@@ -70,7 +70,7 @@ class AuthViewModel @Inject constructor(
             logD("Found existing user (${currentFirebaseUser.uid}), checking authentication status...")
             
             // Start performance tracking for auth initialization
-            PerformanceMonitor.startTimer("auth_initialization")
+            PerformanceMonitor.startTiming("auth_initialization")
             
             // Prefetch user from local storage to use as fallback
             val userId = currentFirebaseUser.uid
@@ -91,10 +91,10 @@ class AuthViewModel @Inject constructor(
                     kotlinx.coroutines.withTimeout(10000) { // 10 second timeout
                         initializeExistingUser(currentFirebaseUser)
                     }
-                    PerformanceMonitor.endTimer("auth_initialization")
+                    PerformanceMonitor.endTiming("auth_initialization")
                 } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                     logW("Authentication initialization timed out after 10s")
-                    PerformanceMonitor.endTimer("auth_initialization")
+                    PerformanceMonitor.endTiming("auth_initialization")
                     
                     // Don't reset to Initial state on timeout if we have cached data
                     withContext(Dispatchers.Main) {
@@ -115,7 +115,7 @@ class AuthViewModel @Inject constructor(
                             logE("Setting auth state to Initial due to error: ${e.message}")
                         }
                     }
-                    PerformanceMonitor.endTimer("auth_initialization")
+                    PerformanceMonitor.endTiming("auth_initialization")
                 }
             }
         }

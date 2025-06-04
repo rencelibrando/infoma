@@ -14,6 +14,7 @@ import com.example.bikerental.models.Review
 import com.example.bikerental.models.TrackableBike
 import com.example.bikerental.utils.ErrorHandler
 import com.example.bikerental.utils.QRCodeHelper
+import com.example.bikerental.utils.FirestoreUtils
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
@@ -265,35 +266,40 @@ class BikeViewModel : ViewModel() {
                     firestore.collection("bikes").get().await()
                 }
                 
-                // Log raw document count
+                // Log raw document count (reduced logging)
                 Log.d(TAG, "Raw document count from Firestore: ${bikesCollection.documents.size}")
                 
-                // Process results on CPU dispatcher
+                // Process results on CPU dispatcher with better error handling
                 val fetchedBikes = withContext(Dispatchers.Default) {
-                    bikesCollection.documents.mapNotNull { doc ->
+                    var successCount = 0
+                    var errorCount = 0
+                    
+                    val bikes = bikesCollection.documents.mapNotNull { doc ->
                         try {
-                            val bike = doc.toObject(Bike::class.java)?.copy(id = doc.id)
-                            
-                            // Log each conversion result
-                            if (bike == null) {
-                                Log.w(TAG, "Document ${doc.id} converted to null bike object")
-                                // Log the document data for debugging
-                                Log.w(TAG, "Document data: ${doc.data}")
+                            // Create bike with manual field mapping to handle type conversions
+                            val data = doc.data
+                            if (data != null) {
+                                val bike = FirestoreUtils.createBikeFromData(doc.id, data)
+                                successCount++
+                                bike
+                            } else {
+                                errorCount++
+                                Log.w(TAG, "Document ${doc.id} has null data")
+                                null
                             }
-                            
-                            bike
                         } catch (e: Exception) {
-                            Log.e(TAG, "Error converting document ${doc.id}", e)
-                            // Log the document data that caused the error
-                            Log.e(TAG, "Document data: ${doc.data}")
+                            errorCount++
+                            // Only log the first few errors to reduce log spam
+                            if (errorCount <= 3) {
+                                Log.e(TAG, "Error converting document ${doc.id}: ${e.message}")
+                            }
                             null
                         }
                     }
-                }
-                
-                Log.d(TAG, "Successfully fetched ${fetchedBikes.size} bikes from Firestore")
-                fetchedBikes.forEach { bike ->
-                    Log.d(TAG, "Bike: ${bike.id}, Name: ${bike.name}, Available: ${bike.isAvailable}, InUse: ${bike.isInUse}")
+                    
+                    // Summary logging instead of individual bike logging
+                    Log.d(TAG, "Successfully processed $successCount bikes, $errorCount errors")
+                    bikes
                 }
                 
                 _bikes.value = fetchedBikes
@@ -327,12 +333,27 @@ class BikeViewModel : ViewModel() {
                         if (snapshot != null) {
                             viewModelScope.launch(Dispatchers.Default) {
                                 try {
+                                    var successCount = 0
+                                    var errorCount = 0
+                                    
                                     // Process documents on background thread
                                     val bikesList = snapshot.documents.mapNotNull { document -> 
                                         try {
-                                            document.toObject(Bike::class.java)?.copy(id = document.id)
+                                            val data = document.data
+                                            if (data != null) {
+                                                val bike = FirestoreUtils.createBikeFromData(document.id, data)
+                                                successCount++
+                                                bike
+                                            } else {
+                                                errorCount++
+                                                null
+                                            }
                                         } catch (e: Exception) {
-                                            Log.e(TAG, "Error parsing bike data from Firestore: ${document.id}", e)
+                                            errorCount++
+                                            // Only log first error to reduce spam
+                                            if (errorCount == 1) {
+                                                Log.e(TAG, "Error parsing bike data from Firestore: ${document.id}", e)
+                                            }
                                             null
                                         }
                                     }
@@ -340,7 +361,10 @@ class BikeViewModel : ViewModel() {
                                     // Update UI on main thread
                                     withContext(Dispatchers.Main) {
                                         _bikes.value = bikesList
-                                        Log.d(TAG, "Updated bikes list: ${bikesList.size} bikes")
+                                        // Reduced logging frequency
+                                        if (successCount > 0 || errorCount > 0) {
+                                            Log.d(TAG, "Updated bikes list: $successCount bikes, $errorCount errors")
+                                        }
                                     }
                                 } catch (e: Exception) {
                                     Log.e(TAG, "Error processing bike updates", e)
@@ -382,8 +406,13 @@ class BikeViewModel : ViewModel() {
                     }
                     
                     if (bikeDoc.exists()) {
-                        val bike = bikeDoc.toObject(Bike::class.java)?.copy(id = bikeDoc.id)
-                        _selectedBike.value = bike
+                        val data = bikeDoc.data
+                        if (data != null) {
+                            val bike = FirestoreUtils.createBikeFromData(bikeDoc.id, data)
+                            _selectedBike.value = bike
+                        } else {
+                            _error.value = "Bike data is null"
+                        }
                     } else {
                         _error.value = "Bike not found"
                     }
@@ -433,8 +462,8 @@ class BikeViewModel : ViewModel() {
                         price = "₱$price/hr",
                         priceValue = price,
                         imageUrl = downloadUrl,
-                        latitude = location.latitude,
-                        longitude = location.longitude,
+                        _latitude = location.latitude,
+                        _longitude = location.longitude,
                         description = description,
                         isAvailable = true,
                         isInUse = false
@@ -538,7 +567,6 @@ class BikeViewModel : ViewModel() {
         return results[0] / 1000f // Distance in kilometers
     }
     
-    // Add missing fetchReviewsForBike method
     /**
      * Fetch reviews for a specific bike
      */
@@ -546,56 +574,106 @@ class BikeViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
+                    // Cancel any existing listener first
                     synchronized(reviewsLock) {
-                        // Cancel any existing listener
                         reviewsListener?.remove()
+                    }
+                    
+                    Log.d(TAG, "Fetching reviews for bike: $bikeId")
+                    
+                    // We need to check both review collections:
+                    // 1. Global reviews collection
+                    // 2. Bike-specific reviews subcollection
+                    
+                    val allReviews = mutableListOf<Review>()
+                    
+                    try {
+                        // 1. Query global reviews collection
+                        val globalReviewsQuery = firestore.collection("reviews")
+                            .whereEqualTo("bikeId", bikeId)
+                            .orderBy("timestamp", Query.Direction.DESCENDING)
                         
-                        // Create new listener for real-time reviews
+                        val globalSnapshot = globalReviewsQuery.get().await()
+                        val globalReviews = globalSnapshot.documents.mapNotNull { document ->
+                            try {
+                                document.toObject(Review::class.java)?.copy(id = document.id)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parsing global review: ${document.id}", e)
+                                null
+                            }
+                        }
+                        allReviews.addAll(globalReviews)
+                        Log.d(TAG, "Found ${globalReviews.size} reviews in global collection")
+                        
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error fetching global reviews", e)
+                    }
+                    
+                    try {
+                        // 2. Query bike-specific reviews subcollection
+                        val bikeReviewsQuery = firestore.collection("bikes")
+                            .document(bikeId)
+                            .collection("reviews")
+                            .orderBy("timestamp", Query.Direction.DESCENDING)
+                        
+                        val bikeSnapshot = bikeReviewsQuery.get().await()
+                        val bikeReviews = bikeSnapshot.documents.mapNotNull { document ->
+                            try {
+                                document.toObject(Review::class.java)?.copy(
+                                    id = document.id,
+                                    bikeId = bikeId // Ensure bikeId is set
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error parsing bike review: ${document.id}", e)
+                                null
+                            }
+                        }
+                        allReviews.addAll(bikeReviews)
+                        Log.d(TAG, "Found ${bikeReviews.size} reviews in bike subcollection")
+                        
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error fetching bike subcollection reviews", e)
+                    }
+                    
+                    // Remove duplicates based on review content and user (in case same review exists in multiple collections)
+                    val uniqueReviews = allReviews.distinctBy { "${it.userId}_${it.rating}_${it.comment}_${it.timestamp}" }
+                        .sortedByDescending { it.timestamp }
+                    
+                    // Update the state within synchronized block
+                    synchronized(reviewsLock) {
+                        _bikeReviews.value = uniqueReviews
+                        
+                        // Calculate average rating
+                        val averageRating = if (uniqueReviews.isNotEmpty()) {
+                            uniqueReviews.map { it.rating }.average().toFloat()
+                        } else {
+                            0f
+                        }
+                        _averageRating.value = averageRating
+                        
+                        Log.d(TAG, "Total unique reviews: ${uniqueReviews.size}, average rating: $averageRating")
+                        
+                        // Set up real-time listener for future updates (on global reviews collection)
                         reviewsListener = firestore.collection("reviews")
                             .whereEqualTo("bikeId", bikeId)
                             .orderBy("timestamp", Query.Direction.DESCENDING)
                             .addSnapshotListener { snapshot, error ->
-                                viewModelScope.launch {
-                                    if (error != null) {
-                                        Log.e(TAG, "Error listening for reviews", error)
-                                        return@launch
-                                    }
-                                    
-                                    if (snapshot != null) {
-                                        try {
-                                            val reviewsList = withContext(Dispatchers.Default) {
-                                                snapshot.documents.mapNotNull { document ->
-                                                    try {
-                                                        document.toObject(Review::class.java)?.copy(id = document.id)
-                                                    } catch (e: Exception) {
-                                                        Log.e(TAG, "Error parsing review data", e)
-                                                        null
-                                                    }
-                                                }
-                                            }
-                                            
-                                            _bikeReviews.value = reviewsList
-                                            
-                                            // Calculate average rating
-                                            val averageRating = if (reviewsList.isNotEmpty()) {
-                                                reviewsList.map { it.rating }.average().toFloat()
-                                            } else {
-                                                0f
-                                            }
-                                            _averageRating.value = averageRating
-                                            
-                                            Log.d(TAG, "Reviews updated: ${reviewsList.size} reviews, average rating: $averageRating")
-                                            
-                                        } catch (e: Exception) {
-                                            Log.e(TAG, "Error processing reviews", e)
-                                        }
-                                    }
+                                if (error != null) {
+                                    Log.e(TAG, "Error in reviews real-time listener", error)
+                                    return@addSnapshotListener
                                 }
+                                
+                                // Re-fetch all reviews when there's a change
+                                fetchReviewsForBike(bikeId)
                             }
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error setting up reviews listener", e)
+                Log.e(TAG, "Error setting up reviews fetch", e)
+                synchronized(reviewsLock) {
+                    _bikeReviews.value = emptyList()
+                    _averageRating.value = 0f
+                }
             }
         }
     }
@@ -1335,25 +1413,41 @@ class BikeViewModel : ViewModel() {
             auth.currentUser?.let { user ->
                 viewModelScope.launch {
                     try {
-                        val rideRating = mapOf(
-                            "rideId" to ride.id,
+                        val timestamp = System.currentTimeMillis()
+                        
+                        // Create review data for the bike reviews collection
+                        val reviewData = mapOf(
                             "userId" to user.uid,
                             "bikeId" to ride.bikeId,
-                            "rating" to rating,
-                            "feedback" to feedback,
-                            "timestamp" to System.currentTimeMillis()
+                            "rideId" to ride.id,
+                            "rating" to rating.toFloat(), // Convert to Float for consistency
+                            "comment" to feedback,
+                            "timestamp" to timestamp,
+                            "userName" to (user.displayName ?: user.email ?: "Anonymous User")
                         )
                         
-                        // Save rating to Firestore
-                        firestore.collection("rideRatings")
-                            .document(ride.id)
-                            .set(rideRating)
+                        // Generate unique review ID
+                        val reviewId = firestore.collection("reviews").document().id
+                        
+                        // Save as review in global reviews collection
+                        firestore.collection("reviews")
+                            .document(reviewId)
+                            .set(reviewData)
                             .await()
                         
-                        // Update ride with rating in Firestore
+                        // Also save review under the specific bike's reviews subcollection
+                        firestore.collection("bikes")
+                            .document(ride.bikeId)
+                            .collection("reviews")
+                            .document(reviewId)
+                            .set(reviewData)
+                            .await()
+                        
+                        // Update ride with rating in Firestore (but don't save to rideRatings)
                         val rideUpdate = mapOf(
                             "rating" to rating,
-                            "feedback" to feedback
+                            "feedback" to feedback,
+                            "reviewId" to reviewId
                         )
                         firestore.collection("rides").document(ride.id).update(rideUpdate).await()
                         
@@ -1370,10 +1464,25 @@ class BikeViewModel : ViewModel() {
                             _completedRide.value = null
                         }
                         
-                        Log.d(TAG, "Ride rating submitted successfully")
+                        Log.d(TAG, "Ride rating and review submitted successfully to reviews collections")
                     
                     } catch (e: Exception) {
                         Log.e(TAG, "Error submitting ride rating", e)
+                        
+                        // Handle specific Firebase errors
+                        val errorMessage = when {
+                            e.message?.contains("PERMISSION_DENIED") == true -> 
+                                "Permission denied. Please check your authentication."
+                            e.message?.contains("INVALID_ARGUMENT") == true -> 
+                                "Invalid rating data. Please try again."
+                            e.message?.contains("UNAVAILABLE") == true -> 
+                                "Service temporarily unavailable. Please try again later."
+                            else -> "Failed to submit rating: ${e.message}"
+                        }
+                        
+                        withContext(Dispatchers.Main) {
+                            _error.value = errorMessage
+                        }
                     }
                 }
             }
@@ -1527,21 +1636,25 @@ class BikeViewModel : ViewModel() {
                         .orderBy("startDate", Query.Direction.ASCENDING)
                         .get()
                         .await()
-                                }
+                }
                 
+                // Process bookings outside synchronized block
+                val bookingsList = bookingsSnapshot.documents.mapNotNull { document ->
+                    try {
+                        document.toObject(Booking::class.java)?.copy(id = document.id)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error parsing booking data", e)
+                        null
+                    }
+                }
+                
+                // Only protect state updates with synchronized
                 synchronized(bookingsLock) {
-                    val bookingsList = bookingsSnapshot.documents.mapNotNull { document ->
-                        try {
-                            document.toObject(Booking::class.java)?.copy(id = document.id)
-                            } catch (e: Exception) {
-                            Log.e(TAG, "Error parsing booking data", e)
-                                null
-                        }
+                    _bikeBookings.value = bookingsList
                 }
                 
-                    _bikeBookings.value = bookingsList
-                    Log.d(TAG, "Fetched ${bookingsList.size} bookings for bike: $bikeId")
-                }
+                Log.d(TAG, "Fetched ${bookingsList.size} bookings for bike: $bikeId")
+                
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching bookings for bike", e)
                 _bookingError.value = "Failed to load bookings: ${e.message}"
@@ -1673,14 +1786,26 @@ class BikeViewModel : ViewModel() {
                     )
                     
                     withContext(Dispatchers.IO) {
+                        // Save to global reviews collection
                         firestore.collection("reviews")
+                            .document(reviewId)
+                            .set(review)
+                            .await()
+                        
+                        // Also save to bike's reviews subcollection
+                        firestore.collection("bikes")
+                            .document(bikeId)
+                            .collection("reviews")
                             .document(reviewId)
                             .set(review)
                             .await()
                     }
                     
+                    // Refresh reviews for this bike
+                    fetchReviewsForBike(bikeId)
+                    
                     onSuccess()
-                    Log.d(TAG, "Review submitted successfully: $reviewId")
+                    Log.d(TAG, "Review submitted successfully to both collections: $reviewId")
                         
                     } catch (e: Exception) {
                     Log.e(TAG, "Error submitting review", e)
@@ -1704,17 +1829,26 @@ class BikeViewModel : ViewModel() {
                 viewModelScope.launch {
                     try {
                 withContext(Dispatchers.IO) {
+                    // Delete from global reviews collection
                     firestore.collection("reviews")
                         .document(reviewId)
                         .delete()
                             .await()
+                    
+                    // Also delete from bike's reviews subcollection
+                    firestore.collection("bikes")
+                        .document(bikeId)
+                        .collection("reviews")
+                        .document(reviewId)
+                        .delete()
+                        .await()
                 }
                 
                 // Refresh reviews for the bike after deletion
                 fetchReviewsForBike(bikeId)
                 
                 onSuccess()
-                Log.d(TAG, "Review deleted successfully: $reviewId")
+                Log.d(TAG, "Review deleted successfully from both collections: $reviewId")
                         
                     } catch (e: Exception) {
                 Log.e(TAG, "Error deleting review", e)
