@@ -702,9 +702,9 @@ const RealTimeTrackingDashboard = () => {
       const routeSummary = {
         rideId: ride.id,
         userId: ride.userId,
-        userName: ride.user?.name || 'Unknown User',
+        userName: ride.user?.fullName || ride.user?.displayName || ride.user?.name || 'Unknown User',
         userEmail: ride.user?.email || 'No email',
-        userPhone: ride.user?.phone || 'No phone',
+        userPhone: ride.user?.phoneNumber || ride.user?.phone || 'No phone',
         bikeId: ride.bikeId,
         status: ride.status,
         startTime: ride.startTime,
@@ -839,18 +839,18 @@ const RealTimeTrackingDashboard = () => {
                 fontWeight: 'bold',
                 fontSize: '14px'
               }}>
-                {getUserInitials(selectedHistoryRide.user?.name)}
+                {getUserInitials(selectedHistoryRide.user?.fullName || selectedHistoryRide.user?.displayName || selectedHistoryRide.user?.name)}
               </div>
               <div>
                 <div style={{ fontWeight: 'bold', fontSize: '16px', color: colors.darkGray }}>
-                  {selectedHistoryRide.user?.name || 'Unknown User'}
+                  {selectedHistoryRide.user?.fullName || selectedHistoryRide.user?.displayName || selectedHistoryRide.user?.name || 'Unknown User'}
                 </div>
                 <div style={{ fontSize: '14px', color: colors.mediumGray }}>
                   {selectedHistoryRide.user?.email || 'No email'}
                 </div>
-                {selectedHistoryRide.user?.phone && (
+                {(selectedHistoryRide.user?.phoneNumber || selectedHistoryRide.user?.phone) && (
                   <div style={{ fontSize: '13px', color: colors.mediumGray, marginTop: '2px' }}>
-                    📞 {selectedHistoryRide.user.phone}
+                    📞 {selectedHistoryRide.user?.phoneNumber || selectedHistoryRide.user?.phone}
                   </div>
                 )}
               </div>
@@ -1013,7 +1013,7 @@ const RealTimeTrackingDashboard = () => {
                     color: colors.info,
                     marginBottom: '4px'
                   }}>
-                    {formatDuration(routeData.statistics?.duration || 0)}
+                    {formatTime(routeData.statistics?.duration || 0)}
                   </div>
                   <div style={{
                     fontSize: '12px',
@@ -1547,7 +1547,7 @@ const RealTimeTrackingDashboard = () => {
                         fontSize: '14px',
                         fontWeight: 'bold'
                       }}>
-                        {ride.userName ? ride.userName.charAt(0).toUpperCase() : 'U'}
+                        {getUserInitials(ride.user?.fullName || ride.user?.displayName || ride.user?.name)}
                       </div>
                       <div>
                         <div style={{ 
@@ -1555,7 +1555,7 @@ const RealTimeTrackingDashboard = () => {
                           fontSize: '15px',
                           color: colors.darkGray
                         }}>
-                          {ride.userName || 'Unknown User'}
+                          {ride.user?.fullName || ride.user?.displayName || ride.user?.name || 'Unknown User'}
                         </div>
                         <div style={{ 
                           fontSize: '12px', 
@@ -1623,7 +1623,7 @@ const RealTimeTrackingDashboard = () => {
                       color: colors.info,
                       marginBottom: '2px'
                     }}>
-                      {ride.duration ? formatDuration(ride.duration) : 'N/A'}
+                      {ride.duration ? formatTime(ride.duration) : 'N/A'}
                     </div>
                     <div style={{ fontSize: '10px', color: colors.mediumGray }}>⏱️ Duration</div>
                   </div>
@@ -2255,7 +2255,7 @@ const RealTimeTrackingDashboard = () => {
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
                               <strong>⏱️ Duration:</strong><br />
                               <span style={{ color: colors.pineGreen, fontWeight: 'bold' }}>
-                                {formatDuration(selectedRide.startTime)}
+                                {selectedRide.duration ? formatTime(selectedRide.duration) : formatDuration(selectedRide.startTime)}
                               </span>
                             </p>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
@@ -2367,7 +2367,7 @@ const RealTimeTrackingDashboard = () => {
                       <RideInfo>
                         <div style={{ fontWeight: 'bold' }}>{ride.userName}</div>
                         <div style={{ fontSize: '14px', color: colors.mediumGray }}>
-                          Bike: {ride.bikeId} • Duration: {formatDuration(ride.startTime)}
+                          Bike: {ride.bikeId} • Duration: {ride.duration ? formatTime(ride.duration) : formatDuration(ride.startTime)}
                         </div>
                       </RideInfo>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

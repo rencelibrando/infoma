@@ -4,566 +4,838 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import styled from 'styled-components';
+import { FiSearch, FiFilter, FiDownload, FiUpload, FiCheck, FiX, FiEye, FiSettings, FiDollarSign, FiClock, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 
-// Black and white theme colors to match BookingManagement
+// Pine green theme to match BikesList
 const colors = {
-  primary: '#000000',
-  secondary: '#333333',
-  tertiary: '#666666',
-  quaternary: '#999999',
-  lightGray: '#f8f9fa',
-  mediumGray: '#e9ecef',
-  darkGray: '#495057',
+  pineGreen: '#1D3C34',
+  lightPineGreen: '#2D5A4C',
+  darkGray: '#333333',
+  mediumGray: '#666666',
+  lightGray: '#f2f2f2',
   white: '#ffffff',
-  success: '#28a745',
-  warning: '#ffc107',
-  danger: '#dc3545',
-  info: '#17a2b8',
-  border: '#dee2e6'
+  accent: '#FF8C00',
+  success: '#4CAF50',
+  danger: '#d32f2f',
+  warning: '#FFC107',
+  lightRed: '#ffebee',
+  lightGreen: '#e8f5e9',
+  lightBlue: '#e3f2fd'
 };
 
 const Container = styled.div`
-  padding: 16px;
-  background-color: ${colors.white};
+  padding: 20px;
+  background-color: ${colors.lightGray};
   min-height: 100vh;
 `;
 
-const PageHeader = styled.div`
+const Header = styled.div`
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 16px;
-  border-bottom: 2px solid ${colors.border};
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
 `;
 
 const Title = styled.h1`
-  color: ${colors.primary};
+  color: ${colors.darkGray};
   margin: 0;
-  font-size: 2rem;
+  font-size: 28px;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 `;
 
-// Updated styled components for payment settings with black-and-white theme
-const PaymentSettingsSection = styled.div`
-  background: ${colors.white};
-  border: 2px solid ${colors.border};
+const HeaderActions = styled.div`
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+`;
+
+const HeaderButton = styled.button`
+  padding: 12px 20px;
+  background-color: ${props => props.secondary ? colors.lightGray : colors.pineGreen};
+  color: ${props => props.secondary ? colors.darkGray : colors.white};
+  border: ${props => props.secondary ? `2px solid ${colors.mediumGray}` : 'none'};
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
+    background-color: ${props => props.secondary ? colors.white : colors.lightPineGreen};
+  }
+`;
+
+// Stats Section
+const StatsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+`;
+
+const StatCard = styled.div`
+  background: linear-gradient(135deg, ${colors.white} 0%, #fafafa 100%);
   border-radius: 12px;
   padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(29, 60, 52, 0.08);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(29, 60, 52, 0.15);
+  }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: ${props => {
+      switch (props.type) {
+        case 'total': return `linear-gradient(90deg, ${colors.pineGreen}, ${colors.lightPineGreen})`;
+        case 'pending': return `linear-gradient(90deg, ${colors.warning}, #ffcc02)`;
+        case 'confirmed': return `linear-gradient(90deg, ${colors.success}, #45a049)`;
+        case 'rejected': return `linear-gradient(90deg, ${colors.danger}, #c62828)`;
+        default: return `linear-gradient(90deg, ${colors.pineGreen}, ${colors.lightPineGreen})`;
+      }
+    }};
+  }
+`;
+
+const StatHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+`;
+
+const StatIcon = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: ${props => {
+    switch (props.type) {
+      case 'total': return 'rgba(29, 60, 52, 0.1)';
+      case 'pending': return 'rgba(255, 193, 7, 0.1)';
+      case 'confirmed': return 'rgba(76, 175, 80, 0.1)';
+      case 'rejected': return 'rgba(211, 47, 47, 0.1)';
+      default: return 'rgba(29, 60, 52, 0.1)';
+    }
+  }};
+  color: ${props => {
+    switch (props.type) {
+      case 'total': return colors.pineGreen;
+      case 'pending': return colors.warning;
+      case 'confirmed': return colors.success;
+      case 'rejected': return colors.danger;
+      default: return colors.pineGreen;
+    }
+  }};
+`;
+
+const StatValue = styled.div`
+  font-size: 24px;
+  font-weight: 700;
+  color: ${colors.darkGray};
+  margin-bottom: 4px;
+`;
+
+const StatLabel = styled.div`
+  font-size: 14px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+`;
+
+// Filters Section
+const FiltersCard = styled.div`
+  background: ${colors.white};
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(29, 60, 52, 0.08);
+`;
+
+const FiltersHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: ${colors.darkGray};
+`;
+
+const FiltersRow = styled.div`
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+`;
+
+const FilterGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+`;
+
+const FilterLabel = styled.label`
+  font-size: 12px;
+  font-weight: 600;
+  color: ${colors.mediumGray};
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const FilterSelect = styled.select`
+  padding: 10px 12px;
+  border: 2px solid rgba(29, 60, 52, 0.1);
+  border-radius: 8px;
+  background-color: ${colors.white};
+  color: ${colors.darkGray};
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 0 0 3px rgba(29, 60, 52, 0.1);
+  }
+`;
+
+const SearchInput = styled.input`
+  padding: 10px 12px;
+  border: 2px solid rgba(29, 60, 52, 0.1);
+  border-radius: 8px;
+  background-color: ${colors.white};
+  color: ${colors.darkGray};
+  font-weight: 500;
+  min-width: 250px;
+  transition: all 0.2s ease;
+  
+  &:focus {
+    outline: none;
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 0 0 3px rgba(29, 60, 52, 0.1);
+  }
+  
+  &::placeholder {
+    color: ${colors.mediumGray};
+  }
+`;
+
+// Payment Settings Section
+const PaymentSettingsCard = styled.div`
+  background: ${colors.white};
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(29, 60, 52, 0.08);
+`;
+
+const SettingsHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
 `;
 
 const SettingsTitle = styled.h2`
-  color: ${colors.primary};
-  margin: 0 0 16px 0;
-  font-size: 1.5rem;
+  color: ${colors.darkGray};
+  margin: 0;
+  font-size: 20px;
   font-weight: 600;
-  letter-spacing: -0.025em;
 `;
 
 const SettingsGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
-  align-items: start;
-
+  
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
-    gap: 20px;
   }
 `;
 
-const SettingCard = styled.div`
-  background: ${colors.lightGray};
-  border: 1px solid ${colors.border};
-  border-radius: 8px;
-  padding: 20px;
-  transition: all 0.2s ease;
-  min-height: 280px;
+const SettingGroup = styled.div`
   display: flex;
   flex-direction: column;
-
-  &:hover {
-    box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
-  }
+  gap: 12px;
 `;
 
 const SettingLabel = styled.label`
-  display: block;
+  font-size: 14px;
   font-weight: 600;
-  color: ${colors.secondary};
-  margin-bottom: 8px;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: ${colors.darkGray};
+  margin-bottom: 6px;
 `;
 
 const SettingInput = styled.input`
-  width: 100%;
   padding: 12px 16px;
-  border: 2px solid ${colors.border};
+  border: 2px solid rgba(29, 60, 52, 0.1);
   border-radius: 8px;
-  font-size: 14px;
-  box-sizing: border-box;
   background-color: ${colors.white};
-  color: ${colors.primary};
-  transition: all 0.2s ease;
+  color: ${colors.darkGray};
   font-weight: 500;
-
+  transition: all 0.2s ease;
+  
   &:focus {
     outline: none;
-    border-color: ${colors.primary};
-    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1);
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 0 0 3px rgba(29, 60, 52, 0.1);
   }
-
+  
   &::placeholder {
-    color: ${colors.quaternary};
-    font-weight: 400;
+    color: ${colors.mediumGray};
   }
 `;
 
-const FileInputWrapper = styled.div`
-  position: relative;
-  display: inline-block;
-  width: 100%;
+const FileUploadArea = styled.div`
+  border: 2px dashed rgba(29, 60, 52, 0.2);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, ${colors.white} 0%, #fafafa 100%);
+  
+  &:hover {
+    border-color: ${colors.pineGreen};
+    background: ${colors.lightGray};
+    transform: translateY(-2px);
+  }
 `;
 
 const FileInput = styled.input`
   display: none;
 `;
 
-const FileInputLabel = styled.label`
-  display: block;
-  width: 100%;
-  padding: 16px;
-  border: 2px dashed ${colors.border};
-  border-radius: 8px;
-  text-align: center;
-  cursor: pointer;
-  background-color: ${colors.white};
-  color: ${colors.secondary};
-  font-weight: 500;
-  transition: all 0.2s ease;
-  font-size: 14px;
-
-  &:hover {
-    border-color: ${colors.primary};
-    background-color: ${colors.lightGray};
-    color: ${colors.primary};
-  }
-
-  &:active {
-    transform: translateY(1px);
-  }
-`;
-
-const CurrentQRPreview = styled.div`
-  margin-top: 16px;
-  text-align: center;
-  flex: 1;
+const QRPreview = styled.div`
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
   gap: 12px;
+  margin-top: 12px;
 `;
 
 const QRImage = styled.img`
-  max-width: 160px;
-  width: 100%;
-  height: auto;
+  max-width: 120px;
   border-radius: 8px;
-  border: 2px solid ${colors.border};
-  transition: all 0.2s ease;
+  border: 2px solid rgba(29, 60, 52, 0.1);
+  transition: all 0.3s ease;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-
+  
   &:hover {
-    border-color: ${colors.primary};
-    transform: scale(1.02);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    transform: scale(1.05);
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
   }
 `;
 
 const SaveButton = styled.button`
-  background-color: ${colors.primary};
+  background: linear-gradient(135deg, ${colors.pineGreen} 0%, ${colors.lightPineGreen} 100%);
   color: ${colors.white};
   border: none;
-  padding: 10px 18px;
-  border-radius: 6px;
+  padding: 12px 24px;
+  border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
   margin-top: 16px;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   width: 100%;
-
+  
   &:hover {
-    background-color: ${colors.secondary};
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.25);
   }
-
+  
   &:disabled {
-    background-color: ${colors.quaternary};
+    background: ${colors.mediumGray};
     cursor: not-allowed;
     transform: none;
     box-shadow: none;
   }
 `;
 
-const SuccessMessage = styled.div`
-  background-color: ${colors.success};
-  color: ${colors.white};
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-top: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: center;
-  border: 2px solid ${colors.success};
-`;
-
-const ErrorMessage = styled.div`
-  background-color: ${colors.danger};
-  color: ${colors.white};
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-top: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  text-align: center;
-  border: 2px solid ${colors.danger};
-`;
-
-const LoadingSpinner = styled.div`
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 40vh;
-  font-size: 16px;
-  color: ${colors.secondary};
-`;
-
-const StatsContainer = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 20px;
-`;
-
-const StatCard = styled.div`
+// Payments List Section
+const PaymentsCard = styled.div`
   background: ${colors.white};
-  border: 2px solid ${colors.border};
-  border-radius: 8px;
-  padding: 16px;
-  text-align: center;
-  transition: all 0.2s ease;
-
-  &:hover {
-    border-color: ${colors.primary};
-    transform: translateY(-2px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  }
-`;
-
-const StatValue = styled.div`
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: ${colors.primary};
-  margin-bottom: 4px;
-`;
-
-const StatLabel = styled.div`
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: ${colors.secondary};
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-`;
-
-const FilterContainer = styled.div`
-  display: flex;
-  gap: 12px;
-  margin-bottom: 20px;
-  flex-wrap: wrap;
-  align-items: center;
-`;
-
-const FilterSelect = styled.select`
-  padding: 6px 12px;
-  border: 2px solid ${colors.border};
-  border-radius: 6px;
-  background-color: ${colors.white};
-  color: ${colors.primary};
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  &:focus {
-    outline: none;
-    border-color: ${colors.primary};
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-  }
-`;
-
-const SearchInput = styled.input`
-  padding: 6px 12px;
-  border: 2px solid ${colors.border};
-  border-radius: 6px;
-  background-color: ${colors.white};
-  color: ${colors.primary};
-  font-weight: 500;
-  min-width: 200px;
-  transition: all 0.2s ease;
-
-  &:focus {
-    outline: none;
-    border-color: ${colors.primary};
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
-  }
-
-  &::placeholder {
-    color: ${colors.quaternary};
-  }
-`;
-
-const PaymentsTable = styled.div`
-  background: ${colors.white};
-  border: 2px solid ${colors.border};
-  border-radius: 8px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(29, 60, 52, 0.08);
   overflow: hidden;
-  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
 `;
 
-const TableHeader = styled.div`
+const PaymentsHeader = styled.div`
+  padding: 20px;
+  border-bottom: 1px solid rgba(29, 60, 52, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const PaymentsTitle = styled.h3`
+  margin: 0;
+  color: ${colors.darkGray};
+  font-size: 18px;
+  font-weight: 600;
+`;
+
+const PaymentsGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 120px;
-  background: ${colors.lightGray};
-  border-bottom: 2px solid ${colors.border};
+  gap: 1px;
+  background: rgba(29, 60, 52, 0.05);
+`;
+
+const PaymentCard = styled.div`
+  background: ${colors.white};
+  padding: 16px;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  border: 2px solid transparent;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  
+  &:hover {
+    background: ${colors.lightGray};
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(29, 60, 52, 0.15);
+    border-color: ${colors.pineGreen};
+  }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: 12px 0 0 12px;
+    background: ${props => {
+      switch (props.status) {
+        case 'PENDING': return colors.warning;
+        case 'CONFIRMED': return colors.success;
+        case 'REJECTED': return colors.danger;
+        default: return colors.mediumGray;
+      }
+    }};
+  }
+  
+  ${props => props.expanded && `
+    background: ${colors.lightGray};
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 8px 25px rgba(29, 60, 52, 0.15);
+  `}
+`;
+
+const PaymentCardHeader = styled.div`
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: ${props => props.expanded ? '16px' : '0'};
+  padding-bottom: ${props => props.expanded ? '12px' : '0'};
+  border-bottom: ${props => props.expanded ? `2px solid rgba(29, 60, 52, 0.1)` : 'none'};
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+  }
+`;
+
+const PaymentUser = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+`;
+
+const UserName = styled.div`
   font-weight: 700;
-  font-size: 0.75rem;
+  color: ${colors.darkGray};
+  font-size: 16px;
+  line-height: 1.2;
+`;
+
+const UserEmail = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+  line-height: 1.2;
+`;
+
+const PaymentInfo = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+  min-width: 100px;
+`;
+
+const PaymentAmount = styled.div`
+  font-size: 18px;
+  font-weight: 700;
+  color: ${colors.pineGreen};
+  line-height: 1.2;
+`;
+
+const PaymentDate = styled.div`
+  font-size: 11px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+`;
+
+const PaymentBike = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+  min-width: 120px;
+`;
+
+const BikeType = styled.div`
+  font-size: 14px;
+  font-weight: 600;
+  color: ${colors.darkGray};
+  line-height: 1.2;
+`;
+
+const BikeDuration = styled.div`
+  font-size: 11px;
+  color: ${colors.mediumGray};
+  font-weight: 500;
+`;
+
+const PaymentScreenshot = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 50px;
+`;
+
+const ScreenshotThumbnail = styled.img`
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid rgba(29, 60, 52, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.1);
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
+  }
+`;
+
+const NoScreenshot = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px dashed rgba(29, 60, 52, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: ${colors.mediumGray};
+  background: rgba(29, 60, 52, 0.05);
+`;
+
+const StatusAndActions = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 120px;
+`;
+
+const ExpandIndicator = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: ${colors.mediumGray};
+  font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: ${colors.secondary};
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+  cursor: pointer;
   
-  @media (max-width: 1200px) {
-    display: none;
+  &::after {
+    content: '${props => props.expanded ? '▼' : '▶'}';
+    font-size: 8px;
+    transition: all 0.3s ease;
+  }
+  
+  &:hover {
+    color: ${colors.pineGreen};
   }
 `;
 
-const HeaderCell = styled.div`
-  padding: 12px 16px;
-  border-right: 1px solid ${colors.border};
-  
-  &:last-child {
-    border-right: none;
-  }
+const PaymentDetails = styled.div`
+  max-height: ${props => props.expanded ? '1000px' : '0'};
+  opacity: ${props => props.expanded ? '1' : '0'};
+  overflow: hidden;
+  transition: all 0.4s ease;
+  margin-top: ${props => props.expanded ? '16px' : '0'};
 `;
 
-const TableRow = styled.div`
+const DetailsGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 120px;
-  border-bottom: 1px solid ${colors.border};
+  grid-template-columns: 2fr 3fr;
+  gap: 20px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+`;
+
+const UserInfoSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(29, 60, 52, 0.05) 0%, rgba(29, 60, 52, 0.02) 100%);
+  border-radius: 10px;
+  border: 1px solid rgba(29, 60, 52, 0.1);
+`;
+
+const PaymentDetailsSection = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+`;
+
+const InfoItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: rgba(29, 60, 52, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(29, 60, 52, 0.08);
   transition: all 0.2s ease;
   
   &:hover {
-    background-color: ${colors.lightGray};
-  }
-  
-  &:last-child {
-    border-bottom: none;
-  }
-  
-  @media (max-width: 1200px) {
-    display: block;
-    padding: 16px;
-    border-bottom: 2px solid ${colors.border};
-    
-    &:hover {
-      background-color: ${colors.lightGray};
-    }
+    background: rgba(29, 60, 52, 0.05);
+    border-color: rgba(29, 60, 52, 0.15);
   }
 `;
 
-const TableCell = styled.div`
-  padding: 12px 16px;
-  border-right: 1px solid ${colors.border};
-  display: flex;
-  align-items: center;
-  
-  &:last-child {
-    border-right: none;
-  }
-  
-  @media (max-width: 1200px) {
-    border-right: none;
-    padding: 6px 0;
-    display: block;
-    
-    &:before {
-      content: "${props => props.label}: ";
-      font-weight: 700;
-      color: ${colors.secondary};
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      display: inline-block;
-      min-width: 100px;
-    }
-    
-    &:last-child:before {
-      content: "Actions: ";
-    }
-  }
-`;
-
-const PaymentInfoCard = styled.div`
-  width: 100%;
-  
-  @media (max-width: 1200px) {
-    display: inline-block;
-    margin-left: 8px;
-  }
-`;
-
-const PaymentInfoLabel = styled.div`
-  font-size: 0.7rem;
+const InfoLabel = styled.span`
+  font-size: 10px;
+  color: ${colors.mediumGray};
   font-weight: 600;
-  color: ${colors.tertiary};
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.8px;
   margin-bottom: 2px;
-  
-  @media (max-width: 1200px) {
-    display: none;
-  }
 `;
 
-const PaymentInfoValue = styled.div`
-  font-size: 0.85rem;
+const InfoValue = styled.span`
+  font-size: 13px;
+  color: ${colors.darkGray};
   font-weight: 600;
-  color: ${colors.primary};
+  line-height: 1.3;
   word-break: break-word;
 `;
 
-const DetailLabel = styled.div`
-  font-size: 0.75rem;
+const FullScreenshotSection = styled.div`
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  background: rgba(29, 60, 52, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(29, 60, 52, 0.08);
+`;
+
+const FullScreenshot = styled.img`
+  max-width: 200px;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 2px solid rgba(29, 60, 52, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: scale(1.05);
+    border-color: ${colors.pineGreen};
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
+  }
+`;
+
+const PaymentActions = styled.div`
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+`;
+
+const ActionButton = styled.button`
+  padding: 8px 16px;
+  border: 2px solid;
+  border-radius: 6px;
   font-weight: 600;
-  color: ${colors.secondary};
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 8px;
-  text-align: center;
+  letter-spacing: 0.5px;
+  
+  ${props => {
+    if (props.variant === 'confirm') {
+      return `
+        background-color: ${colors.success};
+        color: ${colors.white};
+        border-color: ${colors.success};
+        
+        &:hover {
+          background-color: transparent;
+          color: ${colors.success};
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(76, 175, 80, 0.25);
+        }
+      `;
+    } else if (props.variant === 'reject') {
+      return `
+        background-color: ${colors.danger};
+        color: ${colors.white};
+        border-color: ${colors.danger};
+        
+        &:hover {
+          background-color: transparent;
+          color: ${colors.danger};
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(211, 47, 47, 0.25);
+        }
+      `;
+    } else {
+      return `
+        background-color: ${colors.pineGreen};
+        color: ${colors.white};
+        border-color: ${colors.pineGreen};
+        
+        &:hover {
+          background-color: transparent;
+          color: ${colors.pineGreen};
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(29, 60, 52, 0.25);
+        }
+      `;
+    }
+  }}
+  
+  &:disabled {
+    background-color: ${colors.mediumGray};
+    color: ${colors.white};
+    border-color: ${colors.mediumGray};
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    
+    &:hover {
+      background-color: ${colors.mediumGray};
+      color: ${colors.white};
+      transform: none;
+      box-shadow: none;
+    }
+  }
+`;
+
+const PaymentStatus = styled.span`
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: ${props => {
+    switch (props.status) {
+      case 'PENDING': return 'rgba(255, 193, 7, 0.1)';
+      case 'CONFIRMED': return 'rgba(76, 175, 80, 0.1)';
+      case 'REJECTED': return 'rgba(211, 47, 47, 0.1)';
+      default: return 'rgba(102, 102, 102, 0.1)';
+    }
+  }};
+  color: ${props => {
+    switch (props.status) {
+      case 'PENDING': return colors.warning;
+      case 'CONFIRMED': return colors.success;
+      case 'REJECTED': return colors.danger;
+      default: return colors.mediumGray;
+    }
+  }};
+  border: 1px solid ${props => {
+    switch (props.status) {
+      case 'PENDING': return 'rgba(255, 193, 7, 0.3)';
+      case 'CONFIRMED': return 'rgba(76, 175, 80, 0.3)';
+      case 'REJECTED': return 'rgba(211, 47, 47, 0.3)';
+      default: return 'rgba(102, 102, 102, 0.3)';
+    }
+  }};
 `;
 
 const StatusBadge = styled.span`
   padding: 4px 8px;
   border-radius: 12px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  text-align: center;
-  border: 2px solid;
-  background-color: ${props => {
-    switch (props.status) {
-      case 'PENDING': return colors.warning;
-      case 'CONFIRMED': return colors.success;
-      case 'REJECTED': return colors.danger;
-      default: return colors.quaternary;
-    }
-  }};
-  color: ${colors.white};
-  border-color: ${props => {
-    switch (props.status) {
-      case 'PENDING': return colors.warning;
-      case 'CONFIRMED': return colors.success;
-      case 'REJECTED': return colors.danger;
-      default: return colors.quaternary;
-    }
-  }};
-`;
-
-const ScreenshotContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const ScreenshotImage = styled.img`
-  width: 40px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 2px solid ${colors.border};
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  &:hover {
-    border-color: ${colors.primary};
-    transform: scale(1.05);
-  }
-`;
-
-const ActionButtons = styled.div`
-  display: flex;
-  gap: 6px;
-  flex-direction: column;
-
-  @media (max-width: 1200px) {
-    flex-direction: row;
-    justify-content: flex-start;
-    margin-left: 8px;
-  }
-`;
-
-const ActionButton = styled.button`
-  padding: 6px 12px;
-  border: 2px solid;
-  border-radius: 4px;
+  font-size: 10px;
   font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  
-  ${props => props.variant === 'confirm' ? `
-    background-color: ${colors.success};
-    color: ${colors.white};
-    border-color: ${colors.success};
-    
-    &:hover {
-      background-color: transparent;
-      color: ${colors.success};
+  letter-spacing: 0.5px;
+  transition: all 0.2s ease;
+  background: ${props => {
+    switch (props.status) {
+      case 'PENDING': return 'rgba(255, 193, 7, 0.1)';
+      case 'CONFIRMED': return 'rgba(76, 175, 80, 0.1)';
+      case 'REJECTED': return 'rgba(211, 47, 47, 0.1)';
+      default: return 'rgba(102, 102, 102, 0.1)';
     }
-  ` : `
-    background-color: ${colors.danger};
-    color: ${colors.white};
-    border-color: ${colors.danger};
-    
-    &:hover {
-      background-color: transparent;
-      color: ${colors.danger};
+  }};
+  color: ${props => {
+    switch (props.status) {
+      case 'PENDING': return colors.warning;
+      case 'CONFIRMED': return colors.success;
+      case 'REJECTED': return colors.danger;
+      default: return colors.mediumGray;
     }
-  `}
-
-  &:disabled {
-    background-color: ${colors.quaternary};
-    color: ${colors.white};
-    border-color: ${colors.quaternary};
-    cursor: not-allowed;
-    
-    &:hover {
-      background-color: ${colors.quaternary};
-      color: ${colors.white};
+  }};
+  border: 1px solid ${props => {
+    switch (props.status) {
+      case 'PENDING': return 'rgba(255, 193, 7, 0.3)';
+      case 'CONFIRMED': return 'rgba(76, 175, 80, 0.3)';
+      case 'REJECTED': return 'rgba(211, 47, 47, 0.3)';
+      default: return 'rgba(102, 102, 102, 0.3)';
     }
-  }
+  }};
 `;
 
 const Modal = styled.div`
@@ -572,221 +844,129 @@ const Modal = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.8);
+  background-color: rgba(0, 0, 0, 0.6);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
 `;
 
 const ModalContent = styled.div`
   background: ${colors.white};
-  padding: 20px;
-  border-radius: 8px;
-  max-width: 80vw;
-  max-height: 80vh;
+  border-radius: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
   position: relative;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 `;
 
 const CloseButton = styled.button`
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 16px;
+  right: 16px;
   background: ${colors.danger};
   color: ${colors.white};
   border: none;
   border-radius: 50%;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
-  font-weight: 700;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.3s ease;
+  z-index: 1001;
   
   &:hover {
-    background: ${colors.secondary};
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(211, 47, 47, 0.3);
   }
 `;
 
 const ModalImage = styled.img`
-  max-width: 400px;
-  max-height: 400px;
+  max-width: 600px;
+  max-height: 600px;
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: 8px;
+  padding: 20px;
+`;
+
+const LoadingContainer = styled.div`
+  text-align: center;
+  padding: 60px 20px;
+  color: ${colors.mediumGray};
+  
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(29, 60, 52, 0.1);
+    border-top: 3px solid ${colors.pineGreen};
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  div {
+    font-size: 16px;
+    font-weight: 500;
+  }
+`;
+
+const SuccessMessage = styled.div`
+  background: ${colors.lightGreen};
+  color: ${colors.success};
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-weight: 500;
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const ErrorMessage = styled.div`
+  background: ${colors.lightRed};
+  color: ${colors.danger};
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-weight: 500;
+  border: 1px solid rgba(211, 47, 47, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 `;
 
 const EmptyState = styled.div`
   text-align: center;
-  padding: 40px 16px;
-  color: ${colors.tertiary};
-  font-size: 16px;
-  font-weight: 500;
-  background: ${colors.lightGray};
-  border-radius: 8px;
-  border: 2px dashed ${colors.border};
-`;
-
-// Add new styled components for modern card layout
-const PaymentCard = styled.div`
+  padding: 60px 20px;
+  color: ${colors.mediumGray};
   background: ${colors.white};
-  border: 2px solid ${props => props.expanded ? colors.primary : colors.border};
   border-radius: 12px;
-  margin-bottom: 12px;
-  overflow: hidden;
-  transition: all 0.3s ease;
-  cursor: pointer;
+  border: 2px dashed rgba(29, 60, 52, 0.2);
   
-  &:hover {
-    border-color: ${colors.primary};
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  div {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
   }
-`;
-
-const PaymentCardHeader = styled.div`
-  padding: 16px 20px;
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  gap: 16px;
-  align-items: center;
-  background: ${props => props.expanded ? colors.lightGray : 'transparent'};
-`;
-
-const PaymentIcon = styled.div`
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: ${props => {
-    switch (props.status) {
-      case 'PENDING': return `linear-gradient(135deg, ${colors.warning}, #f59e0b)`;
-      case 'CONFIRMED': return `linear-gradient(135deg, ${colors.success}, #10b981)`;
-      case 'REJECTED': return `linear-gradient(135deg, ${colors.danger}, #ef4444)`;
-      default: return `linear-gradient(135deg, ${colors.primary}, ${colors.secondary})`;
-    }
-  }};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: 700;
-  font-size: 18px;
-`;
-
-const PaymentMainInfo = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const PaymentTitle = styled.div`
-  font-size: 16px;
-  font-weight: 600;
-  color: ${colors.primary};
-`;
-
-const PaymentSubtitle = styled.div`
-  font-size: 13px;
-  color: ${colors.tertiary};
-  display: flex;
-  gap: 12px;
-  align-items: center;
-`;
-
-const PaymentAmount = styled.div`
-  font-size: 20px;
-  font-weight: 700;
-  color: ${colors.primary};
-  text-align: right;
-`;
-
-const ExpandButton = styled.div`
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: ${colors.lightGray};
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  transform: ${props => props.expanded ? 'rotate(180deg)' : 'rotate(0deg)'};
   
-  &:hover {
-    background: ${colors.primary};
-    color: white;
-  }
-`;
-
-const PaymentDetails = styled.div`
-  padding: 0 20px 20px 20px;
-  background: ${colors.lightGray};
-  border-top: 1px solid ${colors.border};
-  display: ${props => props.expanded ? 'block' : 'none'};
-`;
-
-const DetailGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 20px;
-  
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const DetailItem = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const DetailItemLabel = styled.div`
-  font-size: 11px;
-  font-weight: 600;
-  color: ${colors.tertiary};
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-`;
-
-const DetailItemValue = styled.div`
-  font-size: 14px;
-  font-weight: 500;
-  color: ${colors.primary};
-  word-break: break-all;
-`;
-
-const QRCodeSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-`;
-
-const QRUploadSection = styled.div`
-  margin-bottom: 20px;
-`;
-
-const QRPlaceholder = styled.div`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  padding: 20px;
-  border: 2px dashed ${colors.border};
-  border-radius: 8px;
-  background-color: ${colors.white};
-  color: ${colors.tertiary};
-  text-align: center;
-  font-size: 14px;
-`;
-
-const FormGroup = styled.div`
-  margin-bottom: 16px;
-
-  &:last-of-type {
-    margin-bottom: 0;
+  span {
+    font-size: 14px;
+    color: ${colors.mediumGray};
   }
 `;
 
@@ -1189,274 +1369,370 @@ const PaymentsDashboard = () => {
 
   if (loading) {
     return (
-      <LoadingSpinner>
+      <LoadingContainer>
         Loading payments...
-      </LoadingSpinner>
+      </LoadingContainer>
     );
   }
 
   return (
     <Container>
-      <PageHeader>
-        <Title>Payments Dashboard</Title>
-      </PageHeader>
+      <Header>
+        <Title>
+          <FiDollarSign size={20} />
+          Payments Dashboard
+        </Title>
+        <HeaderActions>
+          <HeaderButton>
+            <FiDownload size={20} />
+            Export Payments
+          </HeaderButton>
+          <HeaderButton>
+            <FiUpload size={20} />
+            Import Payments
+          </HeaderButton>
+        </HeaderActions>
+      </Header>
 
       {/* Payment Settings Section */}
-      <PaymentSettingsSection>
-        <SettingsTitle>Payment Settings Management</SettingsTitle>
+      <PaymentSettingsCard>
+        <SettingsHeader>
+          <FiSettings size={20} />
+          <SettingsTitle>Payment Settings Management</SettingsTitle>
+        </SettingsHeader>
         <SettingsGrid>
-          <SettingCard>
-            <FormGroup>
-              <SettingLabel>GCash Mobile Number</SettingLabel>
-              <SettingInput
-                type="text"
-                value={gcashNumber}
-                onChange={handleGCashNumberChange}
-                placeholder="09123456789"
-              />
-            </FormGroup>
+          <SettingGroup>
+            <SettingLabel>GCash Mobile Number</SettingLabel>
+            <SettingInput
+              type="text"
+              value={gcashNumber}
+              onChange={handleGCashNumberChange}
+              placeholder="09123456789"
+            />
+          </SettingGroup>
+          
+          <SettingGroup>
+            <SettingLabel>Business Name</SettingLabel>
+            <SettingInput
+              type="text"
+              value={businessName}
+              onChange={handleBusinessNameChange}
+              placeholder="Bambike Cycles"
+            />
+          </SettingGroup>
+          
+          <SettingGroup style={{ gridColumn: '1 / -1' }}>
+            <SettingLabel>GCash QR Code</SettingLabel>
+            <FileUploadArea onClick={() => document.getElementById('qr-upload').click()}>
+              <FiUpload size={24} color={colors.pineGreen} />
+              <div style={{ marginTop: '8px', fontWeight: '600', color: colors.darkGray }}>
+                {qrFile ? qrFile.name : 'Click to upload QR code image'}
+              </div>
+              <div style={{ fontSize: '12px', color: colors.mediumGray, marginTop: '4px' }}>
+                Supports JPEG, PNG, GIF (Max 5MB)
+              </div>
+            </FileUploadArea>
+            <FileInput
+              id="qr-upload"
+              type="file"
+              accept="image/*"
+              onChange={handleQRFileChange}
+            />
             
-            <FormGroup>
-              <SettingLabel>Business Name</SettingLabel>
-              <SettingInput
-                type="text"
-                value={businessName}
-                onChange={handleBusinessNameChange}
-                placeholder="Bambike Cycles"
-              />
-            </FormGroup>
-            
-            <SaveButton
-              onClick={handleSettingsUpdate}
-              disabled={isUploading}
-            >
-              {isUploading ? 'Updating...' : 'Update Settings'}
-            </SaveButton>
-            
-            {error && error.text && (
-              error.type === 'success' ? (
-                <SuccessMessage>{error.text}</SuccessMessage>
-              ) : (
-                <ErrorMessage>{error.text}</ErrorMessage>
-              )
+            {currentQRUrl && (
+              <QRPreview>
+                <div style={{ fontSize: '14px', fontWeight: '600', color: colors.darkGray }}>
+                  Current QR Code:
+                </div>
+                <QRImage
+                  src={currentQRUrl}
+                  alt="Current QR Code"
+                  onClick={() => setSelectedImage(currentQRUrl)}
+                />
+              </QRPreview>
             )}
-          </SettingCard>
-
-          <SettingCard>
-            <QRCodeSection>
-              <QRUploadSection>
-                <SettingLabel>QR Code Image</SettingLabel>
-                <FileInputWrapper>
-                  <FileInput
-                    id="qr-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleQRFileChange}
-                  />
-                  <FileInputLabel htmlFor="qr-upload">
-                    {qrFile ? `Selected: ${qrFile.name}` : 'Click to upload new QR code'}
-                  </FileInputLabel>
-                </FileInputWrapper>
-              </QRUploadSection>
-              
-              {currentQRUrl ? (
-                <CurrentQRPreview>
-                  <DetailLabel>Current QR Code:</DetailLabel>
-                  <QRImage 
-                    src={currentQRUrl} 
-                    alt="Current QR Code"
-                    onClick={() => setSelectedImage(currentQRUrl)}
-                  />
-                </CurrentQRPreview>
+          </SettingGroup>
+          
+          <SaveButton
+            onClick={handleSettingsUpdate}
+            disabled={isUploading}
+            style={{ gridColumn: '1 / -1' }}
+          >
+            {isUploading ? (
+              <>
+                <FiUpload size={16} />
+                Updating Settings...
+              </>
+            ) : (
+              <>
+                <FiCheck size={16} />
+                Update Settings
+              </>
+            )}
+          </SaveButton>
+          
+          {error && error.text && (
+            <div style={{ gridColumn: '1 / -1' }}>
+              {error.type === 'success' ? (
+                <SuccessMessage>
+                  <FiCheckCircle size={16} />
+                  {error.text}
+                </SuccessMessage>
               ) : (
-                <QRPlaceholder>
-                  No QR code uploaded yet
-                </QRPlaceholder>
+                <ErrorMessage>
+                  <FiAlertCircle size={16} />
+                  {error.text}
+                </ErrorMessage>
               )}
-            </QRCodeSection>
-          </SettingCard>
+            </div>
+          )}
         </SettingsGrid>
-      </PaymentSettingsSection>
+      </PaymentSettingsCard>
 
       {/* Statistics Cards */}
-      <StatsContainer>
+      <StatsGrid>
         <StatCard type="total">
-          <StatValue>{stats.total}</StatValue>
+          <StatHeader>
+            <StatIcon type="total">
+              <FiDollarSign size={20} />
+            </StatIcon>
+            <StatValue>{stats.total}</StatValue>
+          </StatHeader>
           <StatLabel>Total Payments</StatLabel>
         </StatCard>
         <StatCard type="pending">
-          <StatValue>{stats.pending}</StatValue>
+          <StatHeader>
+            <StatIcon type="pending">
+              <FiClock size={20} />
+            </StatIcon>
+            <StatValue>{stats.pending}</StatValue>
+          </StatHeader>
           <StatLabel>Pending Review</StatLabel>
         </StatCard>
         <StatCard type="confirmed">
-          <StatValue>{stats.confirmed}</StatValue>
+          <StatHeader>
+            <StatIcon type="confirmed">
+              <FiCheckCircle size={20} />
+            </StatIcon>
+            <StatValue>{stats.confirmed}</StatValue>
+          </StatHeader>
           <StatLabel>Confirmed</StatLabel>
         </StatCard>
         <StatCard type="rejected">
-          <StatValue>{stats.rejected}</StatValue>
+          <StatHeader>
+            <StatIcon type="rejected">
+              <FiX size={20} />
+            </StatIcon>
+            <StatValue>{stats.rejected}</StatValue>
+          </StatHeader>
           <StatLabel>Rejected</StatLabel>
         </StatCard>
-      </StatsContainer>
+      </StatsGrid>
 
       {/* Filters */}
-      <FilterContainer>
-        <FilterSelect
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="ALL">All Payments</option>
-          <option value="PENDING">Pending</option>
-          <option value="CONFIRMED">Confirmed</option>
-          <option value="REJECTED">Rejected</option>
-        </FilterSelect>
-        <SearchInput
-          type="text"
-          placeholder="Search by user name, email, mobile, reference, or bike type..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-      </FilterContainer>
+      <FiltersCard>
+        <FiltersHeader>
+          <FiFilter size={20} />
+          Filters
+        </FiltersHeader>
+        <FiltersRow>
+          <FilterGroup>
+            <FilterLabel>Status</FilterLabel>
+            <FilterSelect
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="ALL">All Payments</option>
+              <option value="PENDING">Pending</option>
+              <option value="CONFIRMED">Confirmed</option>
+              <option value="REJECTED">Rejected</option>
+            </FilterSelect>
+          </FilterGroup>
+          <FilterGroup>
+            <FilterLabel>Search</FilterLabel>
+            <SearchInput
+              type="text"
+              placeholder="Search by user name, email, mobile, reference, or bike type..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </FilterGroup>
+        </FiltersRow>
+      </FiltersCard>
 
       {/* Payments List */}
       {filteredPayments.length === 0 ? (
         <EmptyState>
-          {loading ? 'Loading payments...' : 'No payments found.'}
+          <div>
+            {loading ? '⏳ Loading payments...' : '📄 No payments found'}
+          </div>
+          <span>
+            {loading ? 'Please wait while we fetch the payment data.' : 'Try adjusting your filters or search criteria.'}
+          </span>
         </EmptyState>
       ) : (
-        <div>
-          {filteredPayments.map(payment => (
-            <PaymentCard
-              key={payment.id}
-              expanded={expandedPayment === payment.id}
-              onClick={() => setExpandedPayment(expandedPayment === payment.id ? null : payment.id)}
-            >
-              <PaymentCardHeader expanded={expandedPayment === payment.id}>
-                <PaymentIcon status={payment.status}>
-                  {payment.status === 'PENDING' ? '⏳' : payment.status === 'CONFIRMED' ? '✓' : '✗'}
-                </PaymentIcon>
+        <PaymentsCard>
+          <PaymentsHeader>
+            <PaymentsTitle>Payment History ({filteredPayments.length})</PaymentsTitle>
+          </PaymentsHeader>
+          
+          <PaymentsGrid>
+            {filteredPayments.map(payment => (
+              <PaymentCard
+                key={payment.id}
+                status={payment.status}
+                expanded={expandedPayment === payment.id}
+                onClick={() => setExpandedPayment(expandedPayment === payment.id ? null : payment.id)}
+              >
+                <PaymentCardHeader expanded={expandedPayment === payment.id}>
+                  <PaymentUser>
+                    <UserName>
+                      {loadingUsers ? '⏳ Loading...' : (users[payment.userId]?.name || '👤 Unknown User')}
+                    </UserName>
+                    <UserEmail>
+                      {loadingUsers ? 'Loading email...' : (users[payment.userId]?.email || 'No email provided')}
+                    </UserEmail>
+                  </PaymentUser>
+                  
+                  <PaymentInfo>
+                    <PaymentAmount>
+                      {payment.amount ? formatAmount(payment.amount) : 'N/A'}
+                    </PaymentAmount>
+                    <PaymentDate>
+                      {formatDate(payment.createdAt)}
+                    </PaymentDate>
+                  </PaymentInfo>
+                  
+                  <PaymentBike>
+                    <BikeType>{payment.bikeType || 'N/A'}</BikeType>
+                    <BikeDuration>{payment.duration || 'N/A'}</BikeDuration>
+                  </PaymentBike>
+                  
+                  <PaymentScreenshot>
+                    {payment.screenshotUrl ? (
+                      <ScreenshotThumbnail
+                        src={payment.screenshotUrl}
+                        alt="Payment screenshot"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedImage(payment.screenshotUrl);
+                        }}
+                      />
+                    ) : (
+                      <NoScreenshot>📷</NoScreenshot>
+                    )}
+                  </PaymentScreenshot>
+                  
+                  <StatusAndActions>
+                    <PaymentStatus status={payment.status}>
+                      {payment.status === 'PENDING' ? '⏳' : payment.status === 'CONFIRMED' ? '✅' : '❌'}
+                      {payment.status}
+                    </PaymentStatus>
+                    <ExpandIndicator expanded={expandedPayment === payment.id}>
+                      Details
+                    </ExpandIndicator>
+                  </StatusAndActions>
+                </PaymentCardHeader>
                 
-                <PaymentMainInfo>
-                  <PaymentTitle>
-                    {loadingUsers ? 'Loading user info...' : (users[payment.userId]?.name || 'Unknown User')} • {payment.bikeType} • {payment.duration}
-                  </PaymentTitle>
-                  <PaymentSubtitle>
-                    <span>#{payment.id.slice(-8)}</span>
-                    <span>•</span>
-                    <span>{loadingUsers ? 'Loading...' : (users[payment.userId]?.email || 'No email')}</span>
-                    <span>•</span>
-                    <span>{payment.mobileNumber}</span>
-                    <span>•</span>
-                    <span>{formatDate(payment.createdAt)}</span>
-                  </PaymentSubtitle>
-                </PaymentMainInfo>
-                
-                <PaymentAmount>{formatAmount(payment.amount)}</PaymentAmount>
-                
-                <ExpandButton expanded={expandedPayment === payment.id}>
-                  ↓
-                </ExpandButton>
-              </PaymentCardHeader>
-              
-              <PaymentDetails expanded={expandedPayment === payment.id}>
-                <DetailGrid>
-                  <DetailItem>
-                    <DetailItemLabel>User Name</DetailItemLabel>
-                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.name || 'Unknown User')}</DetailItemValue>
-                  </DetailItem>
+                <PaymentDetails expanded={expandedPayment === payment.id}>
+                  <DetailsGrid>
+                    <UserInfoSection>
+                      <InfoItem>
+                        <InfoLabel>👤 Customer Name</InfoLabel>
+                        <InfoValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.name || 'Unknown User')}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>✉️ Email Address</InfoLabel>
+                        <InfoValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.email || 'No email provided')}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>📱 Contact Number</InfoLabel>
+                        <InfoValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.phone || payment.mobileNumber || 'No phone provided')}</InfoValue>
+                      </InfoItem>
+                    </UserInfoSection>
+                    
+                    <PaymentDetailsSection>
+                      <InfoItem>
+                        <InfoLabel>🆔 Payment ID</InfoLabel>
+                        <InfoValue>{payment.id}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>🔢 Reference Number</InfoLabel>
+                        <InfoValue>{payment.referenceNumber || 'N/A'}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>📱 Mobile Number</InfoLabel>
+                        <InfoValue>{payment.mobileNumber || 'N/A'}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>💰 Amount</InfoLabel>
+                        <InfoValue>{payment.amount ? formatAmount(payment.amount) : 'N/A'}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>📅 Created Date</InfoLabel>
+                        <InfoValue>{formatDate(payment.createdAt)}</InfoValue>
+                      </InfoItem>
+                      
+                      <InfoItem>
+                        <InfoLabel>🏷️ Status</InfoLabel>
+                        <InfoValue>
+                          <StatusBadge status={payment.status}>{payment.status}</StatusBadge>
+                        </InfoValue>
+                      </InfoItem>
+                      
+                      {payment.screenshotUrl && (
+                        <FullScreenshotSection>
+                          <InfoLabel>📸 Payment Screenshot</InfoLabel>
+                          <FullScreenshot
+                            src={payment.screenshotUrl}
+                            alt="Payment screenshot"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedImage(payment.screenshotUrl);
+                            }}
+                          />
+                        </FullScreenshotSection>
+                      )}
+                    </PaymentDetailsSection>
+                  </DetailsGrid>
                   
-                  <DetailItem>
-                    <DetailItemLabel>User Email</DetailItemLabel>
-                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.email || 'No email provided')}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>User Phone</DetailItemLabel>
-                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.phone || payment.mobileNumber || 'No phone provided')}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>Payment ID</DetailItemLabel>
-                    <DetailItemValue>{payment.id}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>Reference Number</DetailItemLabel>
-                    <DetailItemValue>{payment.referenceNumber}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>Mobile Number</DetailItemLabel>
-                    <DetailItemValue>{payment.mobileNumber}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>Bike Type & Duration</DetailItemLabel>
-                    <DetailItemValue>{payment.bikeType} • {payment.duration}</DetailItemValue>
-                  </DetailItem>
-                  
-                  <DetailItem>
-                    <DetailItemLabel>Status</DetailItemLabel>
-                    <StatusBadge status={payment.status}>{payment.status}</StatusBadge>
-                  </DetailItem>
-                  
-                  {payment.processedAt && (
-                    <DetailItem>
-                      <DetailItemLabel>Processed Date</DetailItemLabel>
-                      <DetailItemValue>{formatDate(payment.processedAt)}</DetailItemValue>
-                    </DetailItem>
+                  {payment.status === 'PENDING' && (
+                    <PaymentActions style={{ marginTop: '16px', justifyContent: 'center' }}>
+                      <ActionButton
+                        variant="confirm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePaymentAction(payment.id, 'CONFIRMED');
+                        }}
+                        disabled={processingId === payment.id}
+                      >
+                        <FiCheck size={14} />
+                        {processingId === payment.id ? 'Processing...' : 'Confirm Payment'}
+                      </ActionButton>
+                      <ActionButton
+                        variant="reject"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handlePaymentAction(payment.id, 'REJECTED');
+                        }}
+                        disabled={processingId === payment.id}
+                      >
+                        <FiX size={14} />
+                        {processingId === payment.id ? 'Processing...' : 'Reject Payment'}
+                      </ActionButton>
+                    </PaymentActions>
                   )}
-                  
-                  {payment.processedBy && (
-                    <DetailItem>
-                      <DetailItemLabel>Processed By</DetailItemLabel>
-                      <DetailItemValue>{payment.processedBy}</DetailItemValue>
-                    </DetailItem>
-                  )}
-                </DetailGrid>
-                
-                {payment.screenshotUrl && (
-                  <DetailItem style={{ marginBottom: '16px' }}>
-                    <DetailItemLabel>Payment Screenshot</DetailItemLabel>
-                    <ScreenshotImage
-                      src={payment.screenshotUrl}
-                      alt="Payment screenshot"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedImage(payment.screenshotUrl);
-                      }}
-                      style={{ width: '60px', height: '60px', marginTop: '8px' }}
-                    />
-                  </DetailItem>
-                )}
-                
-                {payment.status === 'PENDING' && (
-                  <ActionButtons>
-                    <ActionButton
-                      variant="confirm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePaymentAction(payment.id, 'CONFIRMED');
-                      }}
-                      disabled={processingId === payment.id}
-                    >
-                      {processingId === payment.id ? 'Processing...' : 'Confirm Payment'}
-                    </ActionButton>
-                    <ActionButton
-                      variant="reject"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePaymentAction(payment.id, 'REJECTED');
-                      }}
-                      disabled={processingId === payment.id}
-                    >
-                      {processingId === payment.id ? 'Processing...' : 'Reject Payment'}
-                    </ActionButton>
-                  </ActionButtons>
-                )}
-              </PaymentDetails>
-            </PaymentCard>
-          ))}
-        </div>
+                </PaymentDetails>
+              </PaymentCard>
+            ))}
+          </PaymentsGrid>
+        </PaymentsCard>
       )}
 
       {/* Image Modal */}

@@ -169,10 +169,15 @@ const StatusContainer = styled.div`
 `;
 
 const StatusBadge = styled.span`
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background-color: ${props => {
     if (props.isInUse) return '#ffebee';
     if (props.isAvailable) return '#e8f5e9';
@@ -183,6 +188,20 @@ const StatusBadge = styled.span`
     if (props.isAvailable) return '#2e7d32';
     return '#856404';
   }};
+  border: 1px solid ${props => {
+    if (props.isInUse) return 'rgba(183, 28, 28, 0.2)';
+    if (props.isAvailable) return 'rgba(46, 125, 50, 0.2)';
+    return 'rgba(133, 100, 4, 0.2)';
+  }};
+  
+  &::before {
+    content: ${props => {
+      if (props.isInUse) return '"●"';
+      if (props.isAvailable) return '"●"';
+      return '"●"';
+    }};
+    font-size: 8px;
+  }
 `;
 
 const LockStatus = styled.span`
@@ -552,24 +571,75 @@ const NoDataContainer = styled.div`
 `;
 
 const BikesGrid = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+  animation: fadeIn 0.3s ease-in-out;
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @media (min-width: 1200px) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  @media (max-width: 1199px) and (min-width: 900px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  @media (max-width: 899px) and (min-width: 600px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  @media (max-width: 599px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const BikeCard = styled.div`
-  background-color: ${colors.white};
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-  flex: 1;
-  min-width: 250px;
+  background: linear-gradient(135deg, ${colors.white} 0%, #fafafa 100%);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(29, 60, 52, 0.08);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  position: relative;
   
   &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(29, 60, 52, 0.15);
+    border-color: rgba(29, 60, 52, 0.2);
+  }
+  
+  &:active {
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(29, 60, 52, 0.12);
+  }
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, ${colors.pineGreen}, ${colors.lightPineGreen});
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  
+  &:hover::before {
+    opacity: 1;
   }
 `;
 
@@ -577,41 +647,63 @@ const BikeCardHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  padding: 16px 16px 0;
+  margin-bottom: 8px;
 `;
 
 const BikeCardTitle = styled.h3`
-  font-size: 18px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 600;
   color: ${colors.darkGray};
+  margin: 0;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 8px;
 `;
 
 const BikeActions = styled.div`
   display: flex;
-  gap: 5px;
+  gap: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+  
+  ${BikeCard}:hover & {
+    opacity: 1;
+  }
 `;
 
 const ActionButton = styled.button`
-  padding: 5px 8px;
+  padding: 6px;
   background-color: transparent;
   color: ${props => props.danger ? colors.danger : colors.pineGreen};
-  border: 1px solid ${props => props.danger ? colors.danger : colors.pineGreen};
-  border-radius: 4px;
+  border: 1px solid ${props => props.danger ? 'rgba(211, 47, 47, 0.3)' : 'rgba(29, 60, 52, 0.3)'};
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.3s ease;
+  font-size: 12px;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   
   &:hover {
     background-color: ${props => props.danger ? colors.danger : colors.pineGreen};
     color: ${colors.white};
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px ${props => props.danger ? 'rgba(211, 47, 47, 0.3)' : 'rgba(29, 60, 52, 0.3)'};
+  }
+  
+  &:active {
+    transform: scale(0.95);
   }
   
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
+    transform: none;
   }
 `;
 
@@ -632,73 +724,112 @@ const DeleteButton = styled.button`
 
 const BikeImage = styled.img`
   width: 100%;
-  height: 200px;
+  height: 160px;
   object-fit: cover;
-  border-radius: 4px;
-  margin-bottom: 10px;
+  margin: 0 16px;
+  width: calc(100% - 32px);
+  border-radius: 8px;
+  transition: transform 0.2s ease;
+  
+  ${BikeCard}:hover & {
+    transform: scale(1.02);
+  }
 `;
 
 const BikeInfo = styled.div`
-  margin-top: 10px;
+  padding: 12px 16px 16px;
 `;
 
 const InfoRow = styled.div`
-  margin-bottom: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 13px;
+  
+  &:last-child {
+    margin-bottom: 0;
+  }
 `;
 
 const InfoLabel = styled.span`
-  font-size: 14px;
   font-weight: 500;
-  color: ${colors.darkGray};
+  color: ${colors.mediumGray};
+  flex-shrink: 0;
+  margin-right: 8px;
 `;
 
 const InfoValue = styled.span`
-  font-size: 14px;
-  color: ${colors.mediumGray};
+  color: ${colors.darkGray};
+  text-align: right;
+  flex: 1;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 `;
 
 const PaginationContainer = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 20px;
+  margin-top: 32px;
+  gap: 8px;
 `;
 
 const PaginationButton = styled.button`
-  padding: 8px 12px;
-  background-color: ${colors.pineGreen};
-  color: ${colors.white};
-  border: none;
-  border-radius: 4px;
+  padding: 10px 16px;
+  background-color: ${colors.white};
+  color: ${colors.pineGreen};
+  border: 1px solid rgba(29, 60, 52, 0.2);
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 14px;
   
-  &:hover {
-    opacity: 0.9;
+  &:hover:not(:disabled) {
+    background-color: ${colors.pineGreen};
+    color: ${colors.white};
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
   }
   
   &:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
+    transform: none;
+    background-color: ${colors.lightGray};
+    color: ${colors.mediumGray};
+    border-color: transparent;
   }
 `;
 
 const PageNumbers = styled.div`
   display: flex;
-  gap: 5px;
+  gap: 4px;
+  margin: 0 12px;
 `;
 
 const PageNumber = styled.button`
   padding: 8px 12px;
-  background-color: ${props => props.active ? colors.pineGreen : colors.lightGray};
-  color: ${props => props.active ? colors.white : colors.darkGray};
-  border: none;
-  border-radius: 4px;
+  background-color: ${props => props.active ? colors.pineGreen : colors.white};
+  color: ${props => props.active ? colors.white : colors.pineGreen};
+  border: 1px solid ${props => props.active ? colors.pineGreen : 'rgba(29, 60, 52, 0.2)'};
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+  font-weight: ${props => props.active ? '600' : '500'};
+  font-size: 14px;
+  min-width: 40px;
   
-  &:hover {
-    opacity: 0.9;
+  &:hover:not([disabled]) {
+    background-color: ${props => props.active ? colors.pineGreen : colors.pineGreen};
+    color: ${colors.white};
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(29, 60, 52, 0.2);
   }
 `;
 
@@ -759,8 +890,30 @@ const DialogButton = styled.button`
 
 const LoadingContainer = styled.div`
   text-align: center;
-  padding: 40px;
+  padding: 60px 20px;
   color: ${colors.mediumGray};
+  
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(29, 60, 52, 0.1);
+    border-top: 3px solid ${colors.pineGreen};
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  div {
+    font-size: 16px;
+    font-weight: 500;
+  }
 `;
 
 const ErrorContainer = styled.div`
@@ -846,8 +999,6 @@ const BikesList = ({ onEditBike }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [sortBy, setSortBy] = useState('newest');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [bikesPerPage] = useState(10);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [bikeToDelete, setBikeToDelete] = useState(null);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -930,18 +1081,6 @@ const BikesList = ({ onEditBike }) => {
     return filtered;
   }, [bikes, searchTerm, selectedTypes, sortBy]);
 
-  // Pagination
-  const totalPages = Math.ceil(filteredBikes.length / bikesPerPage);
-  const currentBikes = filteredBikes.slice(
-    (currentPage - 1) * bikesPerPage,
-    currentPage * bikesPerPage
-  );
-
-  // Handle page change
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
-  };
-
   // Handle bike type filter
   const handleTypeFilter = (type) => {
     setSelectedTypes(prev => 
@@ -949,7 +1088,6 @@ const BikesList = ({ onEditBike }) => {
         ? prev.filter(t => t !== type)
         : [...prev, type]
     );
-    setCurrentPage(1); // Reset to first page when filtering
   };
 
   // Format date for display
@@ -1504,18 +1642,18 @@ const BikesList = ({ onEditBike }) => {
       {!loading && !bikesError && (
         <>
           <ResultsInfo>
-            Showing {currentBikes.length} of {filteredBikes.length} bikes
+            Showing {filteredBikes.length} of {filteredBikes.length} bikes
             {searchTerm && ` matching "${searchTerm}"`}
             {selectedTypes.length > 0 && ` in ${selectedTypes.join(', ')}`}
           </ResultsInfo>
 
-          {currentBikes.length === 0 ? (
+          {filteredBikes.length === 0 ? (
             <NoDataContainer>
               <div>No bikes found matching your criteria.</div>
             </NoDataContainer>
           ) : (
             <BikesGrid>
-              {currentBikes.map(bike => {
+              {filteredBikes.map(bike => {
                 const bikeStatus = getBikeStatus(bike);
                 return (
                   <BikeCard 
@@ -1580,11 +1718,11 @@ const BikesList = ({ onEditBike }) => {
 
                     <BikeInfo>
                       <InfoRow>
-                        <InfoLabel>Type:</InfoLabel>
+                        <InfoLabel>Type</InfoLabel>
                         <InfoValue>{bike.type || 'N/A'}</InfoValue>
                       </InfoRow>
                       <InfoRow>
-                        <InfoLabel>Status:</InfoLabel>
+                        <InfoLabel>Status</InfoLabel>
                         <StatusBadge 
                           isInUse={bikeStatus.isInUse}
                           isAvailable={bikeStatus.isAvailable}
@@ -1593,55 +1731,18 @@ const BikesList = ({ onEditBike }) => {
                         </StatusBadge>
                       </InfoRow>
                       <InfoRow>
-                        <InfoLabel>QR Code:</InfoLabel>
-                        <InfoValue>{bike.qrCode || 'N/A'}</InfoValue>
+                        <InfoLabel>QR</InfoLabel>
+                        <InfoValue>{bike.qrCode ? bike.qrCode.slice(-6) : 'N/A'}</InfoValue>
                       </InfoRow>
                       <InfoRow>
-                        <InfoLabel>Hardware ID:</InfoLabel>
-                        <InfoValue>{bike.hardwareId || 'N/A'}</InfoValue>
-                      </InfoRow>
-                      <InfoRow>
-                        <InfoLabel>Date Added:</InfoLabel>
-                        <InfoValue>{formatDate(bike.dateAdded)}</InfoValue>
+                        <InfoLabel>Hardware</InfoLabel>
+                        <InfoValue>{bike.hardwareId ? bike.hardwareId.slice(-6) : 'N/A'}</InfoValue>
                       </InfoRow>
                     </BikeInfo>
                   </BikeCard>
                 );
               })}
             </BikesGrid>
-          )}
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <PaginationContainer>
-              <PaginationButton
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-              >
-                <FiChevronLeft />
-                Previous
-              </PaginationButton>
-
-              <PageNumbers>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                  <PageNumber
-                    key={page}
-                    active={page === currentPage}
-                    onClick={() => handlePageChange(page)}
-                  >
-                    {page}
-                  </PageNumber>
-                ))}
-              </PageNumbers>
-
-              <PaginationButton
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-              >
-                Next
-                <FiChevronRight />
-              </PaginationButton>
-            </PaginationContainer>
           )}
         </>
       )}
