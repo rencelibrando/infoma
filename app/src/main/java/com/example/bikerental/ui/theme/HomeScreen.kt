@@ -29,6 +29,7 @@ import com.example.bikerental.components.swipeToOpenDrawer
 import com.example.bikerental.screens.tabs.BikesTab
 import com.example.bikerental.screens.tabs.BookingsTab
 import com.example.bikerental.screens.tabs.MapTab
+import com.example.bikerental.screens.tabs.PaymentTab
 import com.example.bikerental.screens.tabs.ProfileScreen
 import com.example.bikerental.screens.tabs.RideHistoryTab
 import com.example.bikerental.viewmodels.AuthViewModel
@@ -86,8 +87,8 @@ fun HomeScreen(
         if (returnToProfileTab) {
             // Clear the flag to prevent repeated handling
             navBackStackEntry?.savedStateHandle?.remove<Boolean>("returnToProfileTab")
-            // Update the selected tab to Profile (index 3)
-            selectedTab = 3
+            // Update the selected tab to Profile (index 4)
+            selectedTab = 4
         }
     }
 
@@ -158,7 +159,8 @@ fun HomeScreen(
                                 0 -> MapTab()
                                 1 -> BikesTab(navController = navController, fusedLocationProviderClient = fusedLocationProviderClient)
                                 2 -> BookingsTab()
-                                3 -> ProfileScreen(navController, viewModel)
+                                3 -> PaymentTab()
+                                4 -> ProfileScreen(navController, viewModel)
                                 else -> RideHistoryTab()
                             }
                         }

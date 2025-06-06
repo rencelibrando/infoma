@@ -131,6 +131,24 @@ import androidx.compose.ui.res.painterResource
 import com.example.bikerental.R
 import com.example.bikerental.viewmodels.BikeViewModel
 
+// Updated color scheme for white and dark green theme - consistent with PaymentTab and BookingsTab
+object BikeColors {
+    val White = Color(0xFFFFFFFF)
+    val LightGray = Color(0xFFF5F5F5)
+    val MediumGray = Color(0xFFE0E0E0)
+    val DarkGray = Color(0xFF757575)
+    val TextGray = Color(0xFF424242)
+    val DarkGreen = Color(0xFF1D3C34)
+    val MediumGreen = Color(0xFF2D5A4C)
+    val LightGreen = Color(0xFF4CAF50)
+    val AccentGreen = Color(0xFF10B981)
+    val Red = Color(0xFFEF4444)
+    val Orange = Color(0xFFFBBF24)
+    val Blue = Color(0xFF3B82F6)
+    val Success = Color(0xFF059669)
+    val Warning = Color(0xFFF59E0B)
+    val Error = Color(0xFFDC2626)
+}
 
 // Performance optimization: Enhanced caching with expiration
 private val bikeStatusCache = ConcurrentHashMap<String, BikeStatus>()
@@ -290,6 +308,7 @@ fun BikesTab(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(BikeColors.White)
             .pullRefresh(pullRefreshState)
     ) {
         Column(
@@ -305,38 +324,40 @@ fun BikesTab(
             ) {
                 Text(
                     text = "Available Bikes",
-                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = BikeColors.DarkGreen,
                     modifier = Modifier.weight(1f)
                 )
                 
                 Button(
                     onClick = { showStartRideDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkGreen),
-                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BikeColors.DarkGreen),
+                    shape = RoundedCornerShape(12.dp),
                     enabled = !isUnlockingBike,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.QrCodeScanner,
                             contentDescription = "Start Ride",
-                            modifier = Modifier.size(18.dp),
-                            tint = Color.White
+                            modifier = Modifier.size(20.dp),
+                            tint = BikeColors.White
                         )
                         Text(
                             text = "Start Ride",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            color = BikeColors.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
                         )
                     }
                 }
             }
             
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Performance optimized content rendering
             when {
@@ -381,8 +402,8 @@ fun BikesTab(
             refreshing = isRefreshing,
             state = pullRefreshState,
             modifier = Modifier.align(Alignment.TopCenter),
-            backgroundColor = MaterialTheme.colorScheme.surface,
-            contentColor = DarkGreen,
+            backgroundColor = BikeColors.White,
+            contentColor = BikeColors.DarkGreen,
             scale = true
         )
     }
@@ -745,7 +766,7 @@ private fun OptimizedBikeCard(
                             text = bike.price,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = DarkGreen
+                            color = BikeColors.DarkGreen
                         )
                         
                         if (bike.rating > 0) {
@@ -1039,7 +1060,7 @@ fun BikeDetailSheet(
                     text = bike.name,
                     fontSize = 18.sp, // Reduced from 24sp
                     fontWeight = FontWeight.Bold,
-                    color = DarkGreen,
+                    color = BikeColors.DarkGreen,
                     modifier = Modifier.weight(1f)
                 )
                 
@@ -1083,7 +1104,7 @@ fun BikeDetailSheet(
                     text = bike.price,
                     fontSize = 18.sp, // Reduced from 20sp
                     fontWeight = FontWeight.Bold,
-                    color = DarkGreen
+                    color = BikeColors.DarkGreen
                 )
                 
                 Text(
@@ -1206,7 +1227,7 @@ fun BikeDetailSheet(
                         .height(100.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = DarkGreen)
+                    CircularProgressIndicator(color = BikeColors.DarkGreen)
                 }
                 Log.d("BikesTab", "Loading reviews for bike ${bike.id}")
             } else if (reviews.isEmpty()) {
@@ -1311,7 +1332,7 @@ fun BikeDetailSheet(
             Button(
                 onClick = { showReviewForm = !showReviewForm },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (showReviewForm) MaterialTheme.colorScheme.surfaceVariant else DarkGreen,
+                    containerColor = if (showReviewForm) MaterialTheme.colorScheme.surfaceVariant else BikeColors.DarkGreen,
                     contentColor = if (showReviewForm) MaterialTheme.colorScheme.onSurfaceVariant else Color.White
                 ),
                 shape = RoundedCornerShape(12.dp),
@@ -1377,11 +1398,11 @@ fun BikeDetailSheet(
                     onClick = { showReviewForm = true },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, DarkGreen)
+                    border = BorderStroke(1.dp, BikeColors.DarkGreen)
                 ) {
                     Text(
                         text = "Review",
-                        color = DarkGreen
+                        color = BikeColors.DarkGreen
                     )
                 }
             }

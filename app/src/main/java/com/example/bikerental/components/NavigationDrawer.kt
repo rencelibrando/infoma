@@ -198,16 +198,16 @@ fun AppNavigationDrawer(
                 id = 3,
                 icon = Icons.Default.CreditCard,
                 title = "Payments",
-                onClick = { /* Handle payments */ }
-            ),
-            MenuItem(
-                id = 4,
-                icon = Icons.Default.History,
-                title = "Ride History",
-                onClick = { onItemSelected(4) }
+                onClick = { onItemSelected(3) }
             ),
             MenuItem(
                 id = 5,
+                icon = Icons.Default.History,
+                title = "Ride History",
+                onClick = { onItemSelected(5) }
+            ),
+            MenuItem(
+                id = 6,
                 icon = Icons.Default.Notifications,
                 title = "Notifications",
                 onClick = { /* Handle notifications */ },
@@ -240,8 +240,8 @@ fun AppNavigationDrawer(
                             userEmail = userEmail,
                             greenColor = greenColor,
                             onManageAccountClick = { 
-                                // Navigate to profile tab (index 3)
-                                onItemSelected(3)
+                                // Navigate to profile tab (index 4)
+                                onItemSelected(4)
                                 // Close the drawer after navigation
                                 scope.launch {
                                     drawerState.close()
@@ -278,7 +278,7 @@ fun AppNavigationDrawer(
                                     title = "Incomplete Profile",
                                     restrictionType = "profile",
                                     onClick = {
-                                        onItemSelected(3)
+                                        onItemSelected(4)
                                         scope.launch {
                                             drawerState.close()
                                         }
@@ -294,7 +294,7 @@ fun AppNavigationDrawer(
                                     title = "Unverified Phone",
                                     restrictionType = "phone",
                                     onClick = {
-                                        onItemSelected(3)
+                                        onItemSelected(4)
                                         scope.launch {
                                             drawerState.close()
                                         }

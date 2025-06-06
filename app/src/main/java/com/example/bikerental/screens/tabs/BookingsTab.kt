@@ -61,6 +61,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -108,6 +109,25 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+// Updated color scheme for white and dark green theme - consistent with PaymentTab
+object BookingColors {
+    val White = Color(0xFFFFFFFF)
+    val LightGray = Color(0xFFF5F5F5)
+    val MediumGray = Color(0xFFE0E0E0)
+    val DarkGray = Color(0xFF757575)
+    val TextGray = Color(0xFF424242)
+    val DarkGreen = Color(0xFF1D3C34)
+    val MediumGreen = Color(0xFF2D5A4C)
+    val LightGreen = Color(0xFF4CAF50)
+    val AccentGreen = Color(0xFF10B981)
+    val Red = Color(0xFFEF4444)
+    val Orange = Color(0xFFFBBF24)
+    val Blue = Color(0xFF3B82F6)
+    val Success = Color(0xFF059669)
+    val Warning = Color(0xFFF59E0B)
+    val Error = Color(0xFFDC2626)
+}
 
 // Booking filter categories
 enum class BookingCategory(val displayName: String) {
@@ -247,7 +267,11 @@ fun BookingsTab(
         }
     }
     
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(BookingColors.White)
+    ) {
         if (showBookingForm) {
             BookingForm(
                 bikeId = bikeId,
@@ -275,7 +299,7 @@ fun BookingsTab(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = DarkGreen)
+                        CircularProgressIndicator(color = BookingColors.DarkGreen)
                     }
                 } else if (error != null && bookings.isEmpty()) {
                     // Show error state
@@ -290,17 +314,19 @@ fun BookingsTab(
                             Icon(
                                 imageVector = Icons.Default.ErrorOutline,
                                 contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = BookingColors.Error,
                                 modifier = Modifier.size(64.dp)
                             )
                             Text(
                                 text = "Error loading bookings",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.error
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BookingColors.Error
                             )
                             Text(
                                 text = error ?: "Unknown error",
-                                style = MaterialTheme.typography.bodyMedium,
+                                fontSize = 14.sp,
+                                color = BookingColors.DarkGray,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(16.dp))
@@ -311,10 +337,11 @@ fun BookingsTab(
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = DarkGreen
-                                )
+                                    containerColor = BookingColors.DarkGreen
+                                ),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Try Again")
+                                Text("Try Again", color = BookingColors.White)
                             }
                         }
                     }
@@ -331,28 +358,30 @@ fun BookingsTab(
                             Icon(
                                 imageVector = Icons.Default.CalendarToday,
                                 contentDescription = "No Bookings",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                tint = BookingColors.DarkGray,
                                 modifier = Modifier.size(64.dp)
                             )
                             Text(
                                 text = "No Active Bookings",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = BookingColors.DarkGreen
                             )
                             Text(
                                 text = "Your booking history will appear here",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                fontSize = 14.sp,
+                                color = BookingColors.DarkGray,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
                                 onClick = { showBookingForm = true },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = DarkGreen
-                                )
+                                    containerColor = BookingColors.DarkGreen
+                                ),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Text("Book a Bike")
+                                Text("Book a Bike", color = BookingColors.White)
                             }
                         }
                     }
@@ -365,22 +394,35 @@ fun BookingsTab(
                             onValueChange = { searchQuery = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            placeholder = { Text("Search bookings...") },
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            placeholder = { 
+                                Text(
+                                    "Search bookings...", 
+                                    color = BookingColors.DarkGray
+                                ) 
+                            },
                             leadingIcon = { 
                                 Icon(
                                     imageVector = Icons.Default.Search,
-                                    contentDescription = "Search"
+                                    contentDescription = "Search",
+                                    tint = BookingColors.DarkGreen
                                 )
                             },
                             singleLine = true,
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BookingColors.DarkGreen,
+                                unfocusedBorderColor = BookingColors.MediumGray,
+                                focusedTextColor = BookingColors.TextGray,
+                                unfocusedTextColor = BookingColors.TextGray,
+                                cursorColor = BookingColors.DarkGreen
+                            )
                         )
                         
                         // Category tabs with counts
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             items(BookingCategory.values()) { category ->
@@ -398,7 +440,7 @@ fun BookingsTab(
                                 )
                             }
                         }
-                        
+
                         // Add a "Book a Bike" button
                         Row(
                             modifier = Modifier
@@ -409,7 +451,7 @@ fun BookingsTab(
                             Button(
                                 onClick = { showBookingForm = true },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = DarkGreen
+                                    containerColor = BookingColors.DarkGreen
                                 ),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.weight(1f)
@@ -482,18 +524,18 @@ fun BookingsTab(
                                     Icon(
                                         imageVector = Icons.Default.FilterList,
                                         contentDescription = "No matching bookings",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        tint = BookingColors.DarkGray.copy(alpha = 0.5f),
                                         modifier = Modifier.size(64.dp)
                                     )
                                     Text(
                                         text = "No matching bookings found",
                                         style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = BookingColors.DarkGray
                                     )
                                     Text(
                                         text = "Try adjusting your search or filters",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        color = BookingColors.DarkGray.copy(alpha = 0.7f),
                                         textAlign = TextAlign.Center
                                     )
                                 }
@@ -525,7 +567,7 @@ fun BookingsTab(
                     state = pullRefreshState,
                     modifier = Modifier.align(Alignment.TopCenter),
                     backgroundColor = MaterialTheme.colorScheme.surface,
-                    contentColor = DarkGreen,
+                    contentColor = BookingColors.DarkGreen,
                     scale = true
                 )
             }
@@ -676,7 +718,7 @@ fun BookingForm(
         Text(
             text = "Book Your BambiBike",
             style = MaterialTheme.typography.headlineMedium,
-            color = DarkGreen,
+            color = BookingColors.DarkGreen,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp)
         )
@@ -697,7 +739,7 @@ fun BookingForm(
                     .height(200.dp),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = DarkGreen)
+                CircularProgressIndicator(color = BookingColors.DarkGreen)
             }
         } else if (error != null && bikes.isEmpty()) {
             Box(
@@ -724,7 +766,7 @@ fun BookingForm(
                                 viewModel.fetchBikesFromFirestore()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = DarkGreen)
+                        colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen)
                     ) {
                         Text("Retry")
                     }
@@ -832,7 +874,7 @@ fun BookingForm(
                     text = estimatedPrice,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = DarkGreen
+                    color = BookingColors.DarkGreen
                 )
             }
         }
@@ -848,9 +890,9 @@ fun BookingForm(
                 onClick = onCancel,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, DarkGreen)
+                border = BorderStroke(1.dp, BookingColors.DarkGreen)
             ) {
-                Text("Cancel", color = DarkGreen)
+                Text("Cancel", color = BookingColors.DarkGreen)
             }
             
             Spacer(modifier = Modifier.width(16.dp))
@@ -934,13 +976,13 @@ fun BookingForm(
                 },
                 modifier = Modifier.weight(1f),
                 enabled = selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null && !isCreatingBooking,
-                colors = ButtonDefaults.buttonColors(containerColor = DarkGreen),
+                colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 if (isCreatingBooking) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(20.dp),
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         strokeWidth = 2.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -976,11 +1018,11 @@ fun BikeSelectionCard(
             .clickable { onSelect() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) DarkGreen.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) BookingColors.DarkGreen.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surface
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+            color = if (isSelected) BookingColors.DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
         )
     ) {
         Row(
@@ -1004,7 +1046,7 @@ fun BikeSelectionCard(
                     ) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = DarkGreen,
+                            color = BookingColors.DarkGreen,
                             strokeWidth = 1.5.dp
                         )
                     }
@@ -1047,7 +1089,7 @@ fun BikeSelectionCard(
                         Icon(
                             imageVector = Icons.Filled.Star,
                             contentDescription = null,
-                            tint = if (index < bike.rating) DarkGreen else DarkGreen.copy(alpha = 0.3f),
+                            tint = if (index < bike.rating) BookingColors.DarkGreen else BookingColors.DarkGreen.copy(alpha = 0.3f),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1056,13 +1098,13 @@ fun BikeSelectionCard(
                         Icon(
                             imageVector = Icons.Default.CheckCircle,
                             contentDescription = "Available",
-                            tint = DarkGreen,
+                            tint = BookingColors.DarkGreen,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = " Available",
                             style = MaterialTheme.typography.bodySmall,
-                            color = DarkGreen
+                            color = BookingColors.DarkGreen
                         )
                     }
                 }
@@ -1072,7 +1114,7 @@ fun BikeSelectionCard(
             Text(
                 text = bike.price,
                 style = MaterialTheme.typography.titleMedium,
-                color = DarkGreen,
+                color = BookingColors.DarkGreen,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -1267,7 +1309,7 @@ private fun RowScope.DayCell(
                 }
             )
             .background(
-                color = if (isSelected) DarkGreen else Color.Transparent,
+                color = if (isSelected) BookingColors.DarkGreen else Color.Transparent,
                 shape = CircleShape
             ),
         contentAlignment = Alignment.Center
@@ -1277,9 +1319,9 @@ private fun RowScope.DayCell(
             Text(
                 text = cal.get(Calendar.DAY_OF_MONTH).toString(),
                 color = if (isSelected) {
-                    Color.White
-                } else {
                     MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 }
             )
         }
@@ -1306,10 +1348,10 @@ fun TimeSlot(
             .height(40.dp)
             .clickable { onSelect() },
         shape = RoundedCornerShape(8.dp),
-        color = if (isSelected) DarkGreen else MaterialTheme.colorScheme.surface,
+        color = if (isSelected) BookingColors.DarkGreen else MaterialTheme.colorScheme.surface,
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+            color = if (isSelected) BookingColors.DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
         )
     ) {
         Box(
@@ -1317,7 +1359,7 @@ fun TimeSlot(
         ) {
             Text(
                 text = time,
-                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
             )
         }
     }
@@ -1336,11 +1378,11 @@ fun DurationCard(
             .clickable { onSelect() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) DarkGreen else MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) BookingColors.DarkGreen else MaterialTheme.colorScheme.surface
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = if (isSelected) DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+            color = if (isSelected) BookingColors.DarkGreen else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
         )
     ) {
         Column(
@@ -1353,14 +1395,14 @@ fun DurationCard(
             Text(
                 text = durationOption.label,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 fontWeight = FontWeight.Medium
             )
             
             Text(
                 text = durationOption.price,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (isSelected) Color.White else DarkGreen,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                 fontWeight = FontWeight.Bold
             )
         }
@@ -1434,10 +1476,10 @@ private fun BookingCard(
             ) {
                 // Status chip
                 val statusColor = when (booking.status) {
-                    "PENDING" -> Color(0xFFFFA000) // Amber
-                    "CONFIRMED" -> DarkGreen // Green
-                    "COMPLETED" -> Color(0xFF2196F3) // Blue
-                    "CANCELLED" -> Color(0xFFE53935) // Red
+                    "PENDING" -> MaterialTheme.colorScheme.primary
+                    "CONFIRMED" -> BookingColors.DarkGreen
+                    "COMPLETED" -> MaterialTheme.colorScheme.primary
+                    "CANCELLED" -> MaterialTheme.colorScheme.error
                     else -> MaterialTheme.colorScheme.primary
                 }
                 
@@ -1475,14 +1517,14 @@ private fun BookingCard(
                 // Booking type badge
                 if (booking.isHourly) {
                     Surface(
-                        color = DarkGreen.copy(alpha = 0.15f),
+                        color = BookingColors.DarkGreen.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = "Hourly",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = DarkGreen,
+                            color = BookingColors.DarkGreen,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -1530,7 +1572,7 @@ private fun BookingCard(
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = DarkGreen,
+                                color = BookingColors.DarkGreen,
                                 strokeWidth = 2.dp
                             )
                         }
@@ -1544,7 +1586,7 @@ private fun BookingCard(
                         ) {
                             Text(
                                 text = booking.bikeName.firstOrNull()?.toString() ?: "B",
-                                style = MaterialTheme.typography.titleMedium
+                                style = MaterialTheme.typography.headlineMedium
                             )
                         }
                     }
@@ -1576,7 +1618,7 @@ private fun BookingCard(
                     Text(
                         text = booking.getFormattedHourlyRate(),
                         fontSize = 12.sp,
-                        color = DarkGreen,
+                        color = BookingColors.DarkGreen,
                         fontWeight = FontWeight.Medium
                     )
                     
@@ -1630,7 +1672,7 @@ private fun BookingCard(
                         text = booking.totalPrice ?: "N/A",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = DarkGreen
+                        color = BookingColors.DarkGreen
                     )
                     
                     // Duration
@@ -1714,7 +1756,7 @@ fun BookingDetailSheet(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE53935)
+                        containerColor = MaterialTheme.colorScheme.error
                     )
                 ) {
                     Text("Cancel Booking")
@@ -1748,10 +1790,10 @@ fun BookingDetailSheet(
             
             // Status chip
             val statusColor = when (booking.status) {
-                "PENDING" -> Color(0xFFFFA000) // Amber
-                "CONFIRMED" -> DarkGreen // Green
-                "COMPLETED" -> Color(0xFF2196F3) // Blue
-                "CANCELLED" -> Color(0xFFE53935) // Red
+                "PENDING" -> MaterialTheme.colorScheme.primary
+                "CONFIRMED" -> BookingColors.DarkGreen
+                "COMPLETED" -> MaterialTheme.colorScheme.primary
+                "CANCELLED" -> MaterialTheme.colorScheme.error
                 else -> MaterialTheme.colorScheme.primary
             }
             
@@ -1818,7 +1860,7 @@ fun BookingDetailSheet(
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(30.dp),
-                                color = DarkGreen,
+                                color = BookingColors.DarkGreen,
                                 strokeWidth = 2.dp
                             )
                         }
@@ -1855,14 +1897,14 @@ fun BookingDetailSheet(
                     // Booking type badge
                     Spacer(modifier = Modifier.width(8.dp))
                     Surface(
-                        color = if (booking.isHourly) DarkGreen.copy(alpha = 0.15f) else Color(0xFF6200EA).copy(alpha = 0.15f),
+                        color = if (booking.isHourly) BookingColors.DarkGreen.copy(alpha = 0.15f) else Color(0xFF6200EA).copy(alpha = 0.15f),
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
                             text = if (booking.isHourly) "Hourly" else "Daily",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = if (booking.isHourly) DarkGreen else Color(0xFF6200EA),
+                            color = if (booking.isHourly) BookingColors.DarkGreen else Color(0xFF6200EA),
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
@@ -1881,7 +1923,7 @@ fun BookingDetailSheet(
                     text = booking.getFormattedHourlyRate(),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
-                    color = DarkGreen,
+                    color = BookingColors.DarkGreen,
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
@@ -1935,13 +1977,13 @@ fun BookingDetailSheet(
                 DetailItem(
                     title = "Bike Rate", 
                     value = booking.getFormattedHourlyRate(),
-                    valueColor = DarkGreen
+                    valueColor = BookingColors.DarkGreen
                 )
                 
                 DetailItem(
                     title = "Total Price", 
                     value = booking.totalPrice ?: "N/A",
-                    valueColor = DarkGreen,
+                    valueColor = BookingColors.DarkGreen,
                     valueFontWeight = FontWeight.Bold,
                     valueFontSize = 18.sp
                 )
@@ -1960,9 +2002,9 @@ fun BookingDetailSheet(
                 onClick = { onViewBikeDetails(booking.bikeId) },
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, DarkGreen),
+                border = BorderStroke(1.dp, BookingColors.DarkGreen),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = DarkGreen
+                    contentColor = BookingColors.DarkGreen
                 )
             ) {
                 Text("View Bike")
@@ -1974,7 +2016,7 @@ fun BookingDetailSheet(
                     onClick = { showCancelConfirmDialog = true },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFE53935)
+                        containerColor = MaterialTheme.colorScheme.error
                     ),
                     shape = RoundedCornerShape(12.dp),
                     enabled = !isCancelling
@@ -1982,7 +2024,7 @@ fun BookingDetailSheet(
                     if (isCancelling) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(20.dp),
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             strokeWidth = 2.dp
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1995,7 +2037,7 @@ fun BookingDetailSheet(
                     onClick = { onViewBikeDetails(booking.bikeId) },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = DarkGreen
+                        containerColor = BookingColors.DarkGreen
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -2081,71 +2123,6 @@ private fun DetailItem(
     }
 }
 
-@Composable
-private fun BookingCardShimmer() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Shimmer image placeholder
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-            )
-            
-            // Shimmer content placeholders
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .height(18.dp)
-                        .width(120.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(4.dp)
-                        )
-                )
-                Box(
-                    modifier = Modifier
-                        .height(14.dp)
-                        .width(80.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(4.dp)
-                        )
-                )
-                Box(
-                    modifier = Modifier
-                        .height(14.dp)
-                        .width(150.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(4.dp)
-                        )
-                )
-                Box(
-                    modifier = Modifier
-                        .height(14.dp)
-                        .width(100.dp)
-                        .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(4.dp)
-                        )
-                )
-            }
-        }
-    }
-}
-
 // Extension function to capitalize first letter
 private fun String.capitalize(): String {
     return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
@@ -2159,43 +2136,61 @@ fun CategoryCard(
     onSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val backgroundColor = if (isSelected) {
-        DarkGreen
-    } else {
-        Color(0xFF333333)
-    }
-    
-    val contentColor = Color.White
-    
-    Surface(
+    Card(
         modifier = modifier
-            .height(40.dp)
-            .width(140.dp)
+            .height(48.dp)
             .clickable { onSelect() },
-        shape = RoundedCornerShape(20.dp),
-        color = backgroundColor
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) BookingColors.DarkGreen else BookingColors.White
+        ),
+        border = BorderStroke(
+            width = 2.dp,
+            color = if (isSelected) BookingColors.DarkGreen else BookingColors.MediumGray
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isSelected) 4.dp else 2.dp
+        )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
             contentAlignment = Alignment.Center
         ) {
-            val displayText = when (category) {
-                BookingCategory.ALL -> "All Bookings${if (count > 0) " ($count)" else ""}"
-                BookingCategory.ACTIVE -> "Active${if (count > 0) " ($count)" else ""}"
-                BookingCategory.COMPLETED -> "Completed${if (count > 0) " ($count)" else ""}"
-                BookingCategory.CANCELLED -> "Cancelled${if (count > 0) " ($count)" else ""}"
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = category.displayName,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isSelected) BookingColors.White else BookingColors.TextGray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (count > 0) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isSelected) BookingColors.White.copy(alpha = 0.2f) else BookingColors.DarkGreen,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Text(
+                                text = count.toString(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) BookingColors.White else BookingColors.White
+                            )
+                        }
+                    }
+                }
             }
-            
-            Text(
-                text = displayText,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium
-                ),
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
-            )
         }
     }
 } 

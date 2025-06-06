@@ -72,6 +72,20 @@ import androidx.compose.runtime.rememberUpdatedState
 import android.widget.Toast
 import androidx.compose.ui.text.style.TextOverflow
 
+// Profile color scheme
+object ProfileColors {
+    val White = Color(0xFFFFFFFF)
+    val DarkGreen = Color(0xFF0A5F38)
+    val LightGray = Color(0xFFF5F5F5)
+    val MediumGray = Color(0xFFE0E0E0)
+    val DarkGray = Color(0xFF757575)
+    val Success = Color(0xFF4CAF50)
+    val Warning = Color(0xFFFF9800)
+    val Error = Color(0xFFE53E3E)
+    val TextPrimary = Color(0xFF212121)
+    val TextSecondary = Color(0xFF757575)
+}
+
 // Add this function near the top of the file, before the ProfileTab function
 fun formatPhilippinePhoneNumber(phoneNumber: String): String {
     // Remove any non-digit characters
@@ -441,7 +455,7 @@ fun ProfileScreen(
                             tint = MaterialTheme.colorScheme.error
                         )
                         Column {
-                            Text(
+            Text(
                                 text = "Complete Your Profile",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.error
@@ -495,7 +509,7 @@ fun ProfileScreen(
                             // Add verification benefits list
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
