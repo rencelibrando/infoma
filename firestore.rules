@@ -22,17 +22,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Users collection - UPDATED FOR DASHBOARD ACCESS
+    // Users collection
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
-      // Allow admins to read all user data for dashboard analytics
-      allow read: if isAdmin();
-      
-      // Allow limited read access for dashboard analytics (only basic fields)
-      // This enables counting users without exposing sensitive data
-      allow get: if isAuthenticated();
-      allow list: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow delete: if isAuthenticated() && request.auth.uid == userId;
 
       // Bookings subcollection under users
       match /bookings/{bookingId} {
@@ -64,7 +59,27 @@ service cloud.firestore {
         allow delete: if isOwner(userId) && isAuthenticated();
       }
     }
+		
+    match /locations/{locationId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();  // Allow users to create location updates during rides
+      allow update: if isAuthenticated();  // Allow users to update their own location data
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
 
+    // Active rides collection for real-time status tracking
+    match /activeRides/{rideId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+     match /rideLocationHistory/{entryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();  // Allow users to create location history during rides
+      allow update: if isAuthenticated();  // Allow users to update location history
+      allow delete: if isAdmin();  // Only admins can delete location history
+    }
     // Support messages collection
     match /supportMessages/{messageId} {
       allow read: if isAuthenticated();
@@ -79,13 +94,9 @@ service cloud.firestore {
       allow write: if isAuthenticated(); // Allow authenticated users to manage FAQs
     }
     
-    // Bikes collection - UPDATED WITH DASHBOARD ACCESS
+    // Bikes collection - UPDATED WITH MORE PERMISSIVE RULES
     match /bikes/{bikeId} {
-      // Allow reading for authenticated users AND for dashboard analytics
       allow read: if isAuthenticated();
-      
-      // Allow listing for dashboard (essential for analytics)
-      allow list: if isAuthenticated();
 
       // Admins have full write access
       allow write: if isAdmin();
@@ -125,10 +136,9 @@ service cloud.firestore {
         allow delete: if isAuthenticated();
       }
 
-      // Reviews subcollection under bikes - ENHANCED FOR DASHBOARD
+      // Reviews subcollection under bikes
       match /reviews/{reviewId} {
         allow read: if isAuthenticated();
-        allow list: if isAuthenticated(); // Allow listing for dashboard analytics
         allow create: if isAuthenticated() && 
                       request.resource.data.userId == request.auth.uid &&
                       request.resource.data.rating >= 1 && 
@@ -149,14 +159,21 @@ service cloud.firestore {
       // Admins can list all bookings, regular users can list all but should filter client-side
       allow list: if isAuthenticated();
       
-      // Allow creating bookings
-      allow create: if isAuthenticated();
+      // Allow creating bookings - users can only create bookings for themselves
+      allow create: if isAuthenticated() && 
+                    request.resource.data.userId == request.auth.uid;
       
-      // Allow updating bookings - more permissive for admin operations
-      allow update: if isAuthenticated();
+      // Allow updating bookings - users can only update their own bookings, admins can update any
+      allow update: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
       
-      // Allow deleting bookings
-      allow delete: if isAuthenticated();
+      // Allow deleting bookings - users can only delete their own bookings, admins can delete any
+      allow delete: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        isAdmin()
+      );
     }
 
     // IMPORTANT: Wildcard rule for collectionGroup queries on "bookings"
@@ -166,29 +183,17 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
-    // Rides collection - UPDATED FOR DASHBOARD ACCESS
+    // Rides collection - UPDATED TO BE MORE PERMISSIVE
     match /rides/{rideId} {
-      // Users can read/write their own rides
-      allow read, write: if request.auth != null && 
-        request.auth.uid == resource.data.userId;
-      
-      // Users can create new rides for themselves
-      allow create: if request.auth != null && 
-        request.auth.uid == request.resource.data.userId;
-      
-      // Users can update their own rides (including ending them)
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();  // Allow any authenticated user to create rides
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
       allow update: if request.auth != null && 
         request.auth.uid == resource.data.userId;
-      
-      // Admins can read all rides for monitoring AND dashboard analytics
-      allow read: if isAdmin();
-      
-      // Allow listing rides for dashboard analytics
-      allow list: if isAuthenticated();
-      
-      // Admins can update any ride
+        
+        
       allow update: if isAdmin(); 
-      
       // Bookings subcollection under rides
       match /bookings/{bookingId} {
         allow read: if isAuthenticated();
@@ -197,10 +202,9 @@ service cloud.firestore {
       }
     }
 
-    // Reviews collection (global) - ENHANCED FOR DASHBOARD
+    // Reviews collection (global)
     match /reviews/{reviewId} {
       allow read: if isAuthenticated();
-      allow list: if isAuthenticated(); // Essential for dashboard analytics
       allow create: if isAuthenticated() && 
                     request.resource.data.userId == request.auth.uid &&
                     request.resource.data.rating >= 1 && 
@@ -210,34 +214,49 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && 
                     (resource.data.userId == request.auth.uid || isAdmin());
     }
-
-    // Wildcard rule for reviews subcollections (for dashboard analytics)
-    match /{path=**}/reviews/{reviewId} {
+    
+		match /rideRatings/{rideRatingId} {
       allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                    request.resource.data.userId == request.auth.uid &&
+                    request.resource.data.rating >= 1 && 
+                    request.resource.data.rating <= 5;
+      allow update: if isAuthenticated() && 
+                    resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+                    (resource.data.userId == request.auth.uid || isAdmin());
     }
-
+    
     // Bike location history collection
     match /bikeLocationHistory/{entryId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();  // Allow any authenticated user to create location history
       allow delete: if isAdmin();
     }
-
-    // Rules for locations collection (real-time tracking)
-    match /locations/{locationId} {
-      // Users can create location updates for their own rides
-      allow create: if request.auth != null && 
-        request.auth.uid == request.resource.data.userId &&
-        exists(/databases/$(database)/documents/rides/$(request.resource.data.rideId)) &&
-        get(/databases/$(database)/documents/rides/$(request.resource.data.rideId)).data.userId == request.auth.uid;
+    
+    // Payments collection - TEMPORARY TEST ACCESS
+    match /payments/{paymentId} {
+      // TEMPORARY: Allow anyone to read payments for testing
+      allow read: if true;
       
-      // Users can read their own location history
-      allow read: if request.auth != null && 
-        request.auth.uid == resource.data.userId;
+      // Users can create their own payments
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       
-      // Admins can read all location data for monitoring
-      allow read: if request.auth != null && 
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      // TEMPORARY: Allow any authenticated user to update payments for testing
+      allow update: if isAuthenticated();
+      
+      // TEMPORARY: Allow any authenticated user to delete payments for testing
+      allow delete: if isAuthenticated();
+    }
+    
+    // Settings collection - for payment settings and other app configurations
+    match /settings/{settingId} {
+      // Anyone can read settings (for payment info, etc.)
+      allow read: if true;
+      
+      // Only authenticated users can write settings (for now, can be restricted to admin only)
+      // You can change this to "if isAdmin();" if you want only admins to update settings
+      allow write: if isAuthenticated();
     }
   }
 } 

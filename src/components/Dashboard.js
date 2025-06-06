@@ -11,6 +11,7 @@ import UsersList from './UsersList';
 import BikeReviews from './BikeReviews';
 import CustomerSupportMessages from './CustomerSupportMessages';
 import RealTimeTrackingDashboard from './admin/RealTimeTrackingDashboard';
+import PaymentsDashboard from './PaymentsDashboard';
 import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
@@ -326,6 +327,12 @@ const Dashboard = () => {
               Bookings
             </MenuOption>
             <MenuOption 
+              active={activeTab === 'payments'}
+              onClick={() => handleMenuClick('payments')}
+            >
+              Payments
+            </MenuOption>
+            <MenuOption 
               active={activeTab === 'users'}
               onClick={() => handleMenuClick('users')}
             >
@@ -402,6 +409,9 @@ const Dashboard = () => {
             )}
             {activeTab === 'bookings' && (
               <BookingManagement />
+            )}
+            {activeTab === 'payments' && (
+              <PaymentsDashboard />
             )}
             {activeTab === 'edit' && selectedBike && (
               <EditBike 

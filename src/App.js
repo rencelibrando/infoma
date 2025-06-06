@@ -5,6 +5,7 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import BikeRideScreen from './components/BikeRideScreen';
 import StatusCheck from './components/StatusCheck';
+import { AuthProvider } from './context/AuthContext';
 import { auth } from './firebase';
 import GoogleMapsPreloader from './components/GoogleMapsPreloader';
 
@@ -51,34 +52,36 @@ const AuthHistoryHandler = () => {
 
 function App() {
   return (
-    <Router>
-      <GoogleMapsPreloader />
-      <AuthHistoryHandler />
-      <Routes>
-        {/* Login route - NOT wrapped in StatusCheck so users can always access it */}
-        <Route path="/login" element={<Login />} />
-        
-        {/* Protected routes - wrapped in StatusCheck for system verification */}
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <StatusCheck>
-              <Dashboard />
-            </StatusCheck>
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/ride/:bikeId" element={
-          <ProtectedRoute>
-            <StatusCheck>
-              <BikeRideScreen />
-            </StatusCheck>
-          </ProtectedRoute>
-        } />
-        
-        {/* Default redirect to login */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <GoogleMapsPreloader />
+        <AuthHistoryHandler />
+        <Routes>
+          {/* Login route - NOT wrapped in StatusCheck so users can always access it */}
+          <Route path="/login" element={<Login />} />
+          
+          {/* Protected routes - wrapped in StatusCheck for system verification */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <StatusCheck>
+                <Dashboard />
+              </StatusCheck>
+            </ProtectedRoute>
+          } />
+          
+          <Route path="/ride/:bikeId" element={
+            <ProtectedRoute>
+              <StatusCheck>
+                <BikeRideScreen />
+              </StatusCheck>
+            </ProtectedRoute>
+          } />
+          
+          {/* Default redirect to login */}
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Router>
+    </AuthProvider>
   );
 }
 
