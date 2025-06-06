@@ -12,7 +12,7 @@ import BikeReviews from './BikeReviews';
 import CustomerSupportMessages from './CustomerSupportMessages';
 import RealTimeTrackingDashboard from './admin/RealTimeTrackingDashboard';
 import PaymentsDashboard from './PaymentsDashboard';
-import { preloadOptionsData, preloadDashboardData } from '../services/dashboardService';
+import { preloadOptionsData, preloadDashboardData, clearAllCache } from '../services/dashboardService';
 import { DataProvider } from '../context/DataContext';
 import styled from 'styled-components';
 
@@ -188,6 +188,9 @@ const Dashboard = () => {
         const initializeData = async () => {
           try {
             console.log('Initializing dashboard data...');
+            
+            // Clear all caches first to ensure fresh data
+            clearAllCache();
             
             // Start preloading dashboard data in parallel with options data
             const preloadPromises = [

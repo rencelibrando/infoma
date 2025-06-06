@@ -1,5 +1,7 @@
 import { db, auth } from '../firebase';
 import { collection, getDocs, query, onSnapshot, limit, orderBy, where, getDoc, doc } from 'firebase/firestore';
+import { ref, onValue, get } from 'firebase/database';
+import { realtimeDb } from '../firebase';
 
 // Enhanced in-memory cache with expiration timestamps for different data types
 const dataCache = {
@@ -10,12 +12,14 @@ const dataCache = {
   bikeTypes: null,
   userRoles: null,
   bikeDetails: {}, // Individual bike details cache
+  activeRidesFromRealtime: null, // New cache for active rides from Realtime DB
   lastUpdated: {
     bikes: null,
     users: null,
     rides: null,
     reviews: null,
     bikeDetails: {},
+    activeRidesFromRealtime: null,
   },
   expiryTimes: {
     bikes: 60000, // 1 minute
@@ -23,6 +27,7 @@ const dataCache = {
     rides: 30000, // 30 seconds - more frequent as rides status changes often
     reviews: 600000, // 10 minutes
     bikeDetails: 300000, // 5 minutes
+    activeRidesFromRealtime: 10000, // 10 seconds - very fresh for active rides
   }
 };
 
@@ -228,11 +233,70 @@ export const preloadDashboardData = async () => {
   }
 };
 
+// Clear all cache to force fresh data fetch
+export const clearAllCache = () => {
+  dataCache.bikes = null;
+  dataCache.users = null;
+  dataCache.rides = null;
+  dataCache.reviews = null;
+  dataCache.bikeTypes = null;
+  dataCache.userRoles = null;
+  dataCache.bikeDetails = {};
+  dataCache.activeRidesFromRealtime = null;
+  dataCache.lastUpdated = {
+    bikes: null,
+    users: null,
+    rides: null,
+    reviews: null,
+    bikeDetails: {},
+    activeRidesFromRealtime: null,
+  };
+  console.log('All caches cleared, next fetch will get fresh data');
+};
+
 // Clear reviews cache to force a fresh fetch of reviews data
 export const clearReviewsCache = () => {
   dataCache.reviews = null;
   dataCache.lastUpdated.reviews = null;
   console.log('Reviews cache cleared, next fetch will get fresh data');
+};
+
+// Fetch active rides from Realtime Database (same source as Real-Time Tracking)
+export const getActiveRidesFromRealtime = async () => {
+  try {
+    // Check cache first
+    const now = Date.now();
+    const maxAgeMs = dataCache.expiryTimes.activeRidesFromRealtime;
+    
+    if (dataCache.activeRidesFromRealtime && 
+        dataCache.lastUpdated.activeRidesFromRealtime && 
+        (now - dataCache.lastUpdated.activeRidesFromRealtime) < maxAgeMs) {
+      console.log('Using cached active rides from Realtime DB');
+      return dataCache.activeRidesFromRealtime;
+    }
+    
+    console.log('Fetching fresh active rides from Realtime Database...');
+    const activeRidesRef = ref(realtimeDb, 'activeRides');
+    const snapshot = await get(activeRidesRef);
+    
+    const activeRidesData = snapshot.val() || {};
+    const activeRides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
+      ...rideData,
+      userId: userId,
+      id: rideData.rideId || rideData.id
+    }));
+    
+    // Cache the result
+    dataCache.activeRidesFromRealtime = activeRides;
+    dataCache.lastUpdated.activeRidesFromRealtime = now;
+    
+    console.log(`Found ${activeRides.length} active rides in Realtime Database`);
+    return activeRides;
+  } catch (error) {
+    console.error('Error fetching active rides from Realtime Database:', error);
+    // Return empty array if there's an error
+    return [];
+  }
 };
 
 // Fetch analytics data for the dashboard
@@ -335,14 +399,29 @@ export const getAnalyticsData = async () => {
         console.log('Rides query with startTime successful, got', ridesSnapshot.docs.length, 'rides');
         const rideData = ridesSnapshot.docs.map(doc => {
           const data = doc.data();
+          
+          // Normalize timestamp fields
+          const startTime = data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null);
+          const endTime = data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null);
+          
+          // A ride should only be considered active if:
+          // 1. It has started (has startTime)
+          // 2. It has not ended (no endTime)
+          // 3. The status is explicitly "active"
+          const hasStarted = !!startTime;
+          const hasNotEnded = !endTime;
+          const statusIsActive = data.status === "active";
+          
+          // Only mark as active if all conditions are met
+          const isActuallyActive = hasStarted && hasNotEnded && statusIsActive;
+          
           return {
             id: doc.id,
             ...data,
-            // Normalize timestamp fields
-            startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-            endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-            // Handle both new status field and legacy isActive
-            isActive: data.status === "active" || data.isActive === true,
+            startTime,
+            endTime,
+            // Use the corrected active status
+            isActive: isActuallyActive,
             status: data.status || (data.isActive ? "active" : "completed")
           };
         });
@@ -365,14 +444,29 @@ export const getAnalyticsData = async () => {
           console.log('Rides query with startDate successful, got', ridesSnapshot.docs.length, 'rides');
           const rideData = ridesSnapshot.docs.map(doc => {
             const data = doc.data();
+            
+            // Normalize timestamp fields
+            const startTime = data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null);
+            const endTime = data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null);
+            
+            // A ride should only be considered active if:
+            // 1. It has started (has startTime)
+            // 2. It has not ended (no endTime)
+            // 3. The status is explicitly "active"
+            const hasStarted = !!startTime;
+            const hasNotEnded = !endTime;
+            const statusIsActive = data.status === "active";
+            
+            // Only mark as active if all conditions are met
+            const isActuallyActive = hasStarted && hasNotEnded && statusIsActive;
+            
             return {
               id: doc.id,
               ...data,
-              // Normalize timestamp fields
-              startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-              endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-              // Handle both new status field and legacy isActive
-              isActive: data.status === "active" || data.isActive === true,
+              startTime,
+              endTime,
+              // Use the corrected active status
+              isActive: isActuallyActive,
               status: data.status || (data.isActive ? "active" : "completed")
             };
           });
@@ -390,14 +484,29 @@ export const getAnalyticsData = async () => {
             console.log('Simple rides query successful, got', simpleRidesSnapshot.docs.length, 'rides');
             const rideData = simpleRidesSnapshot.docs.map(doc => {
               const data = doc.data();
+              
+              // Normalize timestamp fields
+              const startTime = data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null);
+              const endTime = data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null);
+              
+              // A ride should only be considered active if:
+              // 1. It has started (has startTime)
+              // 2. It has not ended (no endTime)
+              // 3. The status is explicitly "active"
+              const hasStarted = !!startTime;
+              const hasNotEnded = !endTime;
+              const statusIsActive = data.status === "active";
+              
+              // Only mark as active if all conditions are met
+              const isActuallyActive = hasStarted && hasNotEnded && statusIsActive;
+              
               return {
                 id: doc.id,
                 ...data,
-                // Normalize timestamp fields
-                startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-                endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-                // Handle both new status field and legacy isActive
-                isActive: data.status === "active" || data.isActive === true,
+                startTime,
+                endTime,
+                // Use the corrected active status
+                isActive: isActuallyActive,
                 status: data.status || (data.isActive ? "active" : "completed")
               };
             });
@@ -526,11 +635,12 @@ export const getAnalyticsData = async () => {
     
     // Parallel fetches for better performance
     console.log('Starting parallel data fetches...');
-    const [bikes, users, rides, reviews] = await Promise.all([
+    const [bikes, users, rides, reviews, activeRidesFromRealtime] = await Promise.all([
       getFromCacheOrFetch('bikes', fetchBikes),
       getFromCacheOrFetch('users', fetchUsers),
       getFromCacheOrFetch('rides', fetchRides),
-      getFromCacheOrFetch('reviews', fetchReviews)
+      getFromCacheOrFetch('reviews', fetchReviews),
+      getActiveRidesFromRealtime() // Fetch active rides from Realtime DB
     ]);
     
     console.log('All data fetched successfully:');
@@ -538,9 +648,10 @@ export const getAnalyticsData = async () => {
     console.log(`- Users: ${users.length}`);
     console.log(`- Rides: ${rides.length}`);
     console.log(`- Reviews: ${reviews.length}`);
+    console.log(`- Active Rides (Realtime DB): ${activeRidesFromRealtime.length}`);
     
     // Calculate statistics
-    const stats = calculateStats(bikes, users, rides, reviews);
+    const stats = calculateStats(bikes, users, rides, reviews, activeRidesFromRealtime);
     console.log('Calculated stats:', stats);
     
     return {
@@ -616,48 +727,57 @@ export const getAnalyticsData = async () => {
 };
 
 // Calculate dashboard statistics
-const calculateStats = (bikes, users, rides, reviews) => {
-  const activeRides = rides.filter(ride => ride.isActive);
-  const availableBikes = bikes.filter(bike => bike.isAvailable && !bike.isInUse);
-  const inUseBikes = bikes.filter(bike => bike.isInUse);
-  
-  // Check if bikes have totalReviews and averageRating directly attached
-  const bikesWithReviews = bikes.filter(bike => 
-    bike.totalReviews !== undefined && bike.averageRating !== undefined
-  );
-  
-  let totalReviewsCount = reviews.length;
-  let calculatedAvgRating = calculateAverageRating(reviews);
-  
-  // If we have bikes with direct review data, use that instead
-  if (bikesWithReviews.length > 0) {
-    console.log('Using direct review data from bike documents');
-    totalReviewsCount = bikesWithReviews.reduce((total, bike) => total + (bike.totalReviews || 0), 0);
-    
-    // Calculate weighted average based on number of reviews per bike
-    if (totalReviewsCount > 0) {
-      const weightedSum = bikesWithReviews.reduce((sum, bike) => {
-        return sum + (bike.averageRating || 0) * (bike.totalReviews || 0);
-      }, 0);
-      calculatedAvgRating = (weightedSum / totalReviewsCount).toFixed(1);
-    }
-    
-    console.log(`Using bike direct data: ${totalReviewsCount} reviews, avg rating: ${calculatedAvgRating}`);
+const calculateStats = (bikes, users, rides, reviews, activeRidesFromRealtime = []) => {
+  console.log('🔥 calculateStats called with activeRidesFromRealtime:', activeRidesFromRealtime.length);
+
+  // Use active rides from Realtime Database instead of filtering Firestore rides
+  const activeRides = activeRidesFromRealtime || [];
+  const totalActiveRides = activeRides.length;
+
+  console.log(`📊 Active rides count from Realtime DB: ${totalActiveRides}`);
+
+  let totalReviews = 0;
+  let totalRating = 0;
+  let reviewCount = 0;
+
+  // Count reviews from the main reviews data
+  if (reviews && Array.isArray(reviews)) {
+    totalReviews += reviews.length;
+    reviews.forEach(review => {
+      if (review.rating && typeof review.rating === 'number') {
+        totalRating += review.rating;
+        reviewCount++;
+      }
+    });
   }
-  
+
+  // Also count any direct review data from bikes if available
+  if (bikes && Array.isArray(bikes)) {
+    bikes.forEach(bike => {
+      if (bike.reviewData && Array.isArray(bike.reviewData)) {
+        totalReviews += bike.reviewData.length;
+        bike.reviewData.forEach(review => {
+          if (review.rating && typeof review.rating === 'number') {
+            totalRating += review.rating;
+            reviewCount++;
+          }
+        });
+      }
+    });
+  }
+
+  const averageRating = reviewCount > 0 ? Number((totalRating / reviewCount).toFixed(2)) : 0;
+
   return {
-    totalBikes: bikes.length,
-    activeBikes: availableBikes.length,
-    inUseBikes: inUseBikes.length,
-    maintenanceBikes: bikes.length - availableBikes.length - inUseBikes.length,
-    
-    totalUsers: users.length,
-    
-    activeRides: activeRides.length,
-    totalRides: rides.length,
-    
-    totalReviews: totalReviewsCount,
-    averageRating: calculatedAvgRating
+    totalBikes: bikes?.length || 0,
+    activeBikes: bikes?.filter(bike => bike.status === 'active')?.length || 0,
+    inUseBikes: bikes?.filter(bike => bike.status === 'in-use')?.length || 0,
+    maintenanceBikes: bikes?.filter(bike => bike.status === 'maintenance')?.length || 0,
+    totalUsers: users?.length || 0,
+    activeRides: totalActiveRides, // Now using Realtime Database data
+    totalRides: rides?.length || 0,
+    totalReviews,
+    averageRating
   };
 };
 
@@ -758,14 +878,29 @@ export const subscribeToAnalytics = (callback) => {
           const ridesSnapshot = await getDocs(ridesQuery);
           const rideData = ridesSnapshot.docs.map(doc => {
             const data = doc.data();
+            
+            // Normalize timestamp fields
+            const startTime = data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null);
+            const endTime = data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null);
+            
+            // A ride should only be considered active if:
+            // 1. It has started (has startTime)
+            // 2. It has not ended (no endTime)
+            // 3. The status is explicitly "active"
+            const hasStarted = !!startTime;
+            const hasNotEnded = !endTime;
+            const statusIsActive = data.status === "active";
+            
+            // Only mark as active if all conditions are met
+            const isActuallyActive = hasStarted && hasNotEnded && statusIsActive;
+            
             return {
               id: doc.id,
               ...data,
-              // Normalize timestamp fields
-              startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-              endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-              // Handle both new status field and legacy isActive
-              isActive: data.status === "active" || data.isActive === true,
+              startTime,
+              endTime,
+              // Use the corrected active status
+              isActive: isActuallyActive,
               status: data.status || (data.isActive ? "active" : "completed")
             };
           });
@@ -867,70 +1002,15 @@ export const subscribeToAnalytics = (callback) => {
           users,
           rides,
           reviews,
-          stats: calculateStats(bikes, users, rides, reviews)
+          stats: calculateStats(bikes, users, rides, reviews, [])
         };
         
-        callback(completeData);
-      } catch (error) {
-        console.error('Error in analytics subscription:', error);
-      }
-    }, (error) => {
-      console.error('Error in bikes listener:', error);
-    });
-    
-    unsubscribeFunctions.push(bikesUnsubscribe);
-    
-    // Only subscribe to the rides collection separately for active ride updates
-    // as these change more frequently
-    // Try to query by status first, fallback to isActive
-    let activeRidesQuery;
-    try {
-      activeRidesQuery = query(
-        collection(db, 'rides'),
-        where('status', '==', 'active')
-      );
-    } catch (error) {
-      console.log('Using isActive fallback for active rides query');
-      activeRidesQuery = query(
-        collection(db, 'rides'),
-        where('isActive', '==', true)
-      );
-    }
-    
-    const ridesUnsubscribe = onSnapshot(activeRidesQuery, async (ridesSnapshot) => {
-      try {
-        if (!dataCache.bikes) {
-          console.log('No bikes data available yet, skipping rides update');
-          return;
-        }
-        
-        console.log('Active rides update received');
-        const activeRides = ridesSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            // Normalize timestamp fields
-            startTime: data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null),
-            endTime: data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null),
-            // Handle both new status field and legacy isActive
-            isActive: data.status === "active" || data.isActive === true,
-            status: data.status || (data.isActive ? "active" : "completed")
-          };
-        });
-        
-        // Only update the active rides in the cache
-        if (dataCache.rides) {
-          // Find all non-active rides in current cache
-          const nonActiveRides = dataCache.rides.filter(ride => !ride.isActive && ride.status !== "active");
+        // Notify subscribers with updated data
+        if (dataCache.bikes && dataCache.users && dataCache.reviews) {
+          console.log('Notifying subscribers of rides update...');
           
-          // Combine with new active rides
-          dataCache.rides = [...activeRides, ...nonActiveRides];
-          dataCache.lastUpdated.rides = Date.now();
-          
-          // Notify subscribers with updated data
-          if (dataCache.bikes && dataCache.users && dataCache.reviews) {
-            console.log('Notifying subscribers of rides update...');
+          // Also fetch active rides from Realtime Database for consistency
+          getActiveRidesFromRealtime().then(activeRidesFromRealtime => {
             callback({
               bikes: dataCache.bikes,
               users: dataCache.users,
@@ -940,13 +1020,141 @@ export const subscribeToAnalytics = (callback) => {
                 dataCache.bikes, 
                 dataCache.users, 
                 dataCache.rides, 
-                dataCache.reviews
+                dataCache.reviews,
+                activeRidesFromRealtime
               )
             });
-          }
+          }).catch(error => {
+            console.error('Error fetching active rides from Realtime DB:', error);
+            // Fallback to empty active rides if Realtime DB fails
+            callback({
+              bikes: dataCache.bikes,
+              users: dataCache.users,
+              rides: dataCache.rides,
+              reviews: dataCache.reviews,
+              stats: calculateStats(
+                dataCache.bikes, 
+                dataCache.users, 
+                dataCache.rides, 
+                dataCache.reviews,
+                []
+              )
+            });
+          });
         }
       } catch (error) {
-        console.error('Error in active rides subscription:', error);
+        console.error('Error in analytics subscription:', error);
+      }
+    }, (error) => {
+      console.error('Error in bikes listener:', error);
+    });
+    
+    unsubscribeFunctions.push(bikesUnsubscribe);
+    
+    // Instead of subscribing to just "active" rides which might include old data,
+    // let's subscribe to all recent rides and filter them properly
+    const recentRidesQuery = query(
+      collection(db, 'rides'), 
+      orderBy('startTime', 'desc'), 
+      limit(100)
+    );
+    
+    const ridesUnsubscribe = onSnapshot(recentRidesQuery, async (ridesSnapshot) => {
+      try {
+        if (!dataCache.bikes) {
+          console.log('No bikes data available yet, skipping rides update');
+          return;
+        }
+        
+        console.log('Recent rides update received');
+        const allRides = ridesSnapshot.docs.map(doc => {
+          const data = doc.data();
+          
+          // Normalize timestamp fields
+          const startTime = data.startTime ? new Date(data.startTime) : (data.startDate?.toDate() || null);
+          const endTime = data.endTime ? new Date(data.endTime) : (data.endDate?.toDate() || null);
+          
+          // A ride should only be considered active if:
+          // 1. It has started (has startTime)
+          // 2. It has not ended (no endTime)
+          // 3. The status is explicitly "active"
+          const hasStarted = !!startTime;
+          const hasNotEnded = !endTime;
+          const statusIsActive = data.status === "active";
+          
+          // Only mark as active if all conditions are met
+          const isActuallyActive = hasStarted && hasNotEnded && statusIsActive;
+          
+          return {
+            id: doc.id,
+            ...data,
+            startTime,
+            endTime,
+            // Use the corrected active status
+            isActive: isActuallyActive,
+            status: data.status || (data.isActive ? "active" : "completed")
+          };
+        });
+        
+        // Update the complete rides cache
+        dataCache.rides = allRides;
+        dataCache.lastUpdated.rides = Date.now();
+        
+        // Log how many rides are actually active after our logic
+        const trueActiveRides = allRides.filter(ride => ride.isActive);
+        console.log(`After applying correct logic: ${trueActiveRides.length} active rides out of ${allRides.length} total rides`);
+        
+        // Notify subscribers with updated data
+        if (dataCache.bikes && dataCache.users && dataCache.reviews) {
+          console.log('Notifying subscribers of rides update...');
+          
+          // Also fetch active rides from Realtime Database for consistency
+          getActiveRidesFromRealtime().then(activeRidesFromRealtime => {
+            callback({
+              bikes: dataCache.bikes,
+              users: dataCache.users,
+              rides: dataCache.rides,
+              reviews: dataCache.reviews,
+              stats: calculateStats(
+                dataCache.bikes, 
+                dataCache.users, 
+                dataCache.rides, 
+                dataCache.reviews,
+                activeRidesFromRealtime
+              )
+            });
+          }).catch(error => {
+            console.error('Error fetching active rides from Realtime DB:', error);
+            // Fallback to empty active rides if Realtime DB fails
+            callback({
+              bikes: dataCache.bikes,
+              users: dataCache.users,
+              rides: dataCache.rides,
+              reviews: dataCache.reviews,
+              stats: calculateStats(
+                dataCache.bikes, 
+                dataCache.users, 
+                dataCache.rides, 
+                dataCache.reviews,
+                []
+              )
+            });
+          });
+        }
+      } catch (error) {
+        console.error('Error in rides subscription:', error);
+        // Fallback to startDate if startTime index doesn't exist
+        console.log('Trying rides subscription with startDate fallback...');
+        try {
+          const fallbackQuery = query(
+            collection(db, 'rides'), 
+            orderBy('startDate', 'desc'), 
+            limit(100)
+          );
+          // We'll handle this with a separate listener if needed
+        } catch (fallbackError) {
+          console.error('Even fallback rides subscription failed:', fallbackError);
+        }
       }
     });
     

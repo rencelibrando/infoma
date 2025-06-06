@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard';
 import BikeRideScreen from './components/BikeRideScreen';
 import StatusCheck from './components/StatusCheck';
 import { AuthProvider } from './context/AuthContext';
+import { AnalyticsProvider } from './context/AnalyticsContext';
 import { auth } from './firebase';
 import GoogleMapsPreloader from './components/GoogleMapsPreloader';
 
@@ -64,7 +65,9 @@ function App() {
           <Route path="/dashboard" element={
             <ProtectedRoute>
               <StatusCheck>
-                <Dashboard />
+                <AnalyticsProvider>
+                  <Dashboard />
+                </AnalyticsProvider>
               </StatusCheck>
             </ProtectedRoute>
           } />

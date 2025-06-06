@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import AnalyticsChart from './AnalyticsChart';
 import RatingsChart from './RatingsChart';
-import { getAnalyticsData, subscribeToAnalytics, clearReviewsCache } from '../services/dashboardService';
+import { getAnalyticsData, subscribeToAnalytics, clearReviewsCache, clearAllCache } from '../services/dashboardService';
+import { useAnalytics } from '../context/AnalyticsContext';
 
 // Pine green and gray theme colors
 const colors = {
@@ -175,68 +176,68 @@ const RefreshButton = styled.button`
   }
 `;
 
+const DebugSection = styled.div`
+  background-color: #f0f8ff;
+  border: 2px solid ${colors.pineGreen};
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 20px;
+  font-family: monospace;
+  font-size: 12px;
+`;
+
+const DebugTitle = styled.h4`
+  color: ${colors.pineGreen};
+  margin: 0 0 10px 0;
+`;
+
+const DebugInfo = styled.div`
+  margin: 5px 0;
+  color: ${colors.darkGray};
+`;
+
+const LoadingContainer = styled.div`
+  text-align: center;
+  padding: 40px;
+`;
+
+const Spinner = styled.div`
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-top: 4px solid ${colors.pineGreen};
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+const LoadingText = styled.div`
+  margin-top: 10px;
+  color: ${colors.pineGreen};
+`;
+
+const ErrorContainer = styled.div`
+  text-align: center;
+  padding: 40px;
+  color: ${colors.danger};
+`;
+
+const ErrorText = styled.div`
+  margin-top: 10px;
+`;
+
 const Analytics = () => {
-  const [analyticsData, setAnalyticsData] = useState({
-    bikes: [],
-    users: [],
-    rides: [],
-    reviews: [],
-    stats: {
-      totalBikes: 0,
-      activeBikes: 0,
-      inUseBikes: 0,
-      maintenanceBikes: 0,
-      totalUsers: 0,
-      activeRides: 0,
-      totalRides: 0,
-      totalReviews: 0,
-      averageRating: 0
-    }
-  });
+  const { data, loading, error } = useAnalytics();
   const [recentRentals, setRecentRentals] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
   const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    
-    // Clear reviews cache on component mount to ensure fresh data
-    clearReviewsCache();
-    
-    // Initial data fetch
-    const initialFetch = async () => {
-      try {
-        const data = await getAnalyticsData();
-        setAnalyticsData(data);
-        
-        // Set recent rentals
-        const recentRides = data.rides
-          .sort((a, b) => (b.startDate?.seconds || 0) - (a.startDate?.seconds || 0))
-          .slice(0, 5)
-          .map(ride => ({
-            id: ride.id,
-            bikeId: ride.bikeId,
-            userId: ride.userId,
-            status: ride.isActive ? 'active' : 'completed',
-            createdAt: ride.startDate?.toDate() || new Date()
-          }));
-        
-        setRecentRentals(recentRides);
-        setLastUpdateTime(new Date());
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching analytics data:', error);
-        setLoading(false);
-      }
-    };
-    
-    initialFetch();
-    
-    // Set up real-time listener
-    const unsubscribe = subscribeToAnalytics((data) => {
-      setAnalyticsData(data);
-      
+    if (data) {
       // Set recent rentals
       const recentRides = data.rides
         .sort((a, b) => (b.startDate?.seconds || 0) - (a.startDate?.seconds || 0))
@@ -257,48 +258,27 @@ const Analytics = () => {
       setTimeout(() => {
         setShowUpdateIndicator(false);
       }, 3000);
-    });
-    
-    // Cleanup listener on component unmount
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  // Add refresh function to manually update the analytics data
-  const handleRefresh = async () => {
-    try {
-      setLoading(true);
-      clearReviewsCache();
-      const data = await getAnalyticsData();
-      setAnalyticsData(data);
-      setLastUpdateTime(new Date());
-      setShowUpdateIndicator(true);
-      setTimeout(() => {
-        setShowUpdateIndicator(false);
-      }, 3000);
-    } catch (error) {
-      console.error('Error refreshing analytics data:', error);
-    } finally {
-      setLoading(false);
     }
-  };
-
-  const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
+  }, [data]);
 
   if (loading) {
-    return <LoadingMessage>Loading analytics data...</LoadingMessage>;
+    return (
+      <LoadingContainer>
+        <Spinner />
+        <LoadingText>Loading analytics...</LoadingText>
+      </LoadingContainer>
+    );
   }
 
-  const { stats } = analyticsData;
+  if (error) {
+    return (
+      <ErrorContainer>
+        <ErrorText>Error loading analytics: {error}</ErrorText>
+      </ErrorContainer>
+    );
+  }
+
+  const { stats } = data;
 
   return (
     <Container>
@@ -314,7 +294,7 @@ const Analytics = () => {
         Last updated: {lastUpdateTime.toLocaleTimeString()}
       </LastUpdateTime>
       
-      <RefreshButton onClick={handleRefresh}>
+      <RefreshButton onClick={() => {}}>
         <span>🔄</span> Refresh Data
       </RefreshButton>
       
@@ -366,9 +346,9 @@ const Analytics = () => {
         <p>No bikes found in the analytics data.</p>
       )}
       
-      <AnalyticsChart data={analyticsData} />
+      <AnalyticsChart data={data} />
       
-      <RatingsChart data={analyticsData} />
+      <RatingsChart data={data} />
       
       <RecentActivitiesCard>
         <SectionTitle>Recent Rides</SectionTitle>
@@ -386,7 +366,7 @@ const Analytics = () => {
                     Bike {rental.bikeId} rented by {rental.userId || 'Unknown User'}
                   </ActivityTitle>
                   <ActivityTime>
-                    {formatDate(rental.createdAt)}
+                    {new Date(rental.createdAt).toLocaleString()}
                   </ActivityTime>
                 </ActivityContent>
               </ActivityItem>
