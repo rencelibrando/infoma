@@ -4,10 +4,58 @@ import { collection, query, where, onSnapshot, orderBy, limit, getDoc, doc, upda
 import { ref, onValue, off, child, get } from 'firebase/database';
 import { db, realtimeDb } from '../../firebase';
 import styled from 'styled-components';
-import { Marker, InfoWindow, Polyline, Circle, HeatmapLayer, GoogleMap, useJsApiLoader } from '@react-google-maps/api';
+import { Marker, InfoWindow, Polyline, Circle, GoogleMap, useJsApiLoader } from '@react-google-maps/api';
 import MapContainer from '../MapContainer';
 import { useDataContext } from '../../context/DataContext';
 import { auth } from '../../firebase';
+
+// Add CSS for pulsing animations
+const pulseStyles = `
+  @keyframes liveLocationPulse {
+    0% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+    50% {
+      transform: scale(1.1);
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 0.8;
+    }
+  }
+  
+  @keyframes ripple {
+    0% {
+      transform: scale(0.8);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(2.5);
+      opacity: 0;
+    }
+  }
+  
+  .live-pulse-circle {
+    animation: liveLocationPulse 2s ease-in-out infinite;
+  }
+  
+  .live-ripple-circle {
+    animation: ripple 3s ease-out infinite;
+  }
+`;
+
+// Inject styles into document head
+if (typeof document !== 'undefined') {
+  const existingStyle = document.getElementById('live-location-styles');
+  if (!existingStyle) {
+    const style = document.createElement('style');
+    style.id = 'live-location-styles';
+    style.textContent = pulseStyles;
+    document.head.appendChild(style);
+  }
+}
 
 // Enhanced color theme
 const colors = {
@@ -27,75 +75,141 @@ const colors = {
   indigo: '#3F51B5'
 };
 
+// Add CSS animations for InfoWindow visualizations
+const injectAnimationStyles = () => {
+  // Check if animations are already injected
+  if (document.getElementById('live-tracking-animations')) return;
+  
+  const style = document.createElement('style');
+  style.id = 'live-tracking-animations';
+  style.textContent = `
+    @keyframes liveLocationPulse {
+      0%, 100% { 
+        transform: scale(1); 
+        opacity: 0.3; 
+      }
+      50% { 
+        transform: scale(1.1); 
+        opacity: 0.5; 
+      }
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    @keyframes ripple {
+      0% {
+        transform: scale(1);
+        opacity: 0.6;
+      }
+      100% {
+        transform: scale(2);
+        opacity: 0;
+      }
+    }
+
+    @keyframes circleHover {
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(1.05); opacity: 0.8; }
+    }
+
+    /* Interactive circle styles */
+    .clickable-circle {
+      cursor: pointer !important;
+      transition: all 0.2s ease;
+    }
+
+    .clickable-circle:hover {
+      animation: circleHover 0.3s ease-in-out;
+    }
+
+    /* Map container pointer styles */
+    .gm-style div[role="button"] {
+      cursor: pointer !important;
+    }
+
+    /* Enhanced pulse animation for live circles */
+    .live-pulse-circle {
+      animation: liveLocationPulse 3s infinite ease-in-out;
+    }
+
+    .live-pulse-circle-fast {
+      animation: liveLocationPulse 2s infinite ease-in-out;
+    }
+
+    .live-pulse-circle-slow {
+      animation: liveLocationPulse 4s infinite ease-in-out;
+    }
+  `;
+  document.head.appendChild(style);
+};
+
 const DashboardContainer = styled.div`
-  padding: 20px;
+  padding: 15px; // Reduced from 20px
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  min-height: 100vh;
+  min-height: calc(100vh - 60px); // Reduced
 `;
 
 const Title = styled.h2`
-  margin-bottom: 20px;
-  color: ${colors.darkGray};
+  color: ${colors.pineGreen};
+  margin-bottom: 15px; // Reduced from 20px
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 28px;
-  font-weight: 600;
+  gap: 10px; // Reduced from 15px
+  font-size: 22px; // Reduced from 24px
+  font-weight: 700;
 `;
 
 const LiveIndicator = styled.div`
-  width: 12px;
-  height: 12px;
+  width: 8px; // Reduced from 10px
+  height: 8px;
+  background: ${colors.success};
   border-radius: 50%;
-  background-color: ${colors.danger};
   animation: pulse 2s infinite;
   
   @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 rgba(211, 47, 47, 0.7);
-    }
-    70% {
-      box-shadow: 0 0 0 10px rgba(211, 47, 47, 0);
-    }
-    100% {
-      box-shadow: 0 0 0 0 rgba(211, 47, 47, 0);
-    }
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
   }
 `;
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); // Reduced from 250px
+  gap: 12px; // Reduced from 15px
+  margin-bottom: 15px; // Reduced from 20px
 `;
 
 const StatCard = styled.div`
-  background: linear-gradient(135deg, ${colors.white} 0%, #f8f9fa 100%);
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: ${colors.white};
+  border-radius: 8px; // Reduced from 12px
+  padding: 12px; // Reduced from 15px
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); // Reduced
+  transition: all 0.2s ease;
+  border-left: 4px solid ${props => props.color || colors.pineGreen};
   
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px); // Reduced from -2px
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   }
 `;
 
 const StatValue = styled.div`
-  font-size: 32px;
+  font-size: 20px; // Reduced from 24px
   font-weight: bold;
   color: ${props => props.color || colors.pineGreen};
-  margin-bottom: 5px;
+  margin-bottom: 3px; // Reduced from 5px
 `;
 
 const StatLabel = styled.div`
-  font-size: 14px;
+  font-size: 11px; // Reduced from 12px
   color: ${colors.mediumGray};
-  font-weight: 500;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 `;
 
 const AlertsContainer = styled.div`
@@ -148,25 +262,19 @@ const AlertIcon = styled.div`
 `;
 
 const MapWrapper = styled.div`
-  height: 600px;
-  width: 100%;
-  border-radius: 12px;
+  height: 500px; // Reduced from 600px
+  border-radius: 8px; // Reduced from 12px
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  margin-bottom: 20px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  position: relative;
 `;
 
 const ControlsContainer = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 15px;
-  margin-bottom: 20px;
-  align-items: center;
   background: ${colors.white};
-  padding: 15px;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border-radius: 8px; // Reduced from 12px
+  padding: 12px; // Reduced from 15px
+  margin-bottom: 15px; // Reduced from 20px
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 `;
 
 const ToggleButton = styled.button`
@@ -190,26 +298,26 @@ const ToggleButton = styled.button`
 
 const RidesList = styled.div`
   background: ${colors.white};
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border-radius: 8px; // Reduced from 12px
+  padding: 12px; // Reduced from 15px
+  margin-top: 15px; // Reduced from 20px
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  max-height: 400px; // Reduced from 500px
+  overflow-y: auto;
 `;
 
-const RideItem = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  margin-bottom: 10px;
-  border-radius: 8px;
-  background: ${colors.lightGray};
-  cursor: pointer;
+const RideCard = styled.div`
+  border: 1px solid ${colors.lightGray};
+  border-radius: 6px; // Reduced from 8px
+  padding: 10px; // Reduced from 12px
+  margin-bottom: 8px; // Reduced from 10px
   transition: all 0.2s ease;
+  cursor: pointer;
   
   &:hover {
-    background: ${colors.pineGreen};
-    color: ${colors.white};
-    transform: translateX(5px);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    border-color: ${colors.pineGreen};
   }
 `;
 
@@ -236,22 +344,21 @@ const RideStatus = styled.span`
 `;
 
 const InfoWindowContent = styled.div`
-  padding: 15px;
-  width: 350px;
-  max-height: 500px;
-  overflow-y: auto;
+  padding: 8px; // Reduced from 10px
+  min-width: 250px; // Reduced from 300px
+  max-width: 350px; // Reduced from 400px
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   
-  @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.7);
-    }
-    70% {
-      box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
-    }
-    100% {
-      box-shadow: 0 0 0 0 rgba(76, 175, 80, 0);
-    }
+  h3 {
+    margin: 0 0 8px 0; // Reduced from 10px
+    font-size: 14px; // Reduced from 16px
+    font-weight: 600;
+  }
+  
+  p {
+    margin: 3px 0; // Reduced from 5px
+    font-size: 11px; // Reduced from 12px
+    line-height: 1.3; // Reduced from 1.4
   }
 `;
 
@@ -264,7 +371,6 @@ const RealTimeTrackingDashboard = () => {
   const [activeTab, setActiveTab] = useState('live');
   const [activeRides, setActiveRides] = useState([]);
   const [selectedRide, setSelectedRide] = useState(null);
-  const [showHeatmap, setShowHeatmap] = useState(false);
   const [showTrails, setShowTrails] = useState(true);
   const [alerts, setAlerts] = useState([]);
   const [stats, setStats] = useState({
@@ -278,6 +384,17 @@ const RealTimeTrackingDashboard = () => {
   const [liveLocations, setLiveLocations] = useState({});
   const [authError, setAuthError] = useState(null);
   
+  // New state for tracking ride paths and trails
+  const [ridePaths, setRidePaths] = useState({}); // Store complete paths for each ride
+  const [rideTrails, setRideTrails] = useState({}); // Store trail data for display
+  const [showMarkerClusters, setShowMarkerClusters] = useState(false);
+  const [trailSettings, setTrailSettings] = useState({
+    maxTrailLength: 50, // Maximum number of points in trail
+    trailOpacity: 0.7,
+    trailWeight: 3,
+    fadeTrail: true
+  });
+
   const unsubscribeRefs = useRef([]);
   const realtimeListeners = useRef([]);
 
@@ -298,6 +415,120 @@ const RealTimeTrackingDashboard = () => {
   const [routeData, setRouteData] = useState(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
 
+  // Predefined bike locations for Metro Manila
+  const predefinedBikes = [
+    {
+      id: 'bike-001',
+      name: 'Bambike Manila 01',
+      latitude: 14.5995,
+      longitude: 120.9842,
+      isAvailable: true,
+      maintenanceStatus: 'operational',
+      batteryLevel: 85,
+      lastLocationUpdate: new Date(Date.now() - 10 * 60 * 1000) // 10 minutes ago
+    },
+    {
+      id: 'bike-002', 
+      name: 'Bambike Makati 02',
+      latitude: 14.5547,
+      longitude: 121.0244,
+      isAvailable: true,
+      maintenanceStatus: 'operational',
+      batteryLevel: 92,
+      lastLocationUpdate: new Date(Date.now() - 5 * 60 * 1000) // 5 minutes ago
+    },
+    {
+      id: 'bike-003',
+      name: 'Bambike BGC 03', 
+      latitude: 14.5515,
+      longitude: 121.0473,
+      isAvailable: false,
+      maintenanceStatus: 'operational',
+      batteryLevel: 67,
+      lastLocationUpdate: new Date(Date.now() - 15 * 60 * 1000) // 15 minutes ago
+    },
+    {
+      id: 'bike-004',
+      name: 'Bambike Ortigas 04',
+      latitude: 14.5866,
+      longitude: 121.0635,
+      isAvailable: true,
+      maintenanceStatus: 'operational', 
+      batteryLevel: 78,
+      lastLocationUpdate: new Date(Date.now() - 8 * 60 * 1000) // 8 minutes ago
+    },
+    {
+      id: 'bike-005',
+      name: 'Bambike Quezon 05',
+      latitude: 14.6760,
+      longitude: 121.0437,
+      isAvailable: true,
+      maintenanceStatus: 'maintenance',
+      batteryLevel: 45,
+      lastLocationUpdate: new Date(Date.now() - 120 * 60 * 1000) // 2 hours ago
+    },
+    {
+      id: 'bike-006',
+      name: 'Bambike Pasig 06',
+      latitude: 14.5764,
+      longitude: 121.0851,
+      isAvailable: false,
+      maintenanceStatus: 'operational',
+      batteryLevel: 23,
+      lastLocationUpdate: new Date(Date.now() - 30 * 60 * 1000) // 30 minutes ago
+    },
+    {
+      id: 'bike-007',
+      name: 'Bambike Taguig 07', 
+      latitude: 14.5176,
+      longitude: 121.0509,
+      isAvailable: true,
+      maintenanceStatus: 'operational',
+      batteryLevel: 89,
+      lastLocationUpdate: new Date(Date.now() - 3 * 60 * 1000) // 3 minutes ago
+    },
+    {
+      id: 'bike-008',
+      name: 'Bambike Marikina 08',
+      latitude: 14.6507,
+      longitude: 121.1029,
+      isAvailable: true,
+      maintenanceStatus: 'operational',
+      batteryLevel: 76,
+      lastLocationUpdate: new Date(Date.now() - 12 * 60 * 1000) // 12 minutes ago
+    },
+    {
+      id: 'bike-009',
+      name: 'Bambike Paranaque 09',
+      latitude: 14.4793,
+      longitude: 121.0198,
+      isAvailable: false,
+      maintenanceStatus: 'maintenance',
+      batteryLevel: 34,
+      lastLocationUpdate: new Date(Date.now() - 240 * 60 * 1000) // 4 hours ago
+    },
+    {
+      id: 'bike-010',
+      name: 'Bambike Muntinlupa 10',
+      latitude: 14.4063,
+      longitude: 121.0346,
+      isAvailable: true,
+      maintenanceStatus: 'operational',
+      batteryLevel: 91,
+      lastLocationUpdate: new Date(Date.now() - 7 * 60 * 1000) // 7 minutes ago
+    }
+  ];
+
+  // Combine real bikes data with predefined bikes for demonstration
+  const allBikes = [...(bikes || []), ...predefinedBikes];
+
+  // Add debugging for data availability (moved after state declarations)
+  useEffect(() => {
+    console.log('Dashboard - Bikes data:', bikes?.length || 0, bikes);
+    console.log('Dashboard - Active rides:', activeRides?.length || 0, activeRides);
+    console.log('Dashboard - Live locations:', Object.keys(liveLocations).length, liveLocations);
+  }, [bikes, activeRides, liveLocations]);
+
   // Monitor authentication status
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
@@ -313,8 +544,58 @@ const RealTimeTrackingDashboard = () => {
     return () => unsubscribe();
   }, []);
 
+  // Enhanced trail management
+  const updateRideTrail = useCallback((userId, newLocation) => {
+    if (!newLocation || !newLocation.latitude || !newLocation.longitude) return;
+
+    setRidePaths(prev => {
+      const currentPath = prev[userId] || [];
+      const newPoint = {
+        lat: parseFloat(newLocation.latitude),
+        lng: parseFloat(newLocation.longitude),
+        timestamp: newLocation.timestamp || Date.now(),
+        speed: newLocation.speed || 0,
+        bearing: newLocation.bearing || 0
+      };
+
+      // Add new point and limit trail length
+      const updatedPath = [...currentPath, newPoint];
+      if (updatedPath.length > trailSettings.maxTrailLength) {
+        updatedPath.shift(); // Remove oldest point
+      }
+
+      return {
+        ...prev,
+        [userId]: updatedPath
+      };
+    });
+
+    // Update trail display data
+    setRideTrails(prev => {
+      const path = prev[userId] || [];
+      const newTrailPoint = {
+        lat: parseFloat(newLocation.latitude),
+        lng: parseFloat(newLocation.longitude),
+        timestamp: Date.now()
+      };
+
+      const updatedTrail = [...path, newTrailPoint];
+      if (updatedTrail.length > trailSettings.maxTrailLength) {
+        updatedTrail.shift();
+      }
+
+      return {
+        ...prev,
+        [userId]: updatedTrail
+      };
+    });
+  }, [trailSettings.maxTrailLength]);
+
   // Setup real-time listeners for active rides using Realtime Database
   useEffect(() => {
+    // Inject CSS animations for InfoWindow visualizations
+    injectAnimationStyles();
+    
     const setupRealTimeListeners = () => {
       console.log('Setting up real-time listeners...');
       
@@ -323,13 +604,73 @@ const RealTimeTrackingDashboard = () => {
       const activeRidesListener = onValue(activeRidesRef, (snapshot) => {
         try {
           const activeRidesData = snapshot.val() || {};
-          const rides = Object.entries(activeRidesData).map(([userId, rideData]) => ({
-            ...rideData,
-            userId: userId,
-            id: rideData.rideId || rideData.id
-          }));
+          const rides = Object.entries(activeRidesData).map(([userId, rideData]) => {
+            // Process and validate the ride data
+            const processedRide = {
+              ...rideData,
+              userId: userId,
+              id: rideData.rideId || rideData.id || userId
+            };
+            
+            // Ensure startTime is properly formatted
+            if (rideData.startTime) {
+              // Handle different timestamp formats
+              if (typeof rideData.startTime === 'string') {
+                processedRide.startTime = new Date(rideData.startTime);
+              } else if (typeof rideData.startTime === 'number') {
+                // Handle both milliseconds and seconds timestamps
+                const timestamp = rideData.startTime;
+                processedRide.startTime = new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp);
+              } else if (rideData.startTime && typeof rideData.startTime === 'object') {
+                // Handle Firestore timestamp objects
+                if (rideData.startTime.seconds) {
+                  processedRide.startTime = new Date(rideData.startTime.seconds * 1000);
+                } else if (rideData.startTime.toDate) {
+                  processedRide.startTime = rideData.startTime.toDate();
+                } else {
+                  processedRide.startTime = new Date(rideData.startTime);
+                }
+              }
+              
+              // Validate the parsed date
+              if (isNaN(processedRide.startTime.getTime())) {
+                console.warn(`Invalid startTime for user ${userId}:`, rideData.startTime);
+                processedRide.startTime = null;
+              }
+            } else {
+              // If no startTime, try to use other timestamp fields
+              const timestampFields = ['createdAt', 'timestamp', 'deviceTimestamp'];
+              for (const field of timestampFields) {
+                if (rideData[field]) {
+                  try {
+                    processedRide.startTime = new Date(rideData[field]);
+                    if (!isNaN(processedRide.startTime.getTime())) {
+                      break;
+                    }
+                  } catch (e) {
+                    // Continue to next field
+                  }
+                }
+              }
+              
+              // If still no valid startTime, set to null
+              if (!processedRide.startTime || isNaN(processedRide.startTime.getTime())) {
+                console.warn(`No valid timestamp found for user ${userId}`, rideData);
+                processedRide.startTime = null;
+              }
+            }
+            
+            return processedRide;
+          });
           
           console.log('Active rides updated:', rides.length);
+          // Debug timestamp processing
+          rides.forEach(ride => {
+            if (!ride.startTime) {
+              console.warn(`Missing startTime for ride ${ride.id}:`, ride);
+            }
+          });
+          
           setActiveRides(rides);
           calculateStats(rides);
           checkForAlerts(rides);
@@ -349,8 +690,28 @@ const RealTimeTrackingDashboard = () => {
         try {
           const liveLocationData = snapshot.val() || {};
           console.log('Live locations updated:', Object.keys(liveLocationData).length);
-          setLiveLocations(liveLocationData);
-          setAuthError(null); // Clear auth error on successful data fetch
+          
+          // Update live locations with trail updates
+          setLiveLocations(prevLocations => {
+            const newLocations = { ...liveLocationData };
+            
+            // Update trails for each user with new location data
+            Object.entries(newLocations).forEach(([userId, locationData]) => {
+              if (locationData && locationData.latitude && locationData.longitude) {
+                // Only update trail if location has actually changed
+                const prevLocation = prevLocations[userId];
+                if (!prevLocation || 
+                    prevLocation.latitude !== locationData.latitude || 
+                    prevLocation.longitude !== locationData.longitude) {
+                  updateRideTrail(userId, locationData);
+                }
+              }
+            });
+            
+            return newLocations;
+          });
+          
+          setAuthError(null);
         } catch (error) {
           console.error('Error processing live location data:', error);
           setAuthError('Error loading live locations');
@@ -379,7 +740,7 @@ const RealTimeTrackingDashboard = () => {
       unsubscribeRefs.current.forEach(unsubscribe => unsubscribe());
       unsubscribeRefs.current = [];
     };
-  }, []);
+  }, [updateRideTrail]);
 
   const calculateStats = (rides) => {
     const totalActiveRides = rides.length;
@@ -458,15 +819,25 @@ const RealTimeTrackingDashboard = () => {
   };
 
   const handleRideClick = (ride) => {
-    setSelectedRide(ride);
-    const liveLocation = liveLocations[ride.userId];
-    if (liveLocation) {
-      setMapCenter({
-        lat: liveLocation.latitude,
-        lng: liveLocation.longitude
-      });
+    console.log('🔥 handleRideClick called with:', ride);
+    
+    // Use unified position calculation for consistency
+    const { position, locationStatus } = getUnifiedPosition(ride, 'activeRide');
+    
+    // Store the ride with position for InfoWindow consistency
+    const rideWithPosition = {
+      ...ride,
+      position,
+      locationStatus
+    };
+    
+    setSelectedRide(rideWithPosition);
+    
+    // Center map on the calculated position
+    setMapCenter(position);
       setMapZoom(16);
-    }
+    
+    console.log('🔥 selectedRide set with position:', rideWithPosition);
   };
 
   const handleEmergencyResponse = async (rideId) => {
@@ -483,46 +854,249 @@ const RealTimeTrackingDashboard = () => {
     }
   };
 
-  const getMarkerIcon = (ride) => {
-    let color = colors.success;
-    let scale = 12;
+  // Consolidated marker icon function - replaces getMarkerIcon, getEnhancedMarkerIcon, and getEnhancedBikeIcon
+  const getUnifiedMarkerIcon = (type, data, options = {}) => {
+    const { locationStatus = 'unknown', size = 24 } = options;
     
-    if (ride.status === 'emergency') {
-      color = colors.danger;
-      scale = 16; // Larger for emergency
-    } else if (ride.status === 'paused') {
-      color = colors.warning;
-      scale = 14;
+    let baseColor, strokeColor;
+    
+    if (type === 'bike') {
+      // Static bike icon logic - solid colors
+      if (!data.isAvailable) {
+        baseColor = colors.danger;
+        strokeColor = '#8B0000';
+      } else if (data.maintenanceStatus === 'maintenance') {
+        baseColor = colors.warning;
+        strokeColor = '#FF8C00';
+      } else if (data.batteryLevel && data.batteryLevel < 20) {
+        baseColor = '#FF6B35';
+        strokeColor = '#CC5429';
+      } else {
+        baseColor = colors.success;
+        strokeColor = '#008000';
+      }
+    } else if (type === 'activeRide') {
+      // Active ride marker logic - solid colors
+      if (data.status === 'emergency') {
+        baseColor = colors.danger;
+        strokeColor = '#8B0000';
+      } else if (data.status === 'paused') {
+        baseColor = colors.warning;
+        strokeColor = '#FF8C00';
+      } else {
+        baseColor = colors.success;
+        strokeColor = '#008000';
+      }
     }
-
-    // Create a more visible marker with bike icon
+    
     return {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: scale,
-      fillColor: color,
-      fillOpacity: 0.9,
-      strokeColor: colors.white,
-      strokeWeight: 3,
-      strokeOpacity: 1,
-      // Add a pulsing effect for active rides
-      anchor: new google.maps.Point(0, 0),
-      labelOrigin: new google.maps.Point(0, 0)
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+        <svg width="${size}" height="${size}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="1" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.3)"/>
+            </filter>
+          </defs>
+          <!-- Solid background circle -->
+          <circle cx="12" cy="12" r="10" 
+                  fill="${baseColor}" 
+                  stroke="${strokeColor}" 
+                  stroke-width="2" 
+                  filter="url(#shadow)"/>
+          <!-- Icon letter -->
+          <text x="12" y="16" text-anchor="middle" fill="white" font-size="12" font-weight="bold">
+            ${type === 'bike' ? 'B' : 'U'}
+          </text>
+        </svg>
+      `)}`,
+      scaledSize: new google.maps.Size(size, size),
+      anchor: new google.maps.Point(size/2, size/2)
     };
   };
 
+  // Unified position calculation function
+  const getUnifiedPosition = (data, type, fallbackOptions = {}) => {
+    let position = null;
+    let locationStatus = 'unknown';
+    let locationAge = null;
+    
+    if (type === 'bike') {
+      // Strategy 1: Use current latitude/longitude
+      if (data.latitude && data.longitude && 
+          !isNaN(parseFloat(data.latitude)) && !isNaN(parseFloat(data.longitude))) {
+        position = {
+          lat: parseFloat(data.latitude),
+          lng: parseFloat(data.longitude)
+        };
+        
+        if (data.lastLocationUpdate) {
+          const lastUpdate = new Date(data.lastLocationUpdate);
+          const now = new Date();
+          locationAge = (now - lastUpdate) / (1000 * 60);
+          
+          locationStatus = locationAge < 60 ? 'recent' : 
+                          locationAge < 24 * 60 ? 'stale' : 'old';
+        } else {
+          locationStatus = 'stale';
+        }
+      }
+      // Strategy 2: Use last known location
+      else if (data.lastKnownLocation?.latitude && data.lastKnownLocation?.longitude) {
+        position = {
+          lat: parseFloat(data.lastKnownLocation.latitude),
+          lng: parseFloat(data.lastKnownLocation.longitude)
+        };
+        locationStatus = 'lastKnown';
+        
+        if (data.lastKnownLocation.timestamp) {
+          const lastUpdate = new Date(data.lastKnownLocation.timestamp);
+          locationAge = (Date.now() - lastUpdate.getTime()) / (1000 * 60);
+        }
+      }
+      // Strategy 3: Use initial deployment location
+      else if (data.initialLocation?.latitude && data.initialLocation?.longitude) {
+        position = {
+          lat: parseFloat(data.initialLocation.latitude),
+          lng: parseFloat(data.initialLocation.longitude)
+        };
+        locationStatus = 'initial';
+      }
+    } else if (type === 'activeRide') {
+      // For active rides, prioritize live location over stored location
+      const liveLocation = liveLocations[data.userId];
+      const rideLocation = data.currentLocation;
+      const location = liveLocation || rideLocation;
+      
+      if (location?.latitude && location?.longitude) {
+        position = {
+          lat: parseFloat(location.latitude),
+          lng: parseFloat(location.longitude)
+        };
+        locationStatus = liveLocation ? 'recent' : 'stale';
+      }
+    }
+    
+    // Fallback to default location if no valid position found
+    if (!position) {
+      const { lat = 14.5995, lng = 120.9842, addRandomOffset = true } = fallbackOptions;
+      const offset = addRandomOffset ? (Math.random() - 0.5) * 0.01 : 0;
+      
+      position = {
+        lat: lat + offset,
+        lng: lng + offset
+      };
+      locationStatus = 'fallback';
+    }
+    
+    return { position, locationStatus, locationAge };
+  };
+
+  // Get trail color based on ride status and speed
+  const getTrailColor = (ride) => {
+    const liveLocation = liveLocations[ride.userId];
+    const speed = liveLocation?.speed || 0;
+    
+    if (ride.status === 'emergency') return colors.danger;
+    if (ride.status === 'paused') return colors.warning;
+    if (speed > 25) return colors.info;
+    if (speed > 15) return colors.success;
+    return colors.pineGreen;
+  };
+
+  // Clear trails for a specific ride
+  const clearRideTrail = (userId) => {
+    setRidePaths(prev => {
+      const updated = { ...prev };
+      delete updated[userId];
+      return updated;
+    });
+    setRideTrails(prev => {
+      const updated = { ...prev };
+      delete updated[userId];
+      return updated;
+    });
+  };
+
+  // Clear all trails
+  const clearAllTrails = () => {
+    setRidePaths({});
+    setRideTrails({});
+  };
+
   const formatDuration = (startTime) => {
-    const start = new Date(startTime);
-    const duration = Date.now() - start.getTime();
-    const hours = Math.floor(duration / (1000 * 60 * 60));
-    const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours}h ${minutes}m`;
+    // Handle null, undefined, or invalid startTime
+    if (!startTime) {
+      return 'N/A';
+    }
+    
+    try {
+      let start;
+      
+      // Handle different timestamp formats
+      if (typeof startTime === 'object' && startTime.toDate) {
+        // Firestore Timestamp object
+        start = startTime.toDate();
+      } else if (typeof startTime === 'object' && startTime.seconds) {
+        // Firestore Timestamp-like object
+        start = new Date(startTime.seconds * 1000);
+      } else if (typeof startTime === 'number') {
+        // Unix timestamp (milliseconds or seconds)
+        start = startTime > 1000000000000 ? new Date(startTime) : new Date(startTime * 1000);
+      } else if (typeof startTime === 'string') {
+        // ISO string or other date string
+        start = new Date(startTime);
+      } else {
+        // Fallback
+        start = new Date(startTime);
+      }
+      
+      // Validate the date
+      if (isNaN(start.getTime())) {
+        console.warn('Invalid startTime provided to formatDuration:', startTime);
+        return 'Invalid time';
+      }
+      
+      const duration = Date.now() - start.getTime();
+      
+      // Handle negative duration (future start time)
+      if (duration < 0) {
+        return 'Not started';
+      }
+      
+      const hours = Math.floor(duration / (1000 * 60 * 60));
+      const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
+      
+      // Handle very long durations
+      if (hours > 999) {
+        return '999h+';
+      }
+      
+      return `${hours}h ${minutes}m`;
+    } catch (error) {
+      console.error('Error in formatDuration:', error, 'startTime:', startTime);
+      return 'Error';
+    }
   };
 
   const formatTime = (milliseconds) => {
-    if (!milliseconds) return 'N/A';
+    // Handle null, undefined, or invalid values
+    if (!milliseconds || typeof milliseconds !== 'number' || isNaN(milliseconds)) {
+      return 'N/A';
+    }
+    
+    // Handle negative values
+    if (milliseconds < 0) {
+      return 'N/A';
+    }
+    
     const hours = Math.floor(milliseconds / (1000 * 60 * 60));
     const minutes = Math.floor((milliseconds % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((milliseconds % (1000 * 60)) / 1000);
+    
+    // Handle very long durations
+    if (hours > 999) {
+      return '999h+';
+    }
     
     if (hours > 0) {
       return `${hours}h ${minutes}m ${seconds}s`;
@@ -934,15 +1508,7 @@ const RealTimeTrackingDashboard = () => {
                           lat: routeData.startLocation.latitude || routeData.startLocation.lat,
                           lng: routeData.startLocation.longitude || routeData.startLocation.lng
                         }}
-                        icon={{
-                          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <circle cx="12" cy="12" r="8" fill="${colors.success}" stroke="white" stroke-width="3"/>
-                              <text x="12" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">S</text>
-                            </svg>
-                          `),
-                          scaledSize: { width: 24, height: 24 }
-                        }}
+                        icon={getUnifiedMarkerIcon('bike', routeData.startLocation)}
                         title="Start Location"
                       />
                     )}
@@ -954,15 +1520,7 @@ const RealTimeTrackingDashboard = () => {
                           lat: routeData.endLocation.latitude || routeData.endLocation.lat,
                           lng: routeData.endLocation.longitude || routeData.endLocation.lng
                         }}
-                        icon={{
-                          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <circle cx="12" cy="12" r="8" fill="${colors.danger}" stroke="white" stroke-width="3"/>
-                              <text x="12" y="16" text-anchor="middle" fill="white" font-size="10" font-weight="bold">E</text>
-                            </svg>
-                          `),
-                          scaledSize: { width: 24, height: 24 }
-                        }}
+                        icon={getUnifiedMarkerIcon('bike', routeData.endLocation)}
                         title="End Location"
                       />
                     )}
@@ -1782,9 +2340,9 @@ const RealTimeTrackingDashboard = () => {
       {/* Tab Navigation */}
       <div style={{
         background: colors.white,
-        borderRadius: '12px',
-        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08)',
-        marginBottom: '20px',
+        borderRadius: '8px', // Reduced from 12px
+        boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)', // Reduced
+        marginBottom: '15px', // Reduced from 20px
         overflow: 'hidden'
       }}>
         <div style={{
@@ -1799,9 +2357,9 @@ const RealTimeTrackingDashboard = () => {
                 'transparent',
               color: activeTab === 'live' ? colors.white : colors.darkGray,
               border: 'none',
-              padding: '15px 25px',
+              padding: '10px 18px', // Reduced from 15px 25px
               cursor: 'pointer',
-              fontSize: '16px',
+              fontSize: '14px', // Reduced from 16px
               fontWeight: '600',
               transition: 'all 0.2s ease',
               position: 'relative'
@@ -1817,9 +2375,9 @@ const RealTimeTrackingDashboard = () => {
                 'transparent',
               color: activeTab === 'history' ? colors.white : colors.darkGray,
               border: 'none',
-              padding: '15px 25px',
+              padding: '10px 18px', // Reduced from 15px 25px
               cursor: 'pointer',
-              fontSize: '16px',
+              fontSize: '14px', // Reduced from 16px
               fontWeight: '600',
               transition: 'all 0.2s ease',
               position: 'relative'
@@ -1829,7 +2387,7 @@ const RealTimeTrackingDashboard = () => {
           </button>
         </div>
 
-        <div style={{ padding: activeTab === 'live' ? '20px' : '0' }}>
+        <div style={{ padding: activeTab === 'live' ? '15px' : '0' }}> {/* Reduced from 20px */}
           {activeTab === 'live' ? (
             <>
               {/* Authentication Error Banner */}
@@ -1837,15 +2395,15 @@ const RealTimeTrackingDashboard = () => {
                 <div style={{
                   backgroundColor: '#ffebee',
                   border: `2px solid ${colors.danger}`,
-                  borderRadius: '8px',
-                  padding: '15px',
-                  marginBottom: '20px',
+                  borderRadius: '6px', // Reduced from 8px
+                  padding: '10px', // Reduced from 15px
+                  marginBottom: '15px', // Reduced from 20px
                   textAlign: 'center'
                 }}>
-                  <div style={{ color: colors.danger, fontWeight: 'bold', marginBottom: '10px' }}>
+                  <div style={{ color: colors.danger, fontWeight: 'bold', marginBottom: '8px' }}> {/* Reduced from 10px */}
                     🚨 Authentication Issue Detected
                   </div>
-                  <div style={{ color: colors.mediumGray, fontSize: '14px', marginBottom: '15px' }}>
+                  <div style={{ color: colors.mediumGray, fontSize: '12px', marginBottom: '10px' }}> {/* Reduced from 14px, 15px */}
                     {authError} - Some data may not be available.
                   </div>
                   <button
@@ -1858,10 +2416,11 @@ const RealTimeTrackingDashboard = () => {
                       backgroundColor: colors.danger,
                       color: 'white',
                       border: 'none',
-                      padding: '8px 16px',
+                      padding: '6px 12px', // Reduced from 8px 16px
                       borderRadius: '4px',
                       cursor: 'pointer',
-                      fontWeight: 'bold'
+                      fontWeight: 'bold',
+                      fontSize: '12px' // Added
                     }}
                   >
                     🔄 Reload Dashboard
@@ -1869,21 +2428,79 @@ const RealTimeTrackingDashboard = () => {
                 </div>
               )}
 
+              {/* Alerts Section */}
+              {alerts.length > 0 && (
+                <div style={{
+                  background: colors.white,
+                  borderRadius: '6px', // Reduced from 8px
+                  padding: '10px', // Reduced from 15px
+                  marginBottom: '15px', // Reduced from 20px
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', // Reduced
+                  border: `2px solid ${colors.warning}`
+                }}>
+                  <h3 style={{ marginBottom: '10px', color: colors.darkGray, fontSize: '14px' }}> {/* Reduced from 15px, added fontSize */}
+                    Active Alerts
+                  </h3>
+                  {alerts.map(alert => (
+                    <div key={alert.id} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px', // Reduced from 10px
+                      padding: '8px', // Reduced from 10px
+                      marginBottom: '6px', // Reduced from 8px
+                      borderRadius: '4px', // Reduced from 6px
+                      backgroundColor: alert.severity === 'high' ? '#ffebee' : 
+                                     alert.severity === 'medium' ? '#fff3e0' : '#e3f2fd',
+                      border: `1px solid ${alert.severity === 'high' ? colors.danger : 
+                                          alert.severity === 'medium' ? colors.warning : colors.info}`
+                    }}>
+                      <div style={{ fontSize: '16px' }}> {/* Reduced from 18px */}
+                        {alert.severity === 'high' ? '⚠️' : alert.severity === 'medium' ? '⚡' : 'ℹ️'}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '3px', fontSize: '12px' }}> {/* Reduced from 5px, added fontSize */}
+                          {alert.message}
+                        </div>
+                        <div style={{ fontSize: '10px', color: colors.mediumGray }}> {/* Reduced from 12px */}
+                          {new Date(alert.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      {alert.severity === 'high' && (
+                        <button
+                          onClick={() => handleEmergencyResponse(alert.rideId)}
+                          style={{
+                            backgroundColor: colors.danger,
+                            color: 'white',
+                            border: 'none',
+                            padding: '6px 12px', // Reduced from 8px 16px
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '11px' // Reduced from 12px
+                          }}
+                        >
+                          Respond
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Stats Grid */}
               <StatsGrid>
                 <StatCard>
-                  <StatValue color={colors.pineGreen}>{bikes ? bikes.length : 0}</StatValue>
+                  <StatValue color={colors.pineGreen}>{allBikes?.length || 0}</StatValue>
                   <StatLabel>Total Bikes</StatLabel>
                 </StatCard>
                 <StatCard>
                   <StatValue color={colors.success}>
-                    {bikes ? bikes.filter(bike => bike.isAvailable && !bike.isInUse).length : 0}
+                    {allBikes ? allBikes.filter(bike => bike?.isAvailable && !bike?.isInUse).length : 0}
                   </StatValue>
                   <StatLabel>Available</StatLabel>
                 </StatCard>
                 <StatCard>
                   <StatValue color={colors.warning}>
-                    {bikes ? bikes.filter(bike => bike.isInUse).length : 0}
+                    {bikes ? bikes.filter(bike => bike?.isInUse).length : 0}
                   </StatValue>
                   <StatLabel>In Use</StatLabel>
                 </StatCard>
@@ -1905,107 +2522,204 @@ const RealTimeTrackingDashboard = () => {
                   </StatValue>
                   <StatLabel>Emergency Alerts</StatLabel>
                 </StatCard>
+                <StatCard>
+                  <StatValue color={colors.info}>{Object.keys(liveLocations).length}</StatValue>
+                  <StatLabel>Live Locations</StatLabel>
+                </StatCard>
               </StatsGrid>
-
-              {/* Alerts Section */}
-              {alerts.length > 0 && (
-                <AlertsContainer>
-                  <h3 style={{ marginBottom: '15px', color: colors.darkGray }}>Active Alerts</h3>
-                  {alerts.map(alert => (
-                    <AlertItem key={alert.id} severity={alert.severity}>
-                      <AlertIcon severity={alert.severity}>
-                        {alert.severity === 'high' ? '⚠️' : alert.severity === 'medium' ? '⚡' : 'ℹ️'}
-                      </AlertIcon>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
-                          {alert.message}
-                        </div>
-                        <div style={{ fontSize: '12px', color: colors.mediumGray }}>
-                          {new Date(alert.timestamp).toLocaleTimeString()}
-                        </div>
-                      </div>
-                      {alert.severity === 'high' && (
-                        <button
-                          onClick={() => handleEmergencyResponse(alert.rideId)}
-                          style={{
-                            backgroundColor: colors.danger,
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '4px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Respond
-                        </button>
-                      )}
-                    </AlertItem>
-                  ))}
-                </AlertsContainer>
-              )}
 
               {/* Controls */}
               <ControlsContainer>
-                <ToggleButton
-                  active={showTrails}
-                  onClick={() => setShowTrails(!showTrails)}
+                <button
+                  onClick={clearAllTrails}
+                  style={{
+                    background: 'linear-gradient(135deg, #FF6B6B, #FF8E8E)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px', // Reduced from 8px
+                    padding: '6px 12px', // Reduced from 10px 20px
+                    cursor: 'pointer',
+                    fontSize: '12px', // Reduced from 14px
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease'
+                  }}
                 >
-                  Show Trails
-                </ToggleButton>
-                <ToggleButton
-                  active={showHeatmap}
-                  onClick={() => setShowHeatmap(!showHeatmap)}
-                >
-                  Heatmap View
-                </ToggleButton>
+                  🧹 Clear Trails
+                </button>
+                
+                {/* Trail Settings */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  marginLeft: '20px',
+                  padding: '8px 12px',
+                  backgroundColor: '#f8f9fa',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  border: '1px solid #e9ecef'
+                }}>
+                  <label style={{ fontWeight: 'bold', color: colors.darkGray }}>Trail Length:</label>
+                  <select
+                    value={trailSettings.maxTrailLength}
+                    onChange={(e) => setTrailSettings(prev => ({ 
+                      ...prev, 
+                      maxTrailLength: parseInt(e.target.value) 
+                    }))}
+                    style={{
+                      padding: '4px 8px',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      backgroundColor: 'white'
+                    }}
+                  >
+                    <option value={10}>Very Short (10)</option>
+                    <option value={25}>Short (25)</option>
+                    <option value={50}>Medium (50)</option>
+                    <option value={100}>Long (100)</option>
+                    <option value={200}>Very Long (200)</option>
+                  </select>
+                  
+                  <label style={{ fontWeight: 'bold', color: colors.darkGray, marginLeft: '15px' }}>Trail Weight:</label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="8"
+                    value={trailSettings.trailWeight}
+                    onChange={(e) => setTrailSettings(prev => ({ 
+                      ...prev, 
+                      trailWeight: parseInt(e.target.value) 
+                    }))}
+                    style={{ width: '60px' }}
+                  />
+                  <span style={{ minWidth: '20px', textAlign: 'center' }}>{trailSettings.trailWeight}px</span>
+                  
+                  <label style={{ fontWeight: 'bold', color: colors.darkGray, marginLeft: '15px' }}>Opacity:</label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.1"
+                    value={trailSettings.trailOpacity}
+                    onChange={(e) => setTrailSettings(prev => ({ 
+                      ...prev, 
+                      trailOpacity: parseFloat(e.target.value) 
+                    }))}
+                    style={{ width: '60px' }}
+                  />
+                  <span style={{ minWidth: '30px', textAlign: 'center' }}>{Math.round(trailSettings.trailOpacity * 100)}%</span>
+                </div>
+                
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '15px',
-                  marginLeft: '20px',
-                  padding: '10px',
+                  gap: '10px', // Reduced from 15px
+                  marginLeft: '15px', // Reduced from 20px
+                  padding: '6px 8px', // Reduced from 10px
                   backgroundColor: '#f8f9fa',
-                  borderRadius: '8px',
-                  fontSize: '12px'
+                  borderRadius: '6px', // Reduced from 8px
+                  fontSize: '11px' // Reduced from 12px
                 }}>
-                  <strong>Map Legend:</strong>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <strong style={{ fontSize: '11px' }}>Map Legend:</strong>
+                  
+                  {/* Bike Status */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                     <div style={{
                       width: '12px',
                       height: '12px',
                       borderRadius: '50%',
-                      backgroundColor: colors.success
-                    }} />
-                    <span>Active Ride</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <div style={{
-                      width: '12px',
-                      height: '12px',
-                      borderRadius: '50%',
-                      backgroundColor: colors.danger
-                    }} />
-                    <span>Emergency</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <div style={{
-                      width: '0',
-                      height: '0',
-                      borderLeft: '6px solid transparent',
-                      borderRight: '6px solid transparent',
-                      borderBottom: `12px solid ${colors.teal}`
-                    }} />
+                      backgroundColor: colors.success,
+                      border: '1px solid white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '7px',
+                      fontWeight: 'bold',
+                      color: 'white'
+                    }}>B</div>
                     <span>Available Bike</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                     <div style={{
-                      width: '0',
-                      height: '0',
-                      borderLeft: '6px solid transparent',
-                      borderRight: '6px solid transparent',
-                      borderBottom: `12px solid ${colors.mediumGray}`
-                    }} />
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: colors.danger,
+                      border: '1px solid white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '7px',
+                      fontWeight: 'bold',
+                      color: 'white'
+                    }}>B</div>
                     <span>Unavailable Bike</span>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <div style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: colors.warning,
+                      border: '1px solid white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '7px',
+                      fontWeight: 'bold',
+                      color: 'white'
+                    }}>B</div>
+                    <span>Maintenance</span>
+                  </div>
+
+                  {/* Active Rides */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <div style={{
+                      width: '12px',
+                      height: '12px',
+                        borderRadius: '50%',
+                      backgroundColor: colors.success, 
+                      border: '1px solid white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '7px',
+                      fontWeight: 'bold',
+                      color: 'white'
+                    }}>U</div>
+                    <span>Active Ride</span>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <div style={{
+                      width: '12px',
+                      height: '12px',
+                        borderRadius: '50%',
+                        backgroundColor: colors.danger,
+                      border: '1px solid white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '7px',
+                      fontWeight: 'bold',
+                      color: 'white', 
+                      animation: 'pulse 1.5s infinite'
+                    }}>U</div>
+                    <span>Emergency</span>
+                  </div>
+
+                  {/* Trails */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                    <div style={{
+                      width: '16px',
+                      height: '2px',
+                      backgroundColor: colors.pineGreen,
+                      borderRadius: '1px'
+                    }} />
+                    <span>Ride Trail</span>
                   </div>
                 </div>
               </ControlsContainer>
@@ -2017,76 +2731,298 @@ const RealTimeTrackingDashboard = () => {
                   zoom={mapZoom}
                   onLoad={() => console.log('Map loaded')}
                 >
-                  {/* Render all bike markers - available bikes */}
-                  {bikes && bikes.map(bike => {
-                    // Don't show bikes that are currently in use (they'll be shown as active rides)
-                    const isInActiveRide = activeRides.some(ride => ride.bikeId === bike.id);
+                  {/* Enhanced bike markers with persistent display and visual indicators */}
+                  {allBikes && Array.isArray(allBikes) && allBikes.length > 0 && allBikes.map(bike => {
+                    if (!bike || !bike.id) {
+                      console.warn('Invalid bike data:', bike);
+                      return null;
+                    }
+
+                    // Check if this bike is currently in use by an active ride
+                    const isInActiveRide = activeRides && activeRides.some(ride => 
+                      ride.bikeId === bike.id || ride.bikeId === bike.name
+                    );
                     
-                    return !isInActiveRide && (
+                    // Skip rendering static marker if bike is in active ride (active ride marker will show instead)
+                    if (isInActiveRide) {
+                      return null;
+                    }
+
+                    // Use unified position calculation
+                    const { position: bikePosition, locationStatus, locationAge } = getUnifiedPosition(bike, 'bike');
+
+                    // Create tooltip text with location status information
+                    const createTooltipText = (bike, locationStatus, locationAge) => {
+                      const statusText = bike.isAvailable ? 'Available' : 'Unavailable';
+                      const maintenanceText = bike.maintenanceStatus === 'maintenance' ? ' (Maintenance)' : '';
+                      const batteryText = bike.batteryLevel ? ` | Battery: ${bike.batteryLevel}%` : '';
+                      
+                      let locationText = '';
+                      switch (locationStatus) {
+                        case 'recent':
+                          locationText = locationAge ? ` | Updated ${Math.round(locationAge)} min ago` : ' | Recently updated';
+                          break;
+                        case 'stale':
+                          locationText = locationAge ? ` | Updated ${Math.round(locationAge)} min ago` : ' | Stale location';
+                          break;
+                        case 'old':
+                          locationText = locationAge ? ` | Updated ${Math.round(locationAge / 60)} hours ago` : ' | Old location';
+                          break;
+                        case 'lastKnown':
+                          locationText = ' | Last known location';
+                          break;
+                        case 'initial':
+                          locationText = ' | Initial deployment location';
+                          break;
+                        case 'fallback':
+                          locationText = ' | Estimated location (no GPS data)';
+                          break;
+                        default:
+                          locationText = ' | Location status unknown';
+                      }
+                      
+                      return `${bike.name || bike.id} - ${statusText}${maintenanceText}${batteryText}${locationText}`;
+                    };
+
+                    return (
                       <Marker
-                        key={`bike-${bike.id}`}
-                        position={{
-                          lat: bike.latitude,
-                          lng: bike.longitude
-                        }}
-                        icon={{
-                          path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
-                          scale: 6,
-                          fillColor: bike.isAvailable ? colors.teal : colors.mediumGray,
-                          fillOpacity: 0.8,
-                          strokeColor: colors.white,
-                          strokeWeight: 2,
-                          strokeOpacity: 1,
-                          rotation: 0
-                        }}
-                        title={`${bike.name} - ${bike.isAvailable ? 'Available' : 'Unavailable'}`}
+                        key={`enhanced-bike-${bike.id}`}
+                        position={bikePosition}
+                        icon={getUnifiedMarkerIcon('bike', bike, { locationStatus, size: 24 })}
+                        title={createTooltipText(bike, locationStatus, locationAge)}
                         onClick={() => {
-                          // Show bike info
+                          console.log('Enhanced bike clicked:', bike, 'Location status:', locationStatus);
+                          // Show enhanced bike info with location status
                           setSelectedRide({
-                            userName: bike.isAvailable ? 'Available Bike' : 'Unavailable Bike',
+                            userName: bike.isAvailable ? `Available Bike (${bike.name || bike.id})` : 
+                                     `Unavailable Bike (${bike.name || bike.id})`,
                             bikeId: bike.id,
                             status: bike.isAvailable ? 'available' : 'unavailable',
                             bikeName: bike.name,
                             bikeData: bike,
-                            isStaticBike: true
+                            isStaticBike: true,
+                            locationStatus: locationStatus,
+                            locationAge: locationAge,
+                            enhancedInfo: {
+                              batteryLevel: bike.batteryLevel,
+                              maintenanceStatus: bike.maintenanceStatus,
+                              lastLocationUpdate: bike.lastLocationUpdate,
+                              isInActiveRide: false
+                            },
+                            position: bikePosition // Add consistent position for InfoWindow
                           });
-                          setMapCenter({ lat: bike.latitude, lng: bike.longitude });
+                          setMapCenter(bikePosition);
                           setMapZoom(16);
+                        }}
+                        zIndex={locationStatus === 'recent' ? 200 : 
+                               locationStatus === 'stale' ? 150 : 
+                               locationStatus === 'old' ? 100 : 
+                               locationStatus === 'lastKnown' ? 80 : 
+                               locationStatus === 'initial' ? 60 : 40} // Z-index based on location reliability
+                      />
+                    );
+                  })}
+
+                  {/* Render movement trails for each active ride */}
+                  {showTrails && Object.entries(rideTrails).map(([userId, trail]) => {
+                    const ride = activeRides.find(r => r.userId === userId);
+                    if (!ride || !trail || trail.length < 2) return null;
+
+                    return (
+                      <Polyline
+                        key={`trail-${userId}`}
+                        path={trail}
+                        options={{
+                          strokeColor: getTrailColor(ride),
+                          strokeOpacity: trailSettings.trailOpacity,
+                          strokeWeight: trailSettings.trailWeight,
+                          geodesic: true,
+                          clickable: false,
+                          icons: [{
+                            icon: {
+                              path: google.maps.SymbolPath.FORWARD_OPEN_ARROW,
+                              scale: 2,
+                              strokeColor: getTrailColor(ride),
+                              strokeWeight: 2
+                            },
+                            offset: '100%'
+                          }]
                         }}
                       />
                     );
                   })}
 
-                  {/* Render active ride markers using live locations */}
-                  {activeRides.map(ride => {
-                    const liveLocation = liveLocations[ride.userId];
-                    const fallbackLocation = ride.currentLocation; // From activeRides data
+                  {/* Render enhanced active ride markers */}
+                  {activeRides && Array.isArray(activeRides) && activeRides.length > 0 && activeRides.map(ride => {
+                    // Validate ride data
+                    if (!ride || !ride.userId) {
+                      console.warn('Invalid ride data:', ride);
+                      return null;
+                    }
+
+                    // Use unified position calculation for consistency
+                    const { position: markerPosition, locationStatus } = getUnifiedPosition(ride, 'activeRide');
                     
-                    // Use live location first, fallback to currentLocation from ride data
-                    const markerLocation = liveLocation || fallbackLocation;
-                    
-                    return markerLocation && markerLocation.latitude && markerLocation.longitude && (
+                    return (
                       <Marker
                         key={`active-ride-${ride.userId}`}
-                        position={{
-                          lat: parseFloat(markerLocation.latitude),
-                          lng: parseFloat(markerLocation.longitude)
+                        position={markerPosition}
+                        icon={getUnifiedMarkerIcon('activeRide', ride, { locationStatus, size: 28 })}
+                        label={{
+                          text: ride.userName?.substring(0, 2).toUpperCase() || ride.userId?.substring(0, 2).toUpperCase() || 'R',
+                          color: 'white',
+                          fontWeight: 'bold',
+                          fontSize: '12px'
                         }}
-                        icon={getMarkerIcon(ride)}
-                        onClick={() => handleRideClick(ride)}
-                        title={`${ride.userName} - ${ride.status.toUpperCase()} - ${liveLocation ? 'LIVE' : 'LAST KNOWN'}`}
+                        onClick={() => {
+                          console.log('Active ride clicked:', ride);
+                          handleRideClick(ride);
+                        }}
+                        title={`${ride.userName || ride.userId} - ${ride.status?.toUpperCase() || 'ACTIVE'} - ${locationStatus?.toUpperCase() || 'UNKNOWN'}`}
                         zIndex={1000} // Higher z-index for active rides
+                        animation={ride.status === 'emergency' && typeof google !== 'undefined' && google.maps ? 
+                          google.maps.Animation.BOUNCE : undefined}
                       />
+                    );
+                  })}
+
+                  {/* Add circles for ALL active rides - with different styles based on GPS availability */}
+                  {activeRides.map(ride => {
+                    // Use unified position calculation for consistency
+                    const { position: centerPosition, locationStatus } = getUnifiedPosition(ride, 'activeRide');
+                    
+                    // Different visual styles based on GPS availability
+                    const isLiveGPS = locationStatus === 'recent';
+                    const isCachedGPS = locationStatus === 'stale';
+                    const isNoGPS = locationStatus === 'fallback';
+                    
+                    // Colors and opacity based on GPS status
+                    let fillOpacity, strokeOpacity, strokeWeight;
+                    if (isLiveGPS) {
+                      fillOpacity = [0.3, 0.15, 0.08];
+                      strokeOpacity = [0.7, 0.5, 0.3];
+                      strokeWeight = [2, 2, 1];
+                    } else if (isCachedGPS) {
+                      fillOpacity = [0.2, 0.1, 0.05];
+                      strokeOpacity = [0.5, 0.3, 0.2];
+                      strokeWeight = [2, 1, 1];
+                    } else {
+                      fillOpacity = [0.15, 0.08, 0.04];
+                      strokeOpacity = [0.4, 0.25, 0.15];
+                      strokeWeight = [1, 1, 1];
+                    }
+                    
+                    const baseColor = getTrailColor(ride);
+                    const warningColor = isNoGPS ? colors.warning : baseColor;
+                    
+                    return (
+                      <React.Fragment key={`pulse-group-${ride.userId}`}>
+                        {/* Inner circle - ALWAYS VISIBLE */}
+                        <Circle
+                          key={`pulse-inner-${ride.userId}`}
+                          center={centerPosition}
+                          radius={25} // 25 meter radius
+                          options={{
+                            fillColor: warningColor,
+                            fillOpacity: fillOpacity[0],
+                            strokeColor: warningColor,
+                            strokeOpacity: strokeOpacity[0],
+                            strokeWeight: strokeWeight[0],
+                            clickable: true,
+                            zIndex: 502,
+                            ...(isLiveGPS && { 
+                              strokeDashArray: isNoGPS ? '5,5' : undefined // Dashed for no GPS
+                            })
+                          }}
+                          onClick={() => {
+                            console.log('Inner circle clicked for ride:', ride, 'GPS Status:', 
+                                      isLiveGPS ? 'LIVE' : isCachedGPS ? 'CACHED' : 'NO GPS');
+                            handleRideClick(ride);
+                          }}
+                        />
+                        
+                        {/* Middle circle - ALWAYS VISIBLE */}
+                        <Circle
+                          key={`pulse-middle-${ride.userId}`}
+                          center={centerPosition}
+                          radius={40} // 40 meter radius
+                          options={{
+                            fillColor: warningColor,
+                            fillOpacity: fillOpacity[1],
+                            strokeColor: warningColor,
+                            strokeOpacity: strokeOpacity[1],
+                            strokeWeight: strokeWeight[1],
+                            clickable: true,
+                            zIndex: 501,
+                            ...(isNoGPS && { 
+                              strokeDashArray: '8,8' // Dashed for no GPS
+                            })
+                          }}
+                          onClick={() => {
+                            console.log('Middle circle clicked for ride:', ride, 'GPS Status:', 
+                                      isLiveGPS ? 'LIVE' : isCachedGPS ? 'CACHED' : 'NO GPS');
+                            handleRideClick(ride);
+                          }}
+                        />
+                        
+                        {/* Outer circle - ALWAYS VISIBLE */}
+                        <Circle
+                          key={`pulse-outer-${ride.userId}`}
+                          center={centerPosition}
+                          radius={60} // 60 meter radius
+                          options={{
+                            fillColor: warningColor,
+                            fillOpacity: fillOpacity[2],
+                            strokeColor: warningColor,
+                            strokeOpacity: strokeOpacity[2],
+                            strokeWeight: strokeWeight[2],
+                            clickable: true,
+                            zIndex: 500,
+                            ...(isNoGPS && { 
+                              strokeDashArray: '10,10' // Dashed for no GPS
+                            })
+                          }}
+                          onClick={() => {
+                            console.log('Outer circle clicked for ride:', ride, 'GPS Status:', 
+                                      isLiveGPS ? 'LIVE' : isCachedGPS ? 'CACHED' : 'NO GPS');
+                            handleRideClick(ride);
+                          }}
+                        />
+                        
+                        {/* Center indicator dot - ALWAYS VISIBLE with different styles */}
+                        <Circle
+                          key={`center-dot-${ride.userId}`}
+                          center={centerPosition}
+                          radius={8} // 8 meter radius for center dot
+                          options={{
+                            fillColor: isLiveGPS ? '#ffffff' : isCachedGPS ? '#fff3cd' : '#ffcccc',
+                            fillOpacity: 0.9,
+                            strokeColor: warningColor,
+                            strokeOpacity: 1,
+                            strokeWeight: 2,
+                            clickable: true,
+                            zIndex: 505,
+                            ...(isNoGPS && { 
+                              strokeDashArray: '3,3' // Dashed for no GPS
+                            })
+                          }}
+                          onClick={() => {
+                            console.log('Center dot clicked for ride:', ride, 'GPS Status:', 
+                                      isLiveGPS ? 'LIVE' : isCachedGPS ? 'CACHED' : 'NO GPS');
+                            handleRideClick(ride);
+                          }}
+                        />
+                      </React.Fragment>
                     );
                   })}
 
                   {/* Show info window for selected ride or bike */}
                   {selectedRide && (selectedRide.isStaticBike ? 
-                    // Static bike info window
+                    // Enhanced Static bike info window
                     <InfoWindow
-                      position={{
-                        lat: selectedRide.bikeData.latitude,
-                        lng: selectedRide.bikeData.longitude
+                      position={selectedRide.position || {
+                        lat: selectedRide.bikeData.latitude || 14.5995,
+                        lng: selectedRide.bikeData.longitude || 120.9842
                       }}
                       onCloseClick={() => setSelectedRide(null)}
                     >
@@ -2103,13 +3039,14 @@ const RealTimeTrackingDashboard = () => {
                             width: '12px',
                             height: '12px',
                             borderRadius: '50%',
-                            backgroundColor: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray
+                            backgroundColor: selectedRide.bikeData.isAvailable ? colors.success : colors.danger,
+                            animation: selectedRide.enhancedInfo?.maintenanceStatus === 'maintenance' ? 'pulse 2s infinite' : 'none'
                           }} />
                           <h3 style={{ margin: 0, color: colors.darkGray }}>
-                            🚲 {selectedRide.bikeData.name}
+                            🚲 {selectedRide.bikeName || selectedRide.bikeData.name || selectedRide.bikeId || 'Unknown Bike'}
                           </h3>
                           <span style={{
-                            backgroundColor: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray,
+                            backgroundColor: selectedRide.bikeData.isAvailable ? colors.success : colors.danger,
                             color: 'white',
                             padding: '2px 8px',
                             borderRadius: '12px',
@@ -2119,13 +3056,35 @@ const RealTimeTrackingDashboard = () => {
                           }}>
                             {selectedRide.bikeData.isAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}
                           </span>
+                          {selectedRide.locationStatus && (
+                            <span style={{
+                              backgroundColor: selectedRide.locationStatus === 'recent' ? colors.success : 
+                                             selectedRide.locationStatus === 'stale' ? colors.warning :
+                                             selectedRide.locationStatus === 'old' ? '#FF8000' :
+                                             selectedRide.locationStatus === 'lastKnown' ? colors.info :
+                                             selectedRide.locationStatus === 'initial' ? colors.indigo :
+                                             colors.danger,
+                              color: 'white',
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              fontSize: '9px',
+                              fontWeight: 'bold'
+                            }}>
+                              {selectedRide.locationStatus === 'recent' ? 'LIVE GPS' :
+                               selectedRide.locationStatus === 'stale' ? 'STALE GPS' :
+                               selectedRide.locationStatus === 'old' ? 'OLD GPS' :
+                               selectedRide.locationStatus === 'lastKnown' ? 'LAST KNOWN' :
+                               selectedRide.locationStatus === 'initial' ? 'INITIAL LOC' :
+                               'NO GPS'}
+                            </span>
+                          )}
                         </div>
                         
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
                           <div>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
                               <strong>🆔 Bike ID:</strong><br />
-                              <span style={{ color: colors.mediumGray }}>{selectedRide.bikeData.id}</span>
+                              <span style={{ color: colors.mediumGray }}>{selectedRide.bikeData.id || selectedRide.bikeId}</span>
                             </p>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
                               <strong>🚴‍♀️ Type:</strong><br />
@@ -2134,38 +3093,87 @@ const RealTimeTrackingDashboard = () => {
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
                               <strong>💰 Price:</strong><br />
                               <span style={{ color: colors.info, fontWeight: 'bold' }}>
-                                {selectedRide.bikeData.price || 'N/A'}
+                                {selectedRide.bikeData.price || selectedRide.bikeData.pricePerHour ? 
+                                  `₱${selectedRide.bikeData.price || selectedRide.bikeData.pricePerHour}/hr` : 'N/A'}
                               </span>
                             </p>
                           </div>
                           
                           <div>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>📍 Location:</strong><br />
-                              <span style={{ color: colors.mediumGray, fontSize: '11px' }}>
-                                {selectedRide.bikeData.latitude.toFixed(4)}, {selectedRide.bikeData.longitude.toFixed(4)}
+                              <strong>🔋 Battery:</strong><br />
+                              <span style={{ 
+                                color: (selectedRide.enhancedInfo?.batteryLevel || 0) > 50 ? colors.success :
+                                       (selectedRide.enhancedInfo?.batteryLevel || 0) > 20 ? colors.warning : colors.danger,
+                                fontWeight: 'bold' 
+                              }}>
+                                {selectedRide.enhancedInfo?.batteryLevel || 'N/A'}%
                               </span>
                             </p>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>🔒 Status:</strong><br />
-                              <span style={{ color: selectedRide.bikeData.isLocked ? colors.danger : colors.success }}>
-                                {selectedRide.bikeData.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                              <strong>🔧 Maintenance:</strong><br />
+                              <span style={{ 
+                                color: selectedRide.enhancedInfo?.maintenanceStatus === 'maintenance' ? colors.warning : colors.success,
+                                fontWeight: 'bold' 
+                              }}>
+                                {selectedRide.enhancedInfo?.maintenanceStatus === 'maintenance' ? 'Required' : 'Good'}
                               </span>
                             </p>
                             <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>⚙️ In Use:</strong><br />
-                              <span style={{ color: selectedRide.bikeData.isInUse ? colors.warning : colors.success }}>
-                                {selectedRide.bikeData.isInUse ? '🟡 Yes' : '🟢 No'}
+                              <strong>🚫 In Use:</strong><br />
+                              <span style={{ 
+                                color: selectedRide.enhancedInfo?.isInActiveRide ? colors.warning : colors.success,
+                                fontWeight: 'bold' 
+                              }}>
+                                {selectedRide.enhancedInfo?.isInActiveRide ? 'Yes' : 'No'}
                               </span>
                             </p>
                           </div>
                         </div>
                         
-                        {selectedRide.bikeData.description && (
+                        {/* Location Status Section */}
+                        <div style={{ 
+                          backgroundColor: selectedRide.locationStatus === 'recent' ? '#e8f5e8' :
+                                       selectedRide.locationStatus === 'stale' ? '#fff3cd' :
+                                       selectedRide.locationStatus === 'old' ? '#ffe6cc' :
+                                       selectedRide.locationStatus === 'lastKnown' ? '#e3f2fd' :
+                                       selectedRide.locationStatus === 'initial' ? '#f3e5f5' :
+                                       '#ffebee',
+                          padding: '10px', 
+                          borderRadius: '8px',
+                          border: `2px solid ${selectedRide.locationStatus === 'recent' ? colors.success :
+                                              selectedRide.locationStatus === 'stale' ? colors.warning :
+                                              selectedRide.locationStatus === 'old' ? '#FF8000' :
+                                              selectedRide.locationStatus === 'lastKnown' ? colors.info :
+                                              selectedRide.locationStatus === 'initial' ? colors.indigo :
+                                              colors.danger}`,
+                          marginBottom: '10px'
+                        }}>
+                          <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
+                            <strong>📍 Location Status:</strong><br />
+                            {selectedRide.locationStatus === 'recent' && 
+                              `✅ Recently updated location${selectedRide.locationAge ? ` (${Math.round(selectedRide.locationAge)} min ago)` : ''}`}
+                            {selectedRide.locationStatus === 'stale' && 
+                              `⚠️ Stale location data${selectedRide.locationAge ? ` (${Math.round(selectedRide.locationAge)} min ago)` : ''}`}
+                            {selectedRide.locationStatus === 'old' && 
+                              `⏰ Old location data${selectedRide.locationAge ? ` (${Math.round(selectedRide.locationAge / 60)} hours ago)` : ''}`}
+                            {selectedRide.locationStatus === 'lastKnown' && 
+                              `📍 Last known position${selectedRide.locationAge ? ` (${Math.round(selectedRide.locationAge / 60)} hours ago)` : ''}`}
+                            {selectedRide.locationStatus === 'initial' && 
+                              '🏭 Initial deployment location'}
+                            {selectedRide.locationStatus === 'fallback' && 
+                              '❓ Estimated location (no GPS data available)'}
+                            <br />
+                            <strong>🕐 Last Update:</strong> {selectedRide.enhancedInfo?.lastLocationUpdate ? 
+                              new Date(selectedRide.enhancedInfo.lastLocationUpdate).toLocaleString() : 'Never'}
+                          </p>
+                        </div>
+                        
+                        {selectedRide.bikeData?.description && (
                           <div style={{ 
                             backgroundColor: '#f8f9fa', 
-                            padding: '10px', 
-                            borderRadius: '8px',
+                            padding: '8px', 
+                            borderRadius: '6px',
                             marginBottom: '10px'
                           }}>
                             <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
@@ -2176,220 +3184,455 @@ const RealTimeTrackingDashboard = () => {
                         )}
                         
                         <div style={{ 
-                          backgroundColor: selectedRide.bikeData.isAvailable ? '#e8f5e8' : '#fff3cd',
+                          backgroundColor: selectedRide.bikeData?.isAvailable ? '#e8f5e8' : '#ffebee',
                           padding: '8px',
                           borderRadius: '6px',
-                          border: `2px solid ${selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray}`,
+                          border: `2px solid ${selectedRide.bikeData?.isAvailable ? colors.success : colors.danger}`,
                           textAlign: 'center'
                         }}>
                           <span style={{ 
                             fontSize: '12px', 
                             fontWeight: 'bold',
-                            color: selectedRide.bikeData.isAvailable ? colors.teal : colors.mediumGray
+                            color: selectedRide.bikeData?.isAvailable ? colors.success : colors.danger
                           }}>
-                            {selectedRide.bikeData.isAvailable ? '✅ READY FOR RENT' : '❌ NOT AVAILABLE'}
+                            {selectedRide.bikeData?.isAvailable ? '✅ READY FOR BOOKING' : '❌ NOT AVAILABLE'}
                           </span>
                         </div>
                       </InfoWindowContent>
                     </InfoWindow>
                     :
                     // Active ride info window  
-                    (liveLocations[selectedRide.userId] || selectedRide.currentLocation) && (
-                    <InfoWindow
-                      position={{
-                        lat: (liveLocations[selectedRide.userId] || selectedRide.currentLocation).latitude,
-                        lng: (liveLocations[selectedRide.userId] || selectedRide.currentLocation).longitude
-                      }}
-                      onCloseClick={() => setSelectedRide(null)}
-                    >
-                      <InfoWindowContent>
-                        <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '10px', 
-                          marginBottom: '15px',
-                          borderBottom: '2px solid #e0e0e0',
-                          paddingBottom: '10px'
-                        }}>
-                          <div style={{
-                            width: '12px',
-                            height: '12px',
-                            borderRadius: '50%',
-                            backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
-                                           selectedRide.status === 'paused' ? colors.warning : colors.success,
-                            animation: 'pulse 2s infinite'
-                          }} />
-                          <h3 style={{ margin: 0, color: colors.darkGray }}>
-                            🚴‍♂️ {selectedRide.userName}
-                          </h3>
-                          <span style={{
-                            backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
-                                           selectedRide.status === 'paused' ? colors.warning : colors.success,
-                            color: 'white',
-                            padding: '2px 8px',
-                            borderRadius: '12px',
-                            fontSize: '10px',
-                            fontWeight: 'bold',
-                            textTransform: 'uppercase'
-                          }}>
-                            {selectedRide.status}
-                          </span>
-                          <span style={{
-                            backgroundColor: liveLocations[selectedRide.userId] ? colors.success : colors.warning,
-                            color: 'white',
-                            padding: '1px 6px',
-                            borderRadius: '8px',
-                            fontSize: '9px',
-                            fontWeight: 'bold'
-                          }}>
-                            {liveLocations[selectedRide.userId] ? 'LIVE' : 'CACHED'}
-                          </span>
-                        </div>
-                        
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
-                          <div>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>🚲 Bike ID:</strong><br />
-                              <span style={{ color: colors.mediumGray }}>{selectedRide.bikeId}</span>
-                            </p>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>⏱️ Duration:</strong><br />
-                              <span style={{ color: colors.pineGreen, fontWeight: 'bold' }}>
-                                {selectedRide.duration ? formatTime(selectedRide.duration) : formatDuration(selectedRide.startTime)}
-                              </span>
-                            </p>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>📍 Distance:</strong><br />
-                              <span style={{ color: colors.info, fontWeight: 'bold' }}>
-                                {((selectedRide.totalDistance || 0) / 1000).toFixed(2)} km
-                              </span>
-                            </p>
-                          </div>
-                          
-                          <div>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>🏃‍♂️ Current Speed:</strong><br />
-                              <span style={{ color: colors.success, fontWeight: 'bold' }}>
-                                {((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.speed || 0).toFixed(1)} km/h
-                              </span>
-                            </p>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>🎯 Accuracy:</strong><br />
-                              <span style={{ color: colors.mediumGray }}>
-                                ±{((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.accuracy || 0).toFixed(0)} m
-                              </span>
-                            </p>
-                            <p style={{ margin: '5px 0', fontSize: '13px' }}>
-                              <strong>🧭 Bearing:</strong><br />
-                              <span style={{ color: colors.mediumGray }}>
-                                {((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.bearing || 0).toFixed(0)}°
-                              </span>
-                            </p>
-                          </div>
-                        </div>
-                        
-                        <div style={{ 
-                          backgroundColor: '#f8f9fa', 
-                          padding: '10px', 
-                          borderRadius: '8px',
-                          marginBottom: '10px'
-                        }}>
-                          <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
-                            <strong>📧 User Email:</strong> {selectedRide.userEmail || 'N/A'}<br />
-                            <strong>🔄 Updates:</strong> {(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.locationCount || 0}<br />
-                            <strong>🕐 Last Update:</strong> {new Date((liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.timestamp || Date.now()).toLocaleTimeString()}
-                          </p>
-                        </div>
-                        
-                        <div style={{ 
-                          backgroundColor: (liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? '#e8f5e8' : '#fff3cd',
-                          padding: '8px',
-                          borderRadius: '6px',
-                          border: `2px solid ${(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? colors.success : colors.warning}`,
-                          textAlign: 'center'
-                        }}>
-                          <span style={{ 
-                            fontSize: '12px', 
-                            fontWeight: 'bold',
-                            color: (liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? colors.success : colors.warning
-                          }}>
-                            {(liveLocations[selectedRide.userId] || selectedRide.currentLocation)?.isActive ? '🟢 LIVE TRACKING' : '🟡 TRACKING PAUSED'}
-                          </span>
-                        </div>
-                        
-                        {selectedRide.status === 'emergency' && (
-                          <div style={{ 
-                            backgroundColor: '#ffebee', 
-                            border: `2px solid ${colors.danger}`,
-                            padding: '10px', 
-                            borderRadius: '8px',
-                            marginTop: '10px',
-                            textAlign: 'center'
-                          }}>
-                            <span style={{ 
-                              color: colors.danger, 
-                              fontWeight: 'bold',
-                              fontSize: '13px'
+                    (() => {
+                      // Use unified position calculation for consistency
+                      const { position: infoWindowPosition } = getUnifiedPosition(selectedRide, 'activeRide');
+                      
+                      return (
+                        <InfoWindow
+                          position={infoWindowPosition}
+                          onCloseClick={() => setSelectedRide(null)}
+                        >
+                          <InfoWindowContent>
+                            <div style={{ 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '10px', 
+                              marginBottom: '15px',
+                              borderBottom: '2px solid #e0e0e0',
+                              paddingBottom: '10px'
                             }}>
-                              🚨 EMERGENCY ALERT ACTIVE
-                            </span>
-                          </div>
-                        )}
-                      </InfoWindowContent>
-                    </InfoWindow>
-                  ))}
-
-                  {/* Heatmap layer */}
-                  {showHeatmap && (
-                    <HeatmapLayer
-                      data={Object.values(liveLocations)
-                        .filter(location => location.isActive)
-                        .map(location => ({
-                          location: new google.maps.LatLng(
-                            location.latitude,
-                            location.longitude
-                          ),
-                          weight: location.speed || 1
-                        }))
-                      }
-                    />
+                              <div style={{
+                                width: '12px',
+                                height: '12px',
+                                borderRadius: '50%',
+                                backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
+                                               selectedRide.status === 'paused' ? colors.warning : colors.success,
+                                animation: 'pulse 2s infinite'
+                              }} />
+                              <h3 style={{ margin: 0, color: colors.darkGray }}>
+                                🚴‍♂️ {selectedRide.userName || selectedRide.userId || 'Unknown User'}
+                              </h3>
+                              <span style={{
+                                backgroundColor: selectedRide.status === 'emergency' ? colors.danger : 
+                                               selectedRide.status === 'paused' ? colors.warning : colors.success,
+                                color: 'white',
+                                padding: '2px 8px',
+                                borderRadius: '12px',
+                                fontSize: '10px',
+                                fontWeight: 'bold',
+                                textTransform: 'uppercase'
+                              }}>
+                                {selectedRide.status || 'ACTIVE'}
+                              </span>
+                              <span style={{
+                                backgroundColor: liveLocations[selectedRide.userId] ? colors.success : selectedRide.currentLocation ? colors.warning : colors.danger,
+                                color: 'white',
+                                padding: '1px 6px',
+                                borderRadius: '8px',
+                                fontSize: '9px',
+                                fontWeight: 'bold'
+                              }}>
+                                {liveLocations[selectedRide.userId] ? 'LIVE' : selectedRide.currentLocation ? 'CACHED' : 'NO GPS'}
+                              </span>
+                            </div>
+                            
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '15px' }}>
+                              <div>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>🚲 Bike ID:</strong><br />
+                                  <span style={{ color: colors.mediumGray }}>{selectedRide.bikeId || 'N/A'}</span>
+                                </p>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>⏱️ Duration:</strong><br />
+                                  <span style={{ color: colors.pineGreen, fontWeight: 'bold' }}>
+                                    {selectedRide.duration ? formatTime(selectedRide.duration) : formatDuration(selectedRide.startTime)}
+                                  </span>
+                                </p>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>📍 Distance:</strong><br />
+                                  <span style={{ color: colors.info, fontWeight: 'bold' }}>
+                                    {((selectedRide.totalDistance || selectedRide.distanceTraveled || 0) / 1000).toFixed(2)} km
+                                  </span>
+                                </p>
+                              </div>
+                              
+                              <div>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>🏃‍♂️ Current Speed:</strong><br />
+                                  <span style={{ color: colors.success, fontWeight: 'bold' }}>
+                                    {selectedRide.currentLocation ? (selectedRide.currentLocation.speed || 0).toFixed(1) : 'N/A'} km/h
+                                  </span>
+                                </p>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>🎯 Accuracy:</strong><br />
+                                  <span style={{ color: colors.mediumGray }}>
+                                    {selectedRide.currentLocation ? `±${(selectedRide.currentLocation.accuracy || 0).toFixed(0)} m` : 'N/A'}
+                                  </span>
+                                </p>
+                                <p style={{ margin: '5px 0', fontSize: '13px' }}>
+                                  <strong>📅 Started:</strong><br />
+                                  <span style={{ color: colors.mediumGray }}>
+                                    {selectedRide.startTime ? new Date(selectedRide.startTime).toLocaleTimeString() : 'N/A'}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div style={{ 
+                              backgroundColor: '#f8f9fa', 
+                              padding: '10px', 
+                              borderRadius: '8px',
+                              marginBottom: '10px'
+                            }}>
+                              <p style={{ margin: '0', fontSize: '12px', color: colors.mediumGray }}>
+                                <strong>👤 User ID:</strong> {selectedRide.userId || 'N/A'}<br />
+                                <strong>📧 User Email:</strong> {selectedRide.userEmail || 'N/A'}<br />
+                                <strong>🔄 GPS Updates:</strong> {selectedRide.currentLocation?.locationCount || 0}<br />
+                                <strong>🕐 Last Update:</strong> {selectedRide.currentLocation?.timestamp ? new Date(selectedRide.currentLocation.timestamp).toLocaleTimeString() : 'Never'}
+                              </p>
+                            </div>
+                            
+                            {!selectedRide.currentLocation && (
+                              <div style={{ 
+                                backgroundColor: '#fff3cd',
+                                padding: '8px',
+                                borderRadius: '6px',
+                                border: `2px solid ${colors.warning}`,
+                                textAlign: 'center',
+                                marginBottom: '10px'
+                              }}>
+                                <span style={{ 
+                                  fontSize: '12px', 
+                                  fontWeight: 'bold',
+                                  color: colors.warning
+                                }}>
+                                  ⚠️ WAITING FOR GPS DATA - Ride started but no location updates yet
+                                </span>
+                              </div>
+                            )}
+                            
+                            <div style={{ 
+                              backgroundColor: selectedRide.status === 'emergency' ? '#ffebee' : '#e8f5e8',
+                              padding: '8px',
+                              borderRadius: '6px',
+                              border: `2px solid ${selectedRide.status === 'emergency' ? colors.danger : colors.success}`,
+                              textAlign: 'center'
+                            }}>
+                              <span style={{ 
+                                fontSize: '12px', 
+                                fontWeight: 'bold',
+                                color: selectedRide.status === 'emergency' ? colors.danger : colors.success
+                              }}>
+                                {selectedRide.status === 'emergency' ? '🚨 EMERGENCY STATUS' : 
+                                 selectedRide.status === 'paused' ? '⏸️ RIDE PAUSED' : 
+                                 '✅ ACTIVE RIDE'}
+                              </span>
+                            </div>
+                            
+                            {/* Live Location Rings Visualization */}
+                            {selectedRide.currentLocation && (
+                              <div style={{ 
+                                marginTop: '15px',
+                                padding: '15px',
+                                backgroundColor: '#f8f9fa',
+                                borderRadius: '8px',
+                                border: '2px solid #e9ecef',
+                                textAlign: 'center'
+                              }}>
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  fontWeight: 'bold', 
+                                  color: colors.darkGray,
+                                  marginBottom: '10px' 
+                                }}>
+                                  📍 Live Location Rings
+                                </div>
+                                
+                                {/* Visual representation of pulsing circles */}
+                                <div style={{ 
+                                  position: 'relative',
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  height: '120px',
+                                  marginBottom: '10px'
+                                }}>
+                                  {/* Outer ring - 60m */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    width: '100px',
+                                    height: '100px',
+                                    borderRadius: '50%',
+                                    border: `3px solid ${getTrailColor(selectedRide)}`,
+                                    backgroundColor: getTrailColor(selectedRide),
+                                    opacity: 0.1,
+                                    animation: 'liveLocationPulse 3s ease-in-out infinite'
+                                  }} />
+                                  
+                                  {/* Middle ring - 40m */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    width: '70px',
+                                    height: '70px',
+                                    borderRadius: '50%',
+                                    border: `3px solid ${getTrailColor(selectedRide)}`,
+                                    backgroundColor: getTrailColor(selectedRide),
+                                    opacity: 0.2,
+                                    animation: 'liveLocationPulse 2.5s ease-in-out infinite 0.3s'
+                                  }} />
+                                  
+                                  {/* Inner ring - 25m */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    width: '40px',
+                                    height: '40px',
+                                    borderRadius: '50%',
+                                    border: `3px solid ${getTrailColor(selectedRide)}`,
+                                    backgroundColor: getTrailColor(selectedRide),
+                                    opacity: 0.3,
+                                    animation: 'liveLocationPulse 2s ease-in-out infinite 0.6s'
+                                  }} />
+                                  
+                                  {/* Center dot */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    width: '12px',
+                                    height: '12px',
+                                    borderRadius: '50%',
+                                    backgroundColor: '#ffffff',
+                                    border: `3px solid ${getTrailColor(selectedRide)}`,
+                                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                                    zIndex: 10
+                                  }} />
+                                </div>
+                                
+                                {/* Legend */}
+                                <div style={{ 
+                                  fontSize: '10px', 
+                                  color: colors.mediumGray,
+                                  lineHeight: '1.3'
+                                }}>
+                                  <div style={{ marginBottom: '3px' }}>
+                                    <span style={{ color: getTrailColor(selectedRide), fontWeight: 'bold' }}>●</span> Live Position
+                                  </div>
+                                  <div style={{ marginBottom: '3px' }}>
+                                    Accuracy: ±{(selectedRide.currentLocation.accuracy || 0).toFixed(0)}m
+                                  </div>
+                                  <div>
+                                    Rings: 25m • 40m • 60m radius
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* No GPS visualization */}
+                            {!selectedRide.currentLocation && liveLocations[selectedRide.userId] && (
+                              <div style={{ 
+                                marginTop: '15px',
+                                padding: '15px',
+                                backgroundColor: '#fff3cd',
+                                borderRadius: '8px',
+                                border: '2px solid #ffc107',
+                                textAlign: 'center'
+                              }}>
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  fontWeight: 'bold', 
+                                  color: colors.warning,
+                                  marginBottom: '10px' 
+                                }}>
+                                  📍 Last Known Location
+                                </div>
+                                
+                                <div style={{ 
+                                  position: 'relative',
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  height: '60px',
+                                  marginBottom: '10px'
+                                }}>
+                                  {/* Static circle for cached location */}
+                                  <div style={{
+                                    width: '40px',
+                                    height: '40px',
+                                    borderRadius: '50%',
+                                    border: `3px dashed ${colors.warning}`,
+                                    backgroundColor: colors.warning,
+                                    opacity: 0.2
+                                  }} />
+                                  
+                                  {/* Center dot */}
+                                  <div style={{
+                                    position: 'absolute',
+                                    width: '8px',
+                                    height: '8px',
+                                    borderRadius: '50%',
+                                    backgroundColor: colors.warning,
+                                    border: '2px solid #ffffff'
+                                  }} />
+                                </div>
+                                
+                                <div style={{ 
+                                  fontSize: '10px', 
+                                  color: colors.mediumGray,
+                                  lineHeight: '1.3'
+                                }}>
+                                  Cached position • No live updates
+                                </div>
+                              </div>
+                            )}
+                            
+                            {/* Waiting for GPS visualization */}
+                            {!selectedRide.currentLocation && (
+                              <div style={{ 
+                                marginTop: '15px',
+                                padding: '15px',
+                                backgroundColor: '#ffebee',
+                                borderRadius: '8px',
+                                border: '2px solid #f44336',
+                                textAlign: 'center'
+                              }}>
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  fontWeight: 'bold', 
+                                  color: colors.danger,
+                                  marginBottom: '10px' 
+                                }}>
+                                  📍 Waiting for GPS
+                                </div>
+                                
+                                <div style={{ 
+                                  position: 'relative',
+                                  display: 'flex',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  height: '60px',
+                                  marginBottom: '10px'
+                                }}>
+                                  {/* Searching animation */}
+                                  <div style={{
+                                    width: '30px',
+                                    height: '30px',
+                                    borderRadius: '50%',
+                                    border: `3px solid ${colors.lightGray}`,
+                                    borderTop: `3px solid ${colors.danger}`,
+                                    animation: 'spin 1s linear infinite'
+                                  }} />
+                                </div>
+                                
+                                <div style={{ 
+                                  fontSize: '10px', 
+                                  color: colors.mediumGray,
+                                  lineHeight: '1.3'
+                                }}>
+                                  Searching for GPS signal...
+                                </div>
+                              </div>
+                            )}
+                          </InfoWindowContent>
+                        </InfoWindow>
+                      );
+                    })()
                   )}
                 </MapContainer>
               </MapWrapper>
 
               {/* Active Rides List */}
               <RidesList>
-                <h3 style={{ marginBottom: '15px', color: colors.darkGray }}>Active Rides</h3>
-                {activeRides.map(ride => {
-                  const liveLocation = liveLocations[ride.userId];
-                  return (
-                    <RideItem key={ride.userId} onClick={() => handleRideClick(ride)}>
-                      <RideInfo>
-                        <div style={{ fontWeight: 'bold' }}>{ride.userName}</div>
-                        <div style={{ fontSize: '14px', color: colors.mediumGray }}>
-                          Bike: {ride.bikeId} • Duration: {ride.duration ? formatTime(ride.duration) : formatDuration(ride.startTime)}
-                        </div>
-                      </RideInfo>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <RideStatus status={ride.status}>{ride.status}</RideStatus>
-                        <div style={{ fontSize: '14px' }}>
-                          {ride.totalDistance ? 
-                            `${((ride.totalDistance || 0) / 1000).toFixed(1)} km` : 
-                            'No location'
-                          }
-                        </div>
-                        {liveLocation && (
-                          <div style={{ fontSize: '12px', color: colors.success }}>
-                            LIVE • {liveLocation.speed?.toFixed(1) || 0} km/h
+                <h3 style={{ marginBottom: '10px', color: colors.darkGray, fontSize: '14px' }}> {/* Reduced marginBottom from 15px, added fontSize */}
+                  Active Rides ({activeRides?.length || 0})
+                </h3>
+                {activeRides && activeRides.length > 0 ? (
+                  activeRides.map(ride => {
+                    const liveLocation = liveLocations[ride.userId];
+                    const hasLocation = !!(liveLocation || ride.currentLocation);
+                    
+                    return (
+                      <RideCard key={ride.userId || ride.id} onClick={() => handleRideClick(ride)} style={{
+                        padding: '10px', // Reduced from default padding
+                        marginBottom: '8px', // Reduced spacing between cards
+                        borderRadius: '6px' // Reduced from default border radius
+                      }}>
+                        <RideInfo>
+                          <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}> {/* Reduced gap from 8px, added fontSize */}
+                            {ride.userName || ride.userId || 'Unknown User'}
+                            {liveLocation && (
+                              <span style={{
+                                backgroundColor: colors.success,
+                                color: 'white',
+                                padding: '1px 4px', // Reduced from 1px 6px
+                                borderRadius: '6px', // Reduced from 8px
+                                fontSize: '8px', // Reduced from 9px
+                                fontWeight: 'bold'
+                              }}>
+                                LIVE
+                              </span>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </RideItem>
-                  );
-                })}
-                {activeRides.length === 0 && (
-                  <div style={{ textAlign: 'center', color: colors.mediumGray, padding: '20px' }}>
-                    No active rides at the moment
+                          <div style={{ fontSize: '12px', color: colors.mediumGray, marginTop: '2px' }}> {/* Reduced from 14px, added marginTop */}
+                            Bike: {ride.bikeId || 'N/A'} • Duration: {ride.duration ? formatTime(ride.duration) : formatDuration(ride.startTime)}
+                          </div>
+                          <div style={{ fontSize: '11px', color: colors.mediumGray, marginTop: '1px' }}> {/* Reduced from 12px, added marginTop */}
+                            User ID: {ride.userId} • Status: {ride.status || 'active'}
+                            {ride.userEmail && ` • ${ride.userEmail}`}
+                          </div>
+                        </RideInfo>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}> {/* Reduced gap from 5px */}
+                          <RideStatus status={ride.status || 'active'} style={{
+                            fontSize: '10px', // Added smaller font size
+                            padding: '2px 6px' // Added smaller padding
+                          }}>
+                            {ride.status || 'active'}
+                          </RideStatus>
+                          <div style={{ fontSize: '12px', textAlign: 'right' }}> {/* Reduced from 14px */}
+                            {ride.totalDistance ? 
+                              `${((ride.totalDistance || 0) / 1000).toFixed(1)} km` : 
+                              hasLocation ? 'Tracking...' : 'No location'
+                            }
+                          </div>
+                          {(liveLocation || ride.currentLocation) && (
+                            <div style={{ fontSize: '10px', color: colors.success, textAlign: 'right' }}> {/* Reduced from 12px */}
+                              {liveLocation ? 'LIVE' : 'CACHED'} • {(liveLocation?.speed || ride.currentLocation?.speed || 0).toFixed(1)} km/h
+                            </div>
+                          )}
+                          {!hasLocation && (
+                            <div style={{ fontSize: '10px', color: colors.danger, textAlign: 'right' }}> {/* Reduced from 11px */}
+                              ⚠️ No GPS data
+                            </div>
+                          )}
+                        </div>
+                      </RideCard>
+                    );
+                  })
+                ) : (
+                  <div style={{ textAlign: 'center', color: colors.mediumGray, padding: '15px' }}> {/* Reduced padding from 20px */}
+                    <div style={{ fontSize: '36px', marginBottom: '8px' }}>🚴‍♂️</div> {/* Reduced from 48px, 10px */}
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}> {/* Reduced from 16px, 5px */}
+                      No active rides at the moment
+                    </div>
+                    <div style={{ fontSize: '12px' }}> {/* Reduced from 14px */}
+                      Active rides will appear here when users start cycling
+                    </div>
                   </div>
                 )}
               </RidesList>
