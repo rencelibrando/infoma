@@ -663,7 +663,7 @@ private fun OptimizedBikeCard(
         shape = RoundedCornerShape(12.dp),
         onClick = {
             onBikeClick(bike)
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     ) {
         Column(

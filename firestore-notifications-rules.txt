@@ -1,0 +1,60 @@
+// Firestore Security Rules for Notifications Collection
+// Add these rules to your existing firestore.rules file
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Notifications collection rules
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if request.auth != null && 
+                  request.auth.uid == resource.data.userId;
+      
+      // Users can update their own notifications (mark as read, etc.)
+      allow update: if request.auth != null && 
+                    request.auth.uid == resource.data.userId &&
+                    // Only allow updating certain fields
+                    request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(['isRead']);
+      
+      // Users can delete their own notifications
+      allow delete: if request.auth != null && 
+                    request.auth.uid == resource.data.userId;
+      
+      // Only admins or system can create notifications
+      // You might want to restrict this further based on your admin system
+      allow create: if request.auth != null && 
+                    (hasAdminRole() || isSystemUser());
+    }
+    
+    // Helper functions
+    function hasAdminRole() {
+      return request.auth.token.admin == true;
+    }
+    
+    function isSystemUser() {
+      // Define system users who can create notifications
+      // This could be Cloud Functions service account or specific admin UIDs
+      return request.auth.uid in ['system-user-uid-1', 'system-user-uid-2'];
+    }
+  }
+}
+
+// Alternative simpler rules if you don't have admin system set up yet:
+/*
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /notifications/{notificationId} {
+      // Users can read, update, and delete their own notifications
+      allow read, update, delete: if request.auth != null && 
+                                  request.auth.uid == resource.data.userId;
+      
+      // For now, authenticated users can create notifications (for testing)
+      // In production, restrict this to admin/system only
+      allow create: if request.auth != null;
+    }
+  }
+}
+*/ 
