@@ -19,7 +19,10 @@ service cloud.firestore {
     // Admins collection
     match /admins/{adminId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      // Allow users to create their own admin document for initial setup
+      allow create: if isAuthenticated() && request.auth.uid == adminId;
+      // Updates and deletes require admin privileges  
+      allow update, delete: if isAdmin();
     }
 
     // Users collection
@@ -147,6 +150,14 @@ service cloud.firestore {
                       resource.data.userId == request.auth.uid;
         allow delete: if isAuthenticated() && 
                       (resource.data.userId == request.auth.uid || isAdmin());
+      }
+
+      // Maintenance history subcollection under bikes
+      match /maintenanceHistory/{historyId} {
+        allow read: if isAdmin();
+        allow create: if isAdmin();
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
       }
     }
 

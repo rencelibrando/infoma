@@ -8,6 +8,7 @@ import styled from 'styled-components';
 import QRCode from 'qrcode';
 import { useNavigate } from 'react-router-dom';
 import { useDataContext } from '../context/DataContext';
+import { useAuth } from '../context/AuthContext';
 import { FiPlus, FiSearch, FiFilter, FiChevronLeft, FiChevronRight, FiEdit2, FiTrash2, FiEye, FiPrinter } from 'react-icons/fi';
 
 // Pine green and gray theme colors
@@ -839,6 +840,9 @@ const BikesList = ({ onEditBike }) => {
     error: bikesError
   } = useDataContext();
 
+  // Get authentication and admin status
+  const { isAdmin } = useAuth();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [sortBy, setSortBy] = useState('newest');
@@ -972,9 +976,12 @@ const BikesList = ({ onEditBike }) => {
 
     return {
       total: bikes.length,
-      available: bikes.filter(bike => bike.isAvailable).length,
+      available: bikes.filter(bike => bike.isAvailable && bike.maintenanceStatus === 'operational').length,
       inUse: bikes.filter(bike => bike.isInUse).length,
-      maintenance: bikes.filter(bike => !bike.isAvailable && !bike.isInUse).length
+      maintenance: bikes.filter(bike => 
+        bike.maintenanceStatus && 
+        ['maintenance', 'repair', 'out-of-service'].includes(bike.maintenanceStatus)
+      ).length
     };
   }, [bikes]);
 
@@ -998,6 +1005,11 @@ const BikesList = ({ onEditBike }) => {
   };
 
   const openDeleteDialog = (bike) => {
+    // Only allow admins to delete bikes
+    if (!isAdmin) {
+      setOperationError('Delete operation requires administrator privileges');
+      return;
+    }
     setBikeToDelete(bike);
     setDeleteDialogOpen(true);
   };
@@ -1378,17 +1390,24 @@ const BikesList = ({ onEditBike }) => {
             <FiPrinter size={16} />
             Print All QR Codes
           </RefreshButton>
-          <AddButton onClick={() => setAddBikeModalOpen(true)}>
-            <FiPlus size={20} />
-            Add New Bike
-          </AddButton>
+          {isAdmin && (
+            <AddButton onClick={() => setAddBikeModalOpen(true)}>
+              <FiPlus size={20} />
+              Add New Bike
+            </AddButton>
+          )}
         </div>
       </Header>
 
       {/* Operation Error */}
       {operationError && (
         <ErrorContainer>
-          <div>Error: {operationError}</div>
+          <div>
+            {operationError.includes('Administrator privileges') 
+              ? '🔒 Admin Access Required: Only administrators can delete bikes'
+              : `Error: ${operationError}`
+            }
+          </div>
           <button onClick={() => setOperationError(null)}>Dismiss</button>
         </ErrorContainer>
       )}
@@ -1525,25 +1544,29 @@ const BikesList = ({ onEditBike }) => {
                         >
                           <FiPrinter />
                         </ActionButton>
-                        <ActionButton
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditBike ? onEditBike(bike) : console.warn('No edit handler provided');
-                          }}
-                          title="Edit Bike"
-                        >
-                          <FiEdit2 />
-                        </ActionButton>
-                        <ActionButton
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDeleteDialog(bike);
-                          }}
-                          title="Delete Bike"
-                          danger
-                        >
-                          <FiTrash2 />
-                        </ActionButton>
+                        {isAdmin && (
+                          <ActionButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEditBike ? onEditBike(bike) : console.warn('No edit handler provided');
+                            }}
+                            title="Edit Bike"
+                          >
+                            <FiEdit2 />
+                          </ActionButton>
+                        )}
+                        {isAdmin && (
+                          <ActionButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDeleteDialog(bike);
+                            }}
+                            title="Delete Bike"
+                            danger
+                          >
+                            <FiTrash2 />
+                          </ActionButton>
+                        )}
                       </BikeActions>
                     </BikeCardHeader>
 

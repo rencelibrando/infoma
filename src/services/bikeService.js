@@ -1,6 +1,6 @@
 // src/services/bikeService.js
 import { db, storage, auth } from '../firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query, where, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, getDoc, onSnapshot, query, where, addDoc, serverTimestamp, orderBy } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { v4 as uuidv4 } from 'uuid';
 
@@ -98,6 +98,23 @@ const requireAuth = () => {
   return user;
 };
 
+// Helper function to check if current user is admin
+const requireAdmin = async () => {
+  const user = requireAuth();
+  
+  try {
+    // Check if user exists in the admins collection (matches Firestore security rules)
+    const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+    if (!adminDoc.exists()) {
+      throw new Error('Access denied. Administrator privileges required.');
+    }
+    return user;
+  } catch (error) {
+    console.error('Error checking admin status:', error);
+    throw new Error('Access denied. Unable to verify administrator privileges.');
+  }
+};
+
 // Get all bikes
 export const getAllBikes = async () => {
   try {
@@ -145,6 +162,9 @@ export const getBikeById = async (id) => {
 
 // Upload a bike
 export const uploadBike = async (bike, imageFile) => {
+  // Check admin authentication first - bike creation should require admin privileges
+  const user = await requireAdmin();
+  
   const id = uuidv4();
   
   // Handle QR code (primary field)
@@ -213,6 +233,11 @@ export const uploadBike = async (bike, imageFile) => {
     batteryLevel: 100,   // Default battery level
     rating: 0,           // Default rating
     totalRides: 0,       // Initialize ride counter
+    // Maintenance status fields
+    maintenanceStatus: 'operational', // Default to operational
+    maintenanceNotes: '',
+    maintenanceLastUpdated: new Date(),
+    maintenanceUpdatedBy: user.uid,
     createdAt: new Date(),
     lastUpdated: new Date()
   };
@@ -235,12 +260,12 @@ export const uploadBike = async (bike, imageFile) => {
 // Delete a bike
 export const deleteBike = async (id) => {
   try {
-    // Check authentication first
-    const user = requireAuth();
+    // Check admin authentication first - this is required by Firestore security rules
+    const user = await requireAdmin();
     
     const bikeRef = doc(db, 'bikes', id);
     await deleteDoc(bikeRef);
-    console.log('Bike deleted successfully');
+    console.log('Bike deleted successfully by admin:', user.email);
   } catch (error) {
     console.error('Error deleting bike:', error);
     throw error;
@@ -250,50 +275,106 @@ export const deleteBike = async (id) => {
 // Function to update an existing bike
 export const updateBike = async (id, bikeData, imageFile) => {
   try {
-    // Check authentication first
-    const user = requireAuth();
+    // Check admin authentication first - bike updates should require admin privileges
+    const user = await requireAdmin();
     
     const bikeRef = doc(db, 'bikes', id);
     const currentBikeDoc = await getDoc(bikeRef);
     const currentBike = currentBikeDoc.exists() ? currentBikeDoc.data() : {};
+    
+    // Get current maintenance status
+    const currentMaintenanceStatus = currentBike.maintenanceStatus || 'operational';
     
     // Enforce rule: if bike is available it must be locked
     const isLocked = bikeData.isLocked !== undefined ? bikeData.isLocked : currentBike.isLocked;
     const isInUse = currentBike.isInUse || false;
     let isAvailable = bikeData.isAvailable;
     
-    // Rule: All bikes in use must be unlocked
-    if (isInUse && isLocked) {
-      console.warn(`Bike ${id} is in use but was being set to locked. Forcing unlock.`);
-      bikeData.isLocked = false;
+    // Special handling for maintenance status
+    // If bike has a non-operational maintenance status, it should not be available
+    if (currentMaintenanceStatus !== 'operational') {
+      // For non-operational bikes, preserve current availability unless explicitly overriding
+      if (bikeData.isAvailable !== undefined) {
+        console.warn(`Bike ${id} has maintenance status '${currentMaintenanceStatus}' but isAvailable was explicitly set to ${bikeData.isAvailable}. This may cause conflicts.`);
+        isAvailable = bikeData.isAvailable; // Respect the explicit setting but warn
+      } else {
+        // Preserve current availability state instead of forcing to false
+        isAvailable = currentBike.isAvailable;
+      }
+      console.log(`Bike ${id} has maintenance status '${currentMaintenanceStatus}', preserving isAvailable as ${isAvailable}`);
+    } else {
+      // For operational bikes, allow normal availability logic
+      // Use the provided isAvailable value or keep current state
+      if (bikeData.isAvailable !== undefined) {
+        isAvailable = bikeData.isAvailable;
+      } else {
+        isAvailable = currentBike.isAvailable;
+      }
+      
+      // Rule: All bikes in use must be unlocked
+      if (isInUse && isLocked) {
+        console.warn(`Bike ${id} is in use but was being set to locked. Forcing unlock.`);
+        bikeData.isLocked = false;
+      }
+      
+      // If trying to make a bike available but it's not locked, force lock it
+      if (isAvailable && !isLocked) {
+        console.warn(`Bike ${id} is being marked as available but wasn't locked. Forcing lock state.`);
+        bikeData.isLocked = true;
+      }
+      
+      // If bike is not locked, it cannot be available
+      if (!bikeData.isLocked && isAvailable) {
+        isAvailable = false;
+        console.warn(`Bike ${id} cannot be available when unlocked. Setting to unavailable.`);
+      }
     }
     
-    // If trying to make a bike available but it's not locked, force lock it
-    if (isAvailable && !isLocked) {
-      console.warn(`Bike ${id} is being marked as available but wasn't locked. Forcing lock state.`);
-      bikeData.isLocked = true;
-    }
-    
-    // If bike is not locked, it cannot be available
-    if (!bikeData.isLocked && isAvailable) {
-      isAvailable = false;
-      console.warn(`Bike ${id} cannot be available when unlocked. Setting to unavailable.`);
-    }
-    
-    // Prepare update data
+    // Prepare update data - only include fields that are being updated
     const updatedBike = {
       name: bikeData.name,
       type: bikeData.type,
       priceValue: parseFloat(bikeData.price),
       price: `₱${bikeData.price}/hr`,
       description: bikeData.description,
-      isAvailable: isAvailable,
-      isLocked: bikeData.isLocked !== undefined ? bikeData.isLocked : currentBike.isLocked,
       updatedAt: new Date(),
       lastUpdated: new Date(),
       latitude: bikeData.latitude,
       longitude: bikeData.longitude
     };
+
+    // Only include isAvailable if it's being explicitly updated or if there are rule violations that require changes
+    if (bikeData.isAvailable !== undefined || 
+        (currentMaintenanceStatus !== 'operational' && bikeData.isAvailable === undefined) ||
+        (!bikeData.isLocked && isAvailable) || 
+        (isAvailable && !isLocked)) {
+      updatedBike.isAvailable = isAvailable;
+    }
+
+    // Only include isLocked if it's being explicitly updated or if there are rule violations
+    if (bikeData.isLocked !== undefined || 
+        (isInUse && isLocked) || 
+        (isAvailable && !isLocked)) {
+      updatedBike.isLocked = bikeData.isLocked !== undefined ? bikeData.isLocked : currentBike.isLocked;
+    }
+
+    // Preserve maintenance-related fields unless they're being explicitly updated through maintenance management
+    // This ensures that coordinate updates don't reset maintenance status
+    if (bikeData.maintenanceStatus === undefined) {
+      // Preserve existing maintenance fields
+      if (currentBike.maintenanceStatus !== undefined) {
+        updatedBike.maintenanceStatus = currentBike.maintenanceStatus;
+      }
+      if (currentBike.maintenanceNotes !== undefined) {
+        updatedBike.maintenanceNotes = currentBike.maintenanceNotes;
+      }
+      if (currentBike.maintenanceLastUpdated !== undefined) {
+        updatedBike.maintenanceLastUpdated = currentBike.maintenanceLastUpdated;
+      }
+      if (currentBike.maintenanceUpdatedBy !== undefined) {
+        updatedBike.maintenanceUpdatedBy = currentBike.maintenanceUpdatedBy;
+      }
+    }
 
     // Handle QR code field (primary identifier)
     if (bikeData.qrCode !== undefined) {
@@ -344,6 +425,27 @@ export const updateBike = async (id, bikeData, imageFile) => {
       const imageUrl = await getDownloadURL(storageRef);
       updatedBike.imageUrl = imageUrl;
     }
+
+    console.log(`Updating bike ${id}:`, {
+      maintainingFields: {
+        maintenanceStatus: updatedBike.maintenanceStatus || 'preserved',
+        isAvailable: updatedBike.isAvailable !== undefined ? updatedBike.isAvailable : 'preserved from current: ' + currentBike.isAvailable,
+        isLocked: updatedBike.isLocked !== undefined ? updatedBike.isLocked : 'preserved from current: ' + currentBike.isLocked,
+        maintenanceNotes: updatedBike.maintenanceNotes || 'preserved'
+      },
+      originalFields: {
+        maintenanceStatus: currentBike.maintenanceStatus,
+        isAvailable: currentBike.isAvailable,
+        isLocked: currentBike.isLocked,
+        maintenanceNotes: currentBike.maintenanceNotes
+      },
+      updateData: updatedBike,
+      explicitlyProvided: {
+        isAvailable: bikeData.isAvailable !== undefined ? bikeData.isAvailable : 'not provided',
+        isLocked: bikeData.isLocked !== undefined ? bikeData.isLocked : 'not provided',
+        maintenanceStatus: bikeData.maintenanceStatus !== undefined ? bikeData.maintenanceStatus : 'not provided'
+      }
+    });
 
     // Update Firestore document
     await updateDoc(bikeRef, updatedBike);
@@ -797,21 +899,20 @@ export const validateBikeIdentifiers = async (qrCode, hardwareId, excludeBikeId 
 
 // Enhanced uniqueness check that can exclude a specific bike ID
 export const isQRCodeUnique = async (identifier, excludeBikeId = null) => {
+  if (!identifier) return false;
+  
   try {
-    // Check authentication first
-    const user = requireAuth();
-    
-    // Check in qrCode field
+    // Check qrCode field
     const qrCodeQuery = query(
-      collection(db, "bikes"),
+      collection(db, "bikes"), 
       where("qrCode", "==", identifier),
       ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
     );
     const qrCodeSnapshot = await getDocs(qrCodeQuery);
     
-    // Check in hardwareId field for backward compatibility
+    // Check hardwareId field for backward compatibility
     const hardwareIdQuery = query(
-      collection(db, "bikes"),
+      collection(db, "bikes"), 
       where("hardwareId", "==", identifier),
       ...(excludeBikeId ? [where("id", "!=", excludeBikeId)] : [])
     );
@@ -820,7 +921,321 @@ export const isQRCodeUnique = async (identifier, excludeBikeId = null) => {
     return qrCodeSnapshot.empty && hardwareIdSnapshot.empty;
   } catch (error) {
     console.error('Error checking identifier uniqueness:', error);
-    return false; // Assume not unique to be safe
+    return false;
+  }
+};
+
+// Export admin checking function for use in components
+export const checkAdminStatus = async () => {
+  try {
+    const user = requireAuth();
+    const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+    return {
+      isAdmin: adminDoc.exists(),
+      adminData: adminDoc.exists() ? adminDoc.data() : null,
+      user: {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName
+      }
+    };
+  } catch (error) {
+    console.error('Error checking admin status:', error);
+    return {
+      isAdmin: false,
+      adminData: null,
+      user: null,
+      error: error.message
+    };
+  }
+};
+
+// Function to add current user as admin (for initial setup)
+export const setupAdminUser = async () => {
+  try {
+    const user = requireAuth();
+    
+    // Check if user is already an admin
+    const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+    if (adminDoc.exists()) {
+      console.log('User is already an admin');
+      return { success: true, message: 'User is already an admin' };
+    }
+    
+    // Add user to admins collection
+    const adminData = {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName || user.email,
+      role: 'admin',
+      createdAt: new Date(),
+      addedBy: 'self-setup' // Indicates this was a self-setup
+    };
+    
+    await setDoc(doc(db, 'admins', user.uid), adminData);
+    
+    console.log('User added as admin:', user.email);
+    return { 
+      success: true, 
+      message: `User ${user.email} has been added as an admin`,
+      adminData 
+    };
+  } catch (error) {
+    console.error('Error setting up admin user:', error);
+    return { 
+      success: false, 
+      message: `Failed to setup admin user: ${error.message}` 
+    };
+  }
+};
+
+// Function to list all admins (admin only)
+export const listAdmins = async () => {
+  try {
+    // Verify admin access
+    await requireAdmin();
+    
+    const adminsRef = collection(db, 'admins');
+    const snapshot = await getDocs(adminsRef);
+    
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error listing admins:', error);
+    throw error;
+  }
+};
+
+// Function to remove admin (admin only)
+export const removeAdmin = async (adminUid) => {
+  try {
+    // Verify admin access
+    const currentUser = await requireAdmin();
+    
+    // Prevent removing yourself
+    if (currentUser.uid === adminUid) {
+      throw new Error('Cannot remove your own admin privileges');
+    }
+    
+    await deleteDoc(doc(db, 'admins', adminUid));
+    console.log('Admin removed:', adminUid);
+    
+    return { success: true, message: 'Admin removed successfully' };
+  } catch (error) {
+    console.error('Error removing admin:', error);
+    throw error;
+  }
+};
+
+// Function to update bike maintenance status (admin only)
+export const updateBikeMaintenanceStatus = async (bikeId, maintenanceData) => {
+  try {
+    // Check admin authentication first
+    const user = await requireAdmin();
+    
+    const bikeRef = doc(db, 'bikes', bikeId);
+    const bikeDoc = await getDoc(bikeRef);
+    
+    if (!bikeDoc.exists()) {
+      throw new Error(`Bike with ID ${bikeId} not found`);
+    }
+    
+    const currentBike = bikeDoc.data();
+    
+    // Prepare maintenance update data
+    const updateData = {
+      maintenanceStatus: maintenanceData.status || 'operational', // 'operational', 'maintenance', 'repair', 'out-of-service'
+      maintenanceNotes: maintenanceData.notes || '',
+      maintenanceLastUpdated: new Date(),
+      maintenanceUpdatedBy: user.uid,
+      lastUpdated: new Date()
+    };
+    
+    // Handle bike availability based on maintenance status
+    if (maintenanceData.status === 'maintenance' || maintenanceData.status === 'repair' || maintenanceData.status === 'out-of-service') {
+      // If setting to maintenance status, bike should be unavailable and locked
+      updateData.isAvailable = false;
+      updateData.isLocked = true;
+      updateData.isInUse = false; // Can't be in use if in maintenance
+      
+      // If bike is currently in use, we need to handle this carefully
+      if (currentBike.isInUse) {
+        console.warn(`Warning: Bike ${bikeId} is currently in use but being set to maintenance status`);
+        // You might want to add additional logic here to handle active rides
+      }
+    } else if (maintenanceData.status === 'operational') {
+      // If setting back to operational, make it available and properly locked
+      // Only set to available if the bike is not currently in use
+      if (!currentBike.isInUse) {
+        updateData.isAvailable = true;
+        updateData.isLocked = true;
+        updateData.isInUse = false;
+      } else {
+        // If bike is in use, it should be unlocked and unavailable for new rentals
+        updateData.isAvailable = false;
+        updateData.isLocked = false;
+        // Keep isInUse as is since it's currently being used
+      }
+    }
+    
+    console.log(`Updating bike ${bikeId} maintenance status:`, updateData);
+    
+    // Update the bike document
+    await updateDoc(bikeRef, updateData);
+    
+    // Return the updated bike data
+    const updatedBikeDoc = await getDoc(bikeRef);
+    return {
+      id: bikeId,
+      ...updatedBikeDoc.data()
+    };
+  } catch (error) {
+    console.error('Error updating bike maintenance status:', error);
+    throw error;
+  }
+};
+
+// Function to get bikes by maintenance status
+export const getBikesByMaintenanceStatus = async (status = null) => {
+  try {
+    // Check admin authentication first
+    await requireAdmin();
+    
+    let bikesQuery;
+    if (status) {
+      bikesQuery = query(
+        collection(db, 'bikes'), 
+        where('maintenanceStatus', '==', status)
+      );
+    } else {
+      bikesQuery = collection(db, 'bikes');
+    }
+    
+    const snapshot = await getDocs(bikesQuery);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching bikes by maintenance status:', error);
+    throw error;
+  }
+};
+
+// Function to get maintenance history for a bike
+export const getBikeMaintenanceHistory = async (bikeId) => {
+  try {
+    // Check admin authentication first
+    await requireAdmin();
+    
+    const maintenanceRef = collection(db, `bikes/${bikeId}/maintenanceHistory`);
+    const maintenanceQuery = query(maintenanceRef, orderBy('timestamp', 'desc'));
+    const snapshot = await getDocs(maintenanceQuery);
+    
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error('Error fetching bike maintenance history:', error);
+    throw error;
+  }
+};
+
+// Function to add maintenance log entry
+export const addMaintenanceLogEntry = async (bikeId, logData) => {
+  try {
+    // Check admin authentication first
+    const user = await requireAdmin();
+    
+    const maintenanceRef = collection(db, `bikes/${bikeId}/maintenanceHistory`);
+    const logEntry = {
+      timestamp: new Date(),
+      adminId: user.uid,
+      adminEmail: user.email,
+      action: logData.action || 'status_change',
+      oldStatus: logData.oldStatus || 'unknown',
+      newStatus: logData.newStatus || 'unknown',
+      notes: logData.notes || '',
+      description: logData.description || ''
+    };
+    
+    await addDoc(maintenanceRef, logEntry);
+    return logEntry;
+  } catch (error) {
+    console.error('Error adding maintenance log entry:', error);
+    throw error;
+  }
+};
+
+// Debug function to help troubleshoot bike state issues
+export const debugBikeState = async (bikeId) => {
+  try {
+    const user = await requireAdmin();
+    
+    const bikeRef = doc(db, 'bikes', bikeId);
+    const bikeDoc = await getDoc(bikeRef);
+    
+    if (!bikeDoc.exists()) {
+      console.error(`Bike ${bikeId} not found`);
+      return null;
+    }
+    
+    const bike = bikeDoc.data();
+    
+    console.log('=== BIKE STATE DEBUG ===');
+    console.log(`Bike ID: ${bikeId}`);
+    console.log(`Name: ${bike.name}`);
+    console.log(`Maintenance Status: ${bike.maintenanceStatus || 'undefined'}`);
+    console.log(`Is Available: ${bike.isAvailable}`);
+    console.log(`Is Locked: ${bike.isLocked}`);
+    console.log(`Is In Use: ${bike.isInUse}`);
+    console.log(`Maintenance Notes: ${bike.maintenanceNotes || 'none'}`);
+    console.log(`Last Updated: ${bike.lastUpdated ? new Date(bike.lastUpdated.seconds ? bike.lastUpdated.seconds * 1000 : bike.lastUpdated).toISOString() : 'undefined'}`);
+    console.log(`Maintenance Last Updated: ${bike.maintenanceLastUpdated ? new Date(bike.maintenanceLastUpdated.seconds ? bike.maintenanceLastUpdated.seconds * 1000 : bike.maintenanceLastUpdated).toISOString() : 'undefined'}`);
+    
+    // Check for potential issues
+    const issues = [];
+    
+    if (bike.maintenanceStatus !== 'operational' && bike.isAvailable) {
+      issues.push('ISSUE: Bike has non-operational maintenance status but is marked as available');
+    }
+    
+    if (bike.isAvailable && !bike.isLocked) {
+      issues.push('ISSUE: Bike is available but not locked');
+    }
+    
+    if (bike.isInUse && bike.isLocked) {
+      issues.push('ISSUE: Bike is in use but locked');
+    }
+    
+    if (bike.isInUse && bike.isAvailable) {
+      issues.push('ISSUE: Bike is both in use and available');
+    }
+    
+    if (issues.length > 0) {
+      console.log('🚨 POTENTIAL ISSUES FOUND:');
+      issues.forEach(issue => console.log(`  - ${issue}`));
+    } else {
+      console.log('✅ No state inconsistencies found');
+    }
+    
+    console.log('========================');
+    
+    return {
+      bike,
+      issues,
+      recommendations: issues.length > 0 ? [
+        'Run ensureBikeDataConsistency() to fix state issues',
+        'Check if maintenance status updates are being applied correctly'
+      ] : []
+    };
+    
+  } catch (error) {
+    console.error('Error debugging bike state:', error);
+    throw error;
   }
 };
 

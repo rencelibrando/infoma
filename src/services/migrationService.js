@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, getDocs, doc, updateDoc, query, where } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, query, where, writeBatch } from "firebase/firestore";
 
 /**
  * Migration service to help transition from hardwareId to qrCode field structure
@@ -261,5 +261,119 @@ export const generateQRCodeReport = async () => {
       success: false,
       error: error.message
     };
+  }
+};
+
+// Function to migrate existing bikes to include maintenance status
+export const migrateBikesWithMaintenanceStatus = async () => {
+  try {
+    console.log('Starting bike maintenance status migration...');
+    
+    // Get all bikes
+    const bikesRef = collection(db, 'bikes');
+    const snapshot = await getDocs(bikesRef);
+    
+    if (snapshot.empty) {
+      console.log('No bikes found to migrate');
+      return { success: true, updated: 0 };
+    }
+    
+    let updatedCount = 0;
+    const batch = writeBatch(db);
+    
+    snapshot.docs.forEach(doc => {
+      const bikeData = doc.data();
+      
+      // Check if bike already has maintenance status
+      if (!bikeData.maintenanceStatus) {
+        const bikeRef = doc.ref;
+        
+        // Default all bikes to operational status during migration
+        // This ensures that availability is not controlled by maintenance status
+        // unless explicitly set by an admin
+        const initialStatus = 'operational';
+        
+        const updateData = {
+          maintenanceStatus: initialStatus,
+          maintenanceNotes: '',
+          maintenanceLastUpdated: new Date(),
+          maintenanceUpdatedBy: 'system_migration'
+        };
+        
+        batch.update(bikeRef, updateData);
+        updatedCount++;
+        
+        console.log(`Queued bike ${doc.id} for maintenance status migration (status: ${initialStatus})`);
+      }
+    });
+    
+    if (updatedCount > 0) {
+      await batch.commit();
+      console.log(`✅ Successfully migrated ${updatedCount} bikes with maintenance status`);
+    } else {
+      console.log('All bikes already have maintenance status - no migration needed');
+    }
+    
+    return { success: true, updated: updatedCount };
+    
+  } catch (error) {
+    console.error('Error migrating bikes with maintenance status:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Function to fix bikes that were incorrectly set to maintenance status during migration
+export const fixIncorrectMaintenanceStatus = async () => {
+  try {
+    console.log('Starting fix for incorrect maintenance status...');
+    
+    // Get all bikes with maintenance status but no maintenance notes
+    const bikesRef = collection(db, 'bikes');
+    const q = query(bikesRef, where('maintenanceStatus', '!=', 'operational'));
+    const snapshot = await getDocs(q);
+    
+    if (snapshot.empty) {
+      console.log('No bikes with non-operational status found');
+      return { success: true, fixed: 0 };
+    }
+    
+    let fixedCount = 0;
+    const batch = writeBatch(db);
+    
+    snapshot.docs.forEach(doc => {
+      const bikeData = doc.data();
+      
+      // If the bike has maintenance status but was set by system migration and has no notes,
+      // it was probably incorrectly migrated
+      if (bikeData.maintenanceUpdatedBy === 'system_migration' && 
+          (!bikeData.maintenanceNotes || bikeData.maintenanceNotes.trim() === '')) {
+        
+        const bikeRef = doc.ref;
+        const updateData = {
+          maintenanceStatus: 'operational',
+          maintenanceNotes: '',
+          maintenanceLastUpdated: new Date(),
+          maintenanceUpdatedBy: 'system_fix'
+        };
+        
+        batch.update(bikeRef, updateData);
+        fixedCount++;
+        
+        console.log(`Queued bike ${doc.id} for maintenance status fix (${bikeData.maintenanceStatus} -> operational)`);
+      }
+    });
+    
+    if (fixedCount > 0) {
+      await batch.commit();
+      console.log(`✅ Successfully fixed ${fixedCount} bikes with incorrect maintenance status`);
+    } else {
+      console.log('No bikes needed fixing - all maintenance statuses appear correct');
+    }
+    
+    return { success: true, fixed: fixedCount };
+    
+  } catch (error) {
+    console.error('Error fixing incorrect maintenance status:', error);
+    return { success: false, error: error.message };
   }
 }; 

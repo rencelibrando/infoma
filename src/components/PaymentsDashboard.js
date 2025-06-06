@@ -66,11 +66,12 @@ const SettingsTitle = styled.h2`
 const SettingsGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  gap: 24px;
   align-items: start;
 
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
+    gap: 20px;
   }
 `;
 
@@ -78,8 +79,11 @@ const SettingCard = styled.div`
   background: ${colors.lightGray};
   border: 1px solid ${colors.border};
   border-radius: 8px;
-  padding: 16px;
+  padding: 20px;
   transition: all 0.2s ease;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
 
   &:hover {
     box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
@@ -90,31 +94,33 @@ const SettingLabel = styled.label`
   display: block;
   font-weight: 600;
   color: ${colors.secondary};
-  margin-bottom: 6px;
-  font-size: 0.8rem;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 `;
 
 const SettingInput = styled.input`
   width: 100%;
-  padding: 8px 12px;
+  padding: 12px 16px;
   border: 2px solid ${colors.border};
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   box-sizing: border-box;
   background-color: ${colors.white};
   color: ${colors.primary};
   transition: all 0.2s ease;
+  font-weight: 500;
 
   &:focus {
     outline: none;
     border-color: ${colors.primary};
-    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.1);
   }
 
   &::placeholder {
     color: ${colors.quaternary};
+    font-weight: 400;
   }
 `;
 
@@ -131,37 +137,53 @@ const FileInput = styled.input`
 const FileInputLabel = styled.label`
   display: block;
   width: 100%;
-  padding: 12px;
+  padding: 16px;
   border: 2px dashed ${colors.border};
-  border-radius: 6px;
+  border-radius: 8px;
   text-align: center;
   cursor: pointer;
   background-color: ${colors.white};
   color: ${colors.secondary};
   font-weight: 500;
   transition: all 0.2s ease;
+  font-size: 14px;
 
   &:hover {
     border-color: ${colors.primary};
     background-color: ${colors.lightGray};
     color: ${colors.primary};
   }
+
+  &:active {
+    transform: translateY(1px);
+  }
 `;
 
 const CurrentQRPreview = styled.div`
-  margin-top: 12px;
+  margin-top: 16px;
   text-align: center;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
 `;
 
 const QRImage = styled.img`
-  max-width: 150px;
+  max-width: 160px;
+  width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 2px solid ${colors.border};
   transition: all 0.2s ease;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 
   &:hover {
     border-color: ${colors.primary};
+    transform: scale(1.02);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
   }
 `;
 
@@ -169,15 +191,16 @@ const SaveButton = styled.button`
   background-color: ${colors.primary};
   color: ${colors.white};
   border: none;
-  padding: 8px 16px;
+  padding: 10px 18px;
   border-radius: 6px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  margin-top: 12px;
-  font-size: 12px;
+  margin-top: 16px;
+  font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  width: 100%;
 
   &:hover {
     background-color: ${colors.secondary};
@@ -196,21 +219,25 @@ const SaveButton = styled.button`
 const SuccessMessage = styled.div`
   background-color: ${colors.success};
   color: ${colors.white};
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-top: 8px;
-  font-size: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 13px;
   font-weight: 500;
+  text-align: center;
+  border: 2px solid ${colors.success};
 `;
 
 const ErrorMessage = styled.div`
   background-color: ${colors.danger};
   color: ${colors.white};
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-top: 8px;
-  font-size: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-top: 12px;
+  font-size: 13px;
   font-weight: 500;
+  text-align: center;
+  border: 2px solid ${colors.danger};
 `;
 
 const LoadingSpinner = styled.div`
@@ -425,13 +452,13 @@ const PaymentInfoValue = styled.div`
 `;
 
 const DetailLabel = styled.div`
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: ${colors.tertiary};
+  color: ${colors.secondary};
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 4px;
-  margin-top: 6px;
+  margin-bottom: 8px;
+  text-align: center;
 `;
 
 const StatusBadge = styled.span`
@@ -581,8 +608,10 @@ const CloseButton = styled.button`
 `;
 
 const ModalImage = styled.img`
-  max-width: 100%;
-  max-height: 100%;
+  max-width: 400px;
+  max-height: 400px;
+  width: auto;
+  height: auto;
   object-fit: contain;
   border-radius: 6px;
 `;
@@ -727,6 +756,40 @@ const DetailItemValue = styled.div`
   word-break: break-all;
 `;
 
+const QRCodeSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+`;
+
+const QRUploadSection = styled.div`
+  margin-bottom: 20px;
+`;
+
+const QRPlaceholder = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 20px;
+  border: 2px dashed ${colors.border};
+  border-radius: 8px;
+  background-color: ${colors.white};
+  color: ${colors.tertiary};
+  text-align: center;
+  font-size: 14px;
+`;
+
+const FormGroup = styled.div`
+  margin-bottom: 16px;
+
+  &:last-of-type {
+    margin-bottom: 0;
+  }
+`;
+
 const PaymentsDashboard = () => {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -736,6 +799,8 @@ const PaymentsDashboard = () => {
   const [filteredPayments, setFilteredPayments] = useState([]);
   const [selectedImage, setSelectedImage] = useState(null);
   const [processingId, setProcessingId] = useState(null);
+  const [users, setUsers] = useState({});
+  const [loadingUsers, setLoadingUsers] = useState(false);
   
   // New state for expanded payment details
   const [expandedPayment, setExpandedPayment] = useState(null);
@@ -750,6 +815,56 @@ const PaymentsDashboard = () => {
   const [currentQRUrl, setCurrentQRUrl] = useState('');
 
   const { user, isAuthenticated, loading: authLoading } = useAuth();
+
+  // Function to fetch user data for payments
+  const fetchUsersForPayments = async (paymentsData) => {
+    try {
+      setLoadingUsers(true);
+      const userIds = [...new Set(paymentsData.map(payment => payment.userId).filter(Boolean))];
+      
+      if (userIds.length === 0) {
+        setLoadingUsers(false);
+        return {};
+      }
+
+      const usersData = {};
+      
+      // Fetch each user's data
+      for (const userId of userIds) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            usersData[userId] = {
+              name: userData.fullName || userData.name || userData.displayName || 'Unknown User',
+              email: userData.email || 'No email provided',
+              phone: userData.phoneNumber || userData.phone || 'No phone provided'
+            };
+          } else {
+            usersData[userId] = {
+              name: 'Unknown User',
+              email: 'No email provided',
+              phone: 'No phone provided'
+            };
+          }
+        } catch (error) {
+          console.error(`Error fetching user data for ${userId}:`, error);
+          usersData[userId] = {
+            name: 'Error loading user',
+            email: 'Error loading email',
+            phone: 'Error loading phone'
+          };
+        }
+      }
+      
+      setLoadingUsers(false);
+      return usersData;
+    } catch (error) {
+      console.error('Error fetching users for payments:', error);
+      setLoadingUsers(false);
+      return {};
+    }
+  };
 
   // Load payment settings from Firestore
   useEffect(() => {
@@ -795,6 +910,7 @@ const PaymentsDashboard = () => {
       
       if (snapshot.empty) {
         setPayments([]);
+        setUsers({});
         setLoading(false);
         return;
       }
@@ -820,7 +936,11 @@ const PaymentsDashboard = () => {
         });
       });
       
+      // Fetch user data for all payments
+      const usersData = await fetchUsersForPayments(paymentsData);
+      
       setPayments(paymentsData);
+      setUsers(usersData);
       setLoading(false);
       
     } catch (error) {
@@ -845,17 +965,25 @@ const PaymentsDashboard = () => {
       filtered = filtered.filter(payment => payment.status === statusFilter);
     }
 
-    // Filter by search term
+    // Filter by search term - now includes user name and email
     if (searchTerm) {
-      filtered = filtered.filter(payment =>
-        payment.mobileNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        payment.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        payment.bikeType?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      filtered = filtered.filter(payment => {
+        const userData = users[payment.userId];
+        const searchLower = searchTerm.toLowerCase();
+        
+        return (
+          payment.mobileNumber?.toLowerCase().includes(searchLower) ||
+          payment.referenceNumber?.toLowerCase().includes(searchLower) ||
+          payment.bikeType?.toLowerCase().includes(searchLower) ||
+          userData?.name?.toLowerCase().includes(searchLower) ||
+          userData?.email?.toLowerCase().includes(searchLower) ||
+          userData?.phone?.toLowerCase().includes(searchLower)
+        );
+      });
     }
 
     setFilteredPayments(filtered);
-  }, [payments, statusFilter, searchTerm]);
+  }, [payments, statusFilter, searchTerm, users]);
 
   // Calculate statistics
   const stats = {
@@ -1078,21 +1206,25 @@ const PaymentsDashboard = () => {
         <SettingsTitle>Payment Settings Management</SettingsTitle>
         <SettingsGrid>
           <SettingCard>
-            <SettingLabel>GCash Mobile Number</SettingLabel>
-            <SettingInput
-              type="text"
-              value={gcashNumber}
-              onChange={handleGCashNumberChange}
-              placeholder="09123456789"
-            />
+            <FormGroup>
+              <SettingLabel>GCash Mobile Number</SettingLabel>
+              <SettingInput
+                type="text"
+                value={gcashNumber}
+                onChange={handleGCashNumberChange}
+                placeholder="09123456789"
+              />
+            </FormGroup>
             
-            <SettingLabel style={{ marginTop: '15px' }}>Business Name</SettingLabel>
-            <SettingInput
-              type="text"
-              value={businessName}
-              onChange={handleBusinessNameChange}
-              placeholder="Bambike Cycles"
-            />
+            <FormGroup>
+              <SettingLabel>Business Name</SettingLabel>
+              <SettingInput
+                type="text"
+                value={businessName}
+                onChange={handleBusinessNameChange}
+                placeholder="Bambike Cycles"
+              />
+            </FormGroup>
             
             <SaveButton
               onClick={handleSettingsUpdate}
@@ -1111,29 +1243,37 @@ const PaymentsDashboard = () => {
           </SettingCard>
 
           <SettingCard>
-            <SettingLabel>QR Code Image</SettingLabel>
-            <FileInputWrapper>
-              <FileInput
-                id="qr-upload"
-                type="file"
-                accept="image/*"
-                onChange={handleQRFileChange}
-              />
-              <FileInputLabel htmlFor="qr-upload">
-                {qrFile ? `Selected: ${qrFile.name}` : 'Click to upload new QR code'}
-              </FileInputLabel>
-            </FileInputWrapper>
-            
-            {currentQRUrl && (
-              <CurrentQRPreview>
-                <DetailLabel>Current QR Code:</DetailLabel>
-                <QRImage 
-                  src={currentQRUrl} 
-                  alt="Current QR Code"
-                  onClick={() => setSelectedImage(currentQRUrl)}
-                />
-              </CurrentQRPreview>
-            )}
+            <QRCodeSection>
+              <QRUploadSection>
+                <SettingLabel>QR Code Image</SettingLabel>
+                <FileInputWrapper>
+                  <FileInput
+                    id="qr-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleQRFileChange}
+                  />
+                  <FileInputLabel htmlFor="qr-upload">
+                    {qrFile ? `Selected: ${qrFile.name}` : 'Click to upload new QR code'}
+                  </FileInputLabel>
+                </FileInputWrapper>
+              </QRUploadSection>
+              
+              {currentQRUrl ? (
+                <CurrentQRPreview>
+                  <DetailLabel>Current QR Code:</DetailLabel>
+                  <QRImage 
+                    src={currentQRUrl} 
+                    alt="Current QR Code"
+                    onClick={() => setSelectedImage(currentQRUrl)}
+                  />
+                </CurrentQRPreview>
+              ) : (
+                <QRPlaceholder>
+                  No QR code uploaded yet
+                </QRPlaceholder>
+              )}
+            </QRCodeSection>
           </SettingCard>
         </SettingsGrid>
       </PaymentSettingsSection>
@@ -1171,7 +1311,7 @@ const PaymentsDashboard = () => {
         </FilterSelect>
         <SearchInput
           type="text"
-          placeholder="Search by mobile, reference, or bike type..."
+          placeholder="Search by user name, email, mobile, reference, or bike type..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
@@ -1196,9 +1336,13 @@ const PaymentsDashboard = () => {
                 </PaymentIcon>
                 
                 <PaymentMainInfo>
-                  <PaymentTitle>{payment.bikeType} • {payment.duration}</PaymentTitle>
+                  <PaymentTitle>
+                    {loadingUsers ? 'Loading user info...' : (users[payment.userId]?.name || 'Unknown User')} • {payment.bikeType} • {payment.duration}
+                  </PaymentTitle>
                   <PaymentSubtitle>
                     <span>#{payment.id.slice(-8)}</span>
+                    <span>•</span>
+                    <span>{loadingUsers ? 'Loading...' : (users[payment.userId]?.email || 'No email')}</span>
                     <span>•</span>
                     <span>{payment.mobileNumber}</span>
                     <span>•</span>
@@ -1216,6 +1360,21 @@ const PaymentsDashboard = () => {
               <PaymentDetails expanded={expandedPayment === payment.id}>
                 <DetailGrid>
                   <DetailItem>
+                    <DetailItemLabel>User Name</DetailItemLabel>
+                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.name || 'Unknown User')}</DetailItemValue>
+                  </DetailItem>
+                  
+                  <DetailItem>
+                    <DetailItemLabel>User Email</DetailItemLabel>
+                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.email || 'No email provided')}</DetailItemValue>
+                  </DetailItem>
+                  
+                  <DetailItem>
+                    <DetailItemLabel>User Phone</DetailItemLabel>
+                    <DetailItemValue>{loadingUsers ? 'Loading...' : (users[payment.userId]?.phone || payment.mobileNumber || 'No phone provided')}</DetailItemValue>
+                  </DetailItem>
+                  
+                  <DetailItem>
                     <DetailItemLabel>Payment ID</DetailItemLabel>
                     <DetailItemValue>{payment.id}</DetailItemValue>
                   </DetailItem>
@@ -1228,6 +1387,11 @@ const PaymentsDashboard = () => {
                   <DetailItem>
                     <DetailItemLabel>Mobile Number</DetailItemLabel>
                     <DetailItemValue>{payment.mobileNumber}</DetailItemValue>
+                  </DetailItem>
+                  
+                  <DetailItem>
+                    <DetailItemLabel>Bike Type & Duration</DetailItemLabel>
+                    <DetailItemValue>{payment.bikeType} • {payment.duration}</DetailItemValue>
                   </DetailItem>
                   
                   <DetailItem>
@@ -1260,7 +1424,7 @@ const PaymentsDashboard = () => {
                         e.stopPropagation();
                         setSelectedImage(payment.screenshotUrl);
                       }}
-                      style={{ width: '80px', height: '80px', marginTop: '8px' }}
+                      style={{ width: '60px', height: '60px', marginTop: '8px' }}
                     />
                   </DetailItem>
                 )}

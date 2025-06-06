@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { updateBike } from '../services/bikeService';
-import { checkQRCodeCollisions } from '../services/migrationService';
+import { updateBike, setupAdminUser } from '../services/bikeService';
+import { checkQRCodeCollisions, migrateBikesWithMaintenanceStatus } from '../services/migrationService';
+import MaintenanceManager from './MaintenanceManager';
 
 // Styled components
 const Form = styled.form`
@@ -25,6 +26,20 @@ const FormGroup = styled.div`
   margin-bottom: 20px;
 `;
 
+const FormRow = styled.div`
+  display: flex;
+  gap: 16px;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+  }
+`;
+
+const FormColumn = styled.div`
+  flex: 1;
+`;
+
 const Label = styled.label`
   display: block;
   margin-bottom: 8px;
@@ -42,6 +57,25 @@ const Input = styled.input`
     border-color: #4CAF50;
     outline: none;
   }
+  
+  /* Special styling for coordinate inputs */
+  ${props => props.type === 'number' && props.name?.includes('latitude') && `
+    &:valid {
+      border-color: #4CAF50;
+    }
+    &:invalid {
+      border-color: #f44336;
+    }
+  `}
+  
+  ${props => props.type === 'number' && props.name?.includes('longitude') && `
+    &:valid {
+      border-color: #4CAF50;
+    }
+    &:invalid {
+      border-color: #f44336;
+    }
+  `}
 `;
 
 const Textarea = styled.textarea`
@@ -166,30 +200,98 @@ const ValidationMessage = styled.div`
   }}
 `;
 
+const CoordinateSection = styled.div`
+  background-color: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  margin-bottom: 20px;
+`;
+
+const SectionTitle = styled.h4`
+  margin: 0 0 12px 0;
+  color: #495057;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+const CoordinateHelp = styled.div`
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 8px;
+  line-height: 1.4;
+`;
+
+const AdminSetupSection = styled.div`
+  background-color: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  margin-top: 20px;
+`;
+
+const AdminSetupTitle = styled.h4`
+  margin: 0 0 12px 0;
+  color: #495057;
+  font-size: 16px;
+  font-weight: 600;
+`;
+
+const AdminSetupText = styled.div`
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #6c757d;
+`;
+
+const AdminSetupButton = styled.button`
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  &:hover {
+    background-color: #388E3C;
+  }
+  &:disabled {
+    background-color: #A5D6A7;
+    cursor: not-allowed;
+  }
+`;
+
 const EditBike = ({ bike, onCancel, onSuccess }) => {
   const [formData, setFormData] = useState({
-    name: '',
-    type: '',
-    price: '',
-    description: '',
-    qrCode: '',
-    hardwareId: '',
-    isAvailable: true,
-    latitude: 0,
-    longitude: 0
+    name: bike?.name || '',
+    type: bike?.type || '',
+    qrCode: bike?.qrCode || '',
+    hardwareId: bike?.hardwareId || '',
+    price: bike?.priceValue || '',
+    latitude: bike?.latitude || '',
+    longitude: bike?.longitude || '',
+    description: bike?.description || '',
+    imageFile: null
   });
-  
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState('');
+
+  const [imagePreview, setImagePreview] = useState(bike?.imageUrl || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [qrCodeValidation, setQrCodeValidation] = useState({ status: '', message: '' });
   const [hardwareIdValidation, setHardwareIdValidation] = useState({ status: '', message: '' });
+  const [coordinateValidation, setCoordinateValidation] = useState({ status: '', message: '' });
+  const [showAdminSetup, setShowAdminSetup] = useState(false);
+  const [adminSetupLoading, setAdminSetupLoading] = useState(false);
+  const [currentBike, setCurrentBike] = useState(bike); // Track current bike data for maintenance manager
+  const [migrationLoading, setMigrationLoading] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState('');
   
   // Initialize form with bike data
   useEffect(() => {
     if (bike) {
+      console.log('Initializing EditBike form with bike data:', bike);
       setFormData({
         name: bike.name || '',
         type: bike.type || '',
@@ -197,13 +299,101 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
         description: bike.description || '',
         qrCode: bike.qrCode || '',
         hardwareId: bike.hardwareId || '',
-        isAvailable: bike.isAvailable !== undefined ? bike.isAvailable : true,
-        latitude: bike.latitude || 0,
-        longitude: bike.longitude || 0
+        latitude: bike.latitude !== undefined ? bike.latitude : '',
+        longitude: bike.longitude !== undefined ? bike.longitude : ''
       });
       setImagePreview(bike.imageUrl || '');
+      
+      // Clear any previous validation messages
+      setQrCodeValidation({ status: '', message: '' });
+      setHardwareIdValidation({ status: '', message: '' });
+      setCoordinateValidation({ status: '', message: '' });
+      setError('');
+      setSuccess('');
     }
   }, [bike]);
+  
+  // Update form data when currentBike changes (from maintenance updates)
+  useEffect(() => {
+    if (currentBike && currentBike !== bike) {
+      console.log('CurrentBike changed, updating form data:', {
+        oldBike: bike,
+        newBike: currentBike,
+        maintenanceStatus: currentBike.maintenanceStatus
+      });
+      
+      // Clear any previous success/error messages when bike data changes
+      setSuccess('');
+      // Don't clear error in case it's relevant
+    }
+  }, [currentBike, bike]);
+  
+  const validateCoordinates = (lat, lng) => {
+    // Allow empty coordinates
+    if (!lat && !lng) {
+      setCoordinateValidation({ status: '', message: '' });
+      return true;
+    }
+    
+    // If one coordinate is provided, both should be provided
+    if ((lat && !lng) || (!lat && lng)) {
+      setCoordinateValidation({
+        status: 'error',
+        message: 'Both latitude and longitude must be provided together.'
+      });
+      return false;
+    }
+    
+    const latitude = parseFloat(lat);
+    const longitude = parseFloat(lng);
+    
+    // Check if values are valid numbers
+    if (isNaN(latitude) || isNaN(longitude)) {
+      setCoordinateValidation({
+        status: 'error',
+        message: 'Latitude and longitude must be valid numbers.'
+      });
+      return false;
+    }
+    
+    // Check latitude range (-90 to 90)
+    if (latitude < -90 || latitude > 90) {
+      setCoordinateValidation({
+        status: 'error',
+        message: 'Latitude must be between -90 and 90 degrees.'
+      });
+      return false;
+    }
+    
+    // Check longitude range (-180 to 180)
+    if (longitude < -180 || longitude > 180) {
+      setCoordinateValidation({
+        status: 'error',
+        message: 'Longitude must be between -180 and 180 degrees.'
+      });
+      return false;
+    }
+    
+    // Check for Philippines region (optional warning)
+    const isInPhilippines = (
+      latitude >= 4.0 && latitude <= 21.0 &&
+      longitude >= 116.0 && longitude <= 127.0
+    );
+    
+    if (!isInPhilippines) {
+      setCoordinateValidation({
+        status: 'warning',
+        message: 'Coordinates appear to be outside the Philippines region. Please verify the location is correct.'
+      });
+    } else {
+      setCoordinateValidation({
+        status: 'success',
+        message: 'Valid coordinates within Philippines region.'
+      });
+    }
+    
+    return true;
+  };
   
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -219,6 +409,19 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
     }
     if (name === 'hardwareId' && !value.trim()) {
       setHardwareIdValidation({ status: '', message: '' });
+    }
+    
+    // Validate coordinates on change
+    if (name === 'latitude' || name === 'longitude') {
+      const lat = name === 'latitude' ? value : formData.latitude;
+      const lng = name === 'longitude' ? value : formData.longitude;
+      
+      // Only validate if both fields have non-zero values
+      if ((lat && lat !== '0') || (lng && lng !== '0')) {
+        validateCoordinates(lat, lng);
+      } else {
+        setCoordinateValidation({ status: '', message: '' });
+      }
     }
   };
 
@@ -311,7 +514,10 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      setImageFile(file);
+      setFormData({
+        ...formData,
+        imageFile: file
+      });
       
       // Create preview URL
       const reader = new FileReader();
@@ -323,26 +529,98 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
   };
   
   const validateForm = () => {
-    if (!formData.name) return 'Bike name is required';
-    if (!formData.type) return 'Bike type is required';
-    if (!formData.price) return 'Price is required';
-    if (isNaN(parseFloat(formData.price))) return 'Price must be a number';
+    console.log('=== FORM VALIDATION DEBUG ===');
+    console.log('Form data:', formData);
+    console.log('Bike data:', bike);
+    console.log('Current bike data:', currentBike);
     
-    // Validate QR code and hardware ID
-    if (!formData.qrCode.trim() && !formData.hardwareId.trim()) {
-      return 'Either QR Code or Hardware ID is required';
+    // Check required text fields
+    if (!formData.name?.trim()) {
+      console.log('Validation failed: Bike name is missing');
+      return 'Bike name is required';
+    }
+    if (!formData.type?.trim()) {
+      console.log('Validation failed: Bike type is missing or empty');
+      console.log('formData.type value:', formData.type);
+      return 'Bike type is required';
+    }
+    if (!formData.description?.trim()) {
+      console.log('Validation failed: Description is missing');
+      return 'Description is required';
     }
     
-    // Check for validation errors
-    if (qrCodeValidation.status === 'error') {
-      return 'QR Code validation failed. Please fix the issue.';
+    // Check price
+    const price = parseFloat(formData.price);
+    if (!formData.price || isNaN(price) || price <= 0) {
+      console.log('Validation failed: Invalid price');
+      return 'Valid price is required';
     }
     
-    if (hardwareIdValidation.status === 'error') {
-      return 'Hardware ID validation failed. Please fix the issue.';
+    // Check identifiers - at least one is required
+    if (!formData.qrCode?.trim() && !formData.hardwareId?.trim()) {
+      console.log('Validation failed: No identifiers provided');
+      return 'At least one identifier (QR Code or Hardware ID) is required';
     }
     
-    return '';
+    // Check coordinates if provided
+    if (formData.latitude !== '' && formData.longitude !== '') {
+      const lat = parseFloat(formData.latitude);
+      const lng = parseFloat(formData.longitude);
+      
+      if (isNaN(lat) || lat < -90 || lat > 90) {
+        console.log('Validation failed: Invalid latitude');
+        return 'Valid latitude (-90 to 90) is required';
+      }
+      if (isNaN(lng) || lng < -180 || lng > 180) {
+        console.log('Validation failed: Invalid longitude');
+        return 'Valid longitude (-180 to 180) is required';
+      }
+    }
+    
+    console.log('Form validation passed successfully');
+    console.log('=============================');
+    return null;
+  };
+
+  const handleAdminSetup = async () => {
+    setAdminSetupLoading(true);
+    setError('');
+    
+    try {
+      await setupAdminUser();
+      setSuccess('Admin access granted successfully! You can now update bikes.');
+      setShowAdminSetup(false);
+    } catch (err) {
+      console.error('Admin setup error:', err);
+      setError(`Failed to setup admin access: ${err.message}`);
+    } finally {
+      setAdminSetupLoading(false);
+    }
+  };
+
+  const handleMaintenanceMigration = async () => {
+    setMigrationLoading(true);
+    setMigrationMessage('');
+    setError('');
+    
+    try {
+      const result = await migrateBikesWithMaintenanceStatus();
+      
+      if (result.success) {
+        if (result.updated > 0) {
+          setMigrationMessage(`✅ Successfully migrated ${result.updated} bikes with maintenance status`);
+        } else {
+          setMigrationMessage('ℹ️ All bikes already have maintenance status - no migration needed');
+        }
+      } else {
+        setError(`Migration failed: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('Migration error:', err);
+      setError(`Migration failed: ${err.message}`);
+    } finally {
+      setMigrationLoading(false);
+    }
   };
   
   const handleSubmit = async (e) => {
@@ -358,31 +636,78 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
     setError('');
     
     try {
-      // If the bike is being marked as available, we need to ensure it's locked
-      if (formData.isAvailable && !bike.isLocked) {
-        const confirmLock = window.confirm(
-          "This bike is currently unlocked. To mark it as available, it must be locked. Do you want to lock this bike now?"
-        );
+      // Prepare form data with proper type conversion and validation
+      const updateData = {
+        name: formData.name,
+        type: formData.type,
+        price: formData.price,
+        description: formData.description,
+        qrCode: formData.qrCode,
+        hardwareId: formData.hardwareId
+      };
+
+      // Handle coordinates carefully
+      if (formData.latitude !== '' && formData.longitude !== '') {
+        const lat = parseFloat(formData.latitude);
+        const lng = parseFloat(formData.longitude);
         
-        if (!confirmLock) {
-          setError("A bike must be locked to be available. Please try again.");
-          setLoading(false);
-          return;
+        // Only include coordinates if they are valid numbers
+        if (!isNaN(lat) && !isNaN(lng)) {
+          updateData.latitude = lat;
+          updateData.longitude = lng;
         }
-        
-        // We'll add isLocked: true to the update data
-        await updateBike(bike.id, {...formData, isLocked: true}, imageFile);
-      } else {
-        await updateBike(bike.id, formData, imageFile);
       }
+
+      console.log('=== BIKE UPDATE DEBUG ===');
+      console.log('Original bike data:', bike);
+      console.log('Current bike data:', currentBike);
+      console.log('Form data:', formData);
+      console.log('Update data being sent:', updateData);
+      console.log('Image file:', formData.imageFile);
+      console.log('Maintenance status should be preserved:', bike?.maintenanceStatus || 'operational');
+      console.log('Availability status should be preserved:', bike?.isAvailable);
+      console.log('========================');
+      
+      const result = await updateBike(bike.id, updateData, formData.imageFile);
+      console.log('Update result:', result);
       
       setSuccess('Bike updated successfully!');
-      setTimeout(() => {
-        if (onSuccess) onSuccess();
-      }, 1500);
+      setError('');
+      
+      // Update current bike state for maintenance manager
+      setCurrentBike(result);
+      
+      if (onSuccess) {
+        onSuccess(result);
+      }
     } catch (err) {
-      setError('Failed to update bike. Please try again.');
-      console.error(err);
+      console.error('=== BIKE UPDATE ERROR ===');
+      console.error('Error object:', err);
+      console.error('Error message:', err.message);
+      console.error('Error stack:', err.stack);
+      console.error('========================');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to update bike. Please try again.';
+      
+      if (err.message) {
+        if (err.message.includes('identifier') || err.message.includes('QR') || err.message.includes('Hardware')) {
+          errorMessage = 'QR Code or Hardware ID validation failed. Please check for duplicates.';
+        } else if (err.message.includes('permission') || err.message.includes('Access denied') || err.message.includes('Administrator')) {
+          errorMessage = 'You do not have permission to update bikes. Please check your admin status.';
+          setShowAdminSetup(true); // Show admin setup option
+        } else if (err.message.includes('coordinates') || err.message.includes('latitude') || err.message.includes('longitude')) {
+          errorMessage = 'Invalid coordinates provided. Please check the latitude and longitude values.';
+        } else if (err.message.includes('network') || err.message.includes('offline') || err.message.includes('connection')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else if (err.message.includes('auth') || err.message.includes('authentication')) {
+          errorMessage = 'Authentication error. Please refresh the page and try again.';
+        } else {
+          errorMessage = `Update failed: ${err.message}`;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -507,20 +832,105 @@ const EditBike = ({ bike, onCancel, onSuccess }) => {
         />
       </FormGroup>
       
-      <FormGroup>
-        <Label>
-          <Input
-            type="checkbox"
-            name="isAvailable"
-            checked={formData.isAvailable}
-            onChange={handleInputChange}
-          />
-          Available for Rent
-        </Label>
-      </FormGroup>
+      <CoordinateSection>
+        <SectionTitle>📍 Location Coordinates</SectionTitle>
+        <FormRow>
+          <FormColumn>
+            <Label htmlFor="latitude">Latitude</Label>
+            <Input
+              type="number"
+              id="latitude"
+              name="latitude"
+              value={formData.latitude}
+              onChange={handleInputChange}
+              placeholder="e.g., 14.5995"
+              step="any"
+              min="-90"
+              max="90"
+            />
+          </FormColumn>
+          <FormColumn>
+            <Label htmlFor="longitude">Longitude</Label>
+            <Input
+              type="number"
+              id="longitude"
+              name="longitude"
+              value={formData.longitude}
+              onChange={handleInputChange}
+              placeholder="e.g., 120.9842"
+              step="any"
+              min="-180"
+              max="180"
+            />
+          </FormColumn>
+        </FormRow>
+        
+        {coordinateValidation.message && (
+          <ValidationMessage type={coordinateValidation.status}>
+            {coordinateValidation.message}
+          </ValidationMessage>
+        )}
+        
+        <CoordinateHelp>
+          <strong>Tips:</strong> 
+          • Use decimal degrees format (e.g., 14.5995, 120.9842 for Manila)
+          • Latitude range: -90 to 90 degrees
+          • Longitude range: -180 to 180 degrees
+          • You can get coordinates from Google Maps by right-clicking on a location
+          • <strong>Note:</strong> Updating coordinates will preserve the bike's current maintenance status and availability settings
+        </CoordinateHelp>
+      </CoordinateSection>
       
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {success && <SuccessMessage>{success}</SuccessMessage>}
+      
+      {showAdminSetup && (
+        <AdminSetupSection>
+          <AdminSetupTitle>🔧 Admin Access Required</AdminSetupTitle>
+          <AdminSetupText>
+            It looks like you need admin privileges to update bikes. You can grant yourself admin access if you're the application administrator.
+          </AdminSetupText>
+          <AdminSetupButton 
+            type="button" 
+            onClick={handleAdminSetup}
+            disabled={adminSetupLoading}
+          >
+            {adminSetupLoading ? 'Setting up admin access...' : 'Grant Admin Access'}
+          </AdminSetupButton>
+        </AdminSetupSection>
+      )}
+      
+      {/* Migration Section */}
+      <AdminSetupSection>
+        <AdminSetupTitle>🔄 Database Migration</AdminSetupTitle>
+        <AdminSetupText>
+          If this is your first time using the maintenance management feature, you may need to migrate existing bikes to include maintenance status fields.
+        </AdminSetupText>
+        <AdminSetupButton 
+          type="button" 
+          onClick={handleMaintenanceMigration}
+          disabled={migrationLoading}
+        >
+          {migrationLoading ? 'Migrating bikes...' : 'Migrate Bikes for Maintenance'}
+        </AdminSetupButton>
+        {migrationMessage && (
+          <div style={{ marginTop: '10px', fontSize: '14px', color: '#2e7d32' }}>
+            {migrationMessage}
+          </div>
+        )}
+      </AdminSetupSection>
+      
+      {/* Maintenance Management Section */}
+      <MaintenanceManager 
+        bike={currentBike} 
+        onUpdate={(updatedBike) => {
+          setCurrentBike(updatedBike);
+          // You can also call onSuccess here if you want to refresh the parent component
+          if (onSuccess) {
+            onSuccess(updatedBike);
+          }
+        }} 
+      />
       
       <ButtonGroup>
         <SecondaryButton type="button" onClick={onCancel}>

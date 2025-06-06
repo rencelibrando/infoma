@@ -3,7 +3,8 @@ import styled from 'styled-components';
 import { 
   migrateBikesToQRCodeField, 
   validateBikeQRCodes, 
-  generateQRCodeReport 
+  generateQRCodeReport,
+  fixIncorrectMaintenanceStatus
 } from '../../services/migrationService';
 
 const colors = {
@@ -229,6 +230,11 @@ const QRCodeMigrationPanel = () => {
   const [report, setReport] = useState(null);
   const [migrationResult, setMigrationResult] = useState(null);
   const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState('info');
+  const [validationReport, setValidationReport] = useState(null);
+  const [maintenanceFixStatus, setMaintenanceFixStatus] = useState('');
 
   // Generate initial report on component mount
   useEffect(() => {
@@ -276,17 +282,46 @@ const QRCodeMigrationPanel = () => {
   };
 
   const handleGenerateReport = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      
-      const reportData = await generateQRCodeReport();
-      setReport(reportData);
-      
-    } catch (err) {
-      setError(`Report generation failed: ${err.message}`);
+      const report = await generateQRCodeReport();
+      setValidationReport(report);
+      setMessage('QR Code report generated successfully');
+      setMessageType('success');
+    } catch (error) {
+      console.error('Report generation failed:', error);
+      setError(`Report generation failed: ${error.message}`);
+      setMessageType('error');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
+    }
+  };
+
+  const handleFixMaintenanceStatus = async () => {
+    setIsLoading(true);
+    setMaintenanceFixStatus('Fixing incorrect maintenance statuses...');
+    try {
+      const result = await fixIncorrectMaintenanceStatus();
+      if (result.success) {
+        setMaintenanceFixStatus(`✅ Fixed ${result.fixed} bikes with incorrect maintenance status`);
+        setMessageType('success');
+        
+        // Refresh validation report if it exists
+        if (validationReport) {
+          const newReport = await generateQRCodeReport();
+          setValidationReport(newReport);
+        }
+      } else {
+        setMaintenanceFixStatus(`❌ Fix failed: ${result.error}`);
+        setMessageType('error');
+      }
+    } catch (error) {
+      console.error('Maintenance status fix failed:', error);
+      setMaintenanceFixStatus(`❌ Fix failed: ${error.message}`);
+      setMessageType('error');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -342,6 +377,15 @@ const QRCodeMigrationPanel = () => {
         >
           {migrating && <LoadingSpinner />}
           Migrate Bikes
+        </Button>
+        
+        <Button 
+          variant="danger" 
+          onClick={handleFixMaintenanceStatus}
+          disabled={isLoading}
+        >
+          {isLoading && <LoadingSpinner />}
+          Fix Maintenance Status
         </Button>
       </ButtonGroup>
 
@@ -426,6 +470,13 @@ const QRCodeMigrationPanel = () => {
             <small>Report generated: {new Date(report.timestamp).toLocaleString()}</small>
           </StatusBox>
         </>
+      )}
+
+      {/* Maintenance Fix Status */}
+      {maintenanceFixStatus && (
+        <StatusBox type={maintenanceFixStatus.includes('✅') ? 'success' : maintenanceFixStatus.includes('❌') ? 'error' : 'info'}>
+          {maintenanceFixStatus}
+        </StatusBox>
       )}
     </Panel>
   );
