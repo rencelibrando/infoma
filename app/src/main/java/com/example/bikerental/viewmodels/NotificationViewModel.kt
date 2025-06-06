@@ -3,12 +3,15 @@ package com.example.bikerental.viewmodels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bikerental.models.Notification
+import com.example.bikerental.models.NotificationType
+import com.example.bikerental.models.NotificationPriority
 import com.example.bikerental.repositories.NotificationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -23,6 +26,9 @@ class NotificationViewModel @Inject constructor(
 
     private val _unreadCount = MutableStateFlow(0)
     val unreadCount: StateFlow<Int> = _unreadCount.asStateFlow()
+
+    private val _selectedFilter = MutableStateFlow(NotificationFilter.ALL)
+    val selectedFilter: StateFlow<NotificationFilter> = _selectedFilter.asStateFlow()
 
     init {
         loadNotifications()
@@ -41,9 +47,17 @@ class NotificationViewModel @Inject constructor(
                         error = exception.message ?: "Failed to load notifications"
                     )
                 }
+                .map { notifications ->
+                    // Sort by priority and timestamp
+                    notifications.sortedWith(
+                        compareByDescending<Notification> { it.priority.ordinal }
+                            .thenByDescending { it.timestamp.toDate() }
+                    )
+                }
                 .collect { notifications ->
                     _uiState.value = _uiState.value.copy(
-                        notifications = notifications,
+                        allNotifications = notifications,
+                        notifications = filterNotifications(notifications, _selectedFilter.value),
                         isLoading = false,
                         error = null
                     )
@@ -58,6 +72,45 @@ class NotificationViewModel @Inject constructor(
                 .collect { count ->
                     _unreadCount.value = count
                 }
+        }
+    }
+
+    fun setFilter(filter: NotificationFilter) {
+        _selectedFilter.value = filter
+        val currentState = _uiState.value
+        _uiState.value = currentState.copy(
+            notifications = filterNotifications(currentState.allNotifications, filter)
+        )
+    }
+
+    private fun filterNotifications(notifications: List<Notification>, filter: NotificationFilter): List<Notification> {
+        return when (filter) {
+            NotificationFilter.ALL -> notifications
+            NotificationFilter.UNREAD -> notifications.filter { !it.isRead }
+            NotificationFilter.PAYMENTS -> notifications.filter { 
+                it.type in listOf(
+                    NotificationType.UNPAID_BOOKING,
+                    NotificationType.PAYMENT_SUCCESS,
+                    NotificationType.PAYMENT_APPROVAL,
+                    NotificationType.UNPAID_PAYMENT
+                )
+            }
+            NotificationFilter.BOOKINGS -> notifications.filter {
+                it.type in listOf(
+                    NotificationType.BOOKING_APPROVAL,
+                    NotificationType.BOOKING_CONFIRMATION,
+                    NotificationType.BOOKING_REMINDER
+                )
+            }
+            NotificationFilter.ADMIN -> notifications.filter {
+                it.type in listOf(
+                    NotificationType.ADMIN_REPLY,
+                    NotificationType.ADMIN_MESSAGE
+                )
+            }
+            NotificationFilter.HIGH_PRIORITY -> notifications.filter {
+                it.priority in listOf(NotificationPriority.HIGH, NotificationPriority.URGENT)
+            }
         }
     }
 
@@ -140,23 +193,43 @@ class NotificationViewModel @Inject constructor(
         
         // Handle specific action based on notification type
         when (notification.type) {
-            com.example.bikerental.models.NotificationType.RIDE_COMPLETE -> {
+            NotificationType.UNPAID_BOOKING -> {
+                // Navigate to payment screen with booking details
+                // Extract booking data and initiate payment flow
+            }
+            NotificationType.PAYMENT_SUCCESS -> {
+                // Navigate to receipt/transaction details
+                // Show success message and receipt
+            }
+            NotificationType.ADMIN_REPLY -> {
+                // Navigate to support/messages screen
+                // Open specific conversation thread
+            }
+            NotificationType.PAYMENT_APPROVAL -> {
+                // Navigate to booking confirmation or next steps
+                // Show approval confirmation
+            }
+            NotificationType.BOOKING_APPROVAL -> {
+                // Navigate to booking details or ride preparation
+                // Show booking details and next steps
+            }
+            NotificationType.RIDE_COMPLETE -> {
                 // Navigate to ride history or receipt
             }
-            com.example.bikerental.models.NotificationType.UNPAID_PAYMENT -> {
+            NotificationType.UNPAID_PAYMENT -> {
                 // Navigate to payment screen
             }
-            com.example.bikerental.models.NotificationType.ADMIN_MESSAGE -> {
+            NotificationType.ADMIN_MESSAGE -> {
                 // Navigate to help/support or show detailed message
             }
-            com.example.bikerental.models.NotificationType.BOOKING_CONFIRMATION,
-            com.example.bikerental.models.NotificationType.BOOKING_REMINDER -> {
+            NotificationType.BOOKING_CONFIRMATION,
+            NotificationType.BOOKING_REMINDER -> {
                 // Navigate to bookings tab
             }
-            com.example.bikerental.models.NotificationType.EMAIL_VERIFICATION -> {
+            NotificationType.EMAIL_VERIFICATION -> {
                 // Navigate to profile or show success message
             }
-            com.example.bikerental.models.NotificationType.GENERAL -> {
+            NotificationType.GENERAL -> {
                 // Default action
             }
         }
@@ -168,7 +241,17 @@ class NotificationViewModel @Inject constructor(
 }
 
 data class NotificationUiState(
+    val allNotifications: List<Notification> = emptyList(),
     val notifications: List<Notification> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null
-) 
+)
+
+enum class NotificationFilter(val displayName: String) {
+    ALL("All"),
+    UNREAD("Unread"),
+    PAYMENTS("Payments"),
+    BOOKINGS("Bookings"),
+    ADMIN("Admin"),
+    HIGH_PRIORITY("Priority")
+} 

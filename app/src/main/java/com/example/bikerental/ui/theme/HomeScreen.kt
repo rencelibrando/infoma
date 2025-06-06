@@ -32,6 +32,7 @@ import com.example.bikerental.screens.tabs.MapTab
 import com.example.bikerental.screens.tabs.PaymentTab
 import com.example.bikerental.screens.tabs.ProfileScreen
 import com.example.bikerental.screens.tabs.RideHistoryTab
+import com.example.bikerental.screens.tabs.NotificationsTab
 import com.example.bikerental.viewmodels.AuthViewModel
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -161,6 +162,8 @@ fun HomeScreen(
                                 2 -> BookingsTab()
                                 3 -> PaymentTab()
                                 4 -> ProfileScreen(navController, viewModel)
+                                5 -> RideHistoryTab()
+                                6 -> NotificationsTab(navController = navController)
                                 else -> RideHistoryTab()
                             }
                         }

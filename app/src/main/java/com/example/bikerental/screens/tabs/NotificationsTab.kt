@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,11 +34,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -69,8 +73,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.example.bikerental.models.Notification
 import com.example.bikerental.models.NotificationType
+import com.example.bikerental.models.NotificationPriority
 import com.example.bikerental.ui.theme.BikerentalTheme
 import com.example.bikerental.viewmodels.NotificationViewModel
+import com.example.bikerental.viewmodels.NotificationFilter
 import kotlinx.coroutines.launch
 
 @Composable
@@ -79,6 +85,7 @@ fun NotificationsTab(
     viewModel: NotificationViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectedFilter by viewModel.selectedFilter.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -100,18 +107,32 @@ fun NotificationsTab(
             // Header Section
             NotificationHeader(
                 notificationCount = uiState.notifications.size,
+                totalCount = uiState.allNotifications.size,
                 onCreateSample = { viewModel.createSampleNotifications() },
                 onClearAll = { viewModel.clearAllNotifications() },
+                onMarkAllRead = { viewModel.markAllAsRead() },
                 isLoading = uiState.isLoading
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Filter Chips
+            NotificationFilters(
+                selectedFilter = selectedFilter,
+                onFilterSelected = { filter -> viewModel.setFilter(filter) },
+                allNotifications = uiState.allNotifications
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
             // Content Section
-            if (uiState.isLoading && uiState.notifications.isEmpty()) {
+            if (uiState.isLoading && uiState.allNotifications.isEmpty()) {
                 LoadingState()
             } else if (uiState.notifications.isEmpty()) {
-                EmptyState(onCreateSample = { viewModel.createSampleNotifications() })
+                EmptyState(
+                    filter = selectedFilter,
+                    onCreateSample = { viewModel.createSampleNotifications() }
+                )
             } else {
                 NotificationsList(
                     notifications = uiState.notifications,
@@ -148,8 +169,10 @@ fun NotificationsTab(
 @Composable
 private fun NotificationHeader(
     notificationCount: Int,
+    totalCount: Int,
     onCreateSample: () -> Unit,
     onClearAll: () -> Unit,
+    onMarkAllRead: () -> Unit,
     isLoading: Boolean
 ) {
     Column {
@@ -159,16 +182,44 @@ private fun NotificationHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Recent Notifications ($notificationCount)",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1F2937)
+            Column {
+                Text(
+                    text = "Notifications",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF1F2937)
+                    )
                 )
-            )
+                if (notificationCount != totalCount) {
+                    Text(
+                        text = "Showing $notificationCount of $totalCount",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = Color(0xFF6B7280)
+                        )
+                    )
+                }
+            }
 
-            if (notificationCount > 0) {
-                Row {
+            if (totalCount > 0) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (notificationCount > 0) {
+                        OutlinedButton(
+                            onClick = onMarkAllRead,
+                            enabled = !isLoading,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color(0xFF059669)
+                            ),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text(
+                                text = "Mark Read",
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    
                     OutlinedButton(
                         onClick = onClearAll,
                         enabled = !isLoading,
@@ -179,7 +230,7 @@ private fun NotificationHeader(
                     ) {
                         Text(
                             text = "Clear All",
-                            fontSize = 14.sp
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -189,7 +240,67 @@ private fun NotificationHeader(
 }
 
 @Composable
+private fun NotificationFilters(
+    selectedFilter: NotificationFilter,
+    onFilterSelected: (NotificationFilter) -> Unit,
+    allNotifications: List<Notification>
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(NotificationFilter.values()) { filter ->
+            val count = when (filter) {
+                NotificationFilter.ALL -> allNotifications.size
+                NotificationFilter.UNREAD -> allNotifications.count { !it.isRead }
+                NotificationFilter.PAYMENTS -> allNotifications.count { 
+                    it.type in listOf(
+                        NotificationType.UNPAID_BOOKING,
+                        NotificationType.PAYMENT_SUCCESS,
+                        NotificationType.PAYMENT_APPROVAL,
+                        NotificationType.UNPAID_PAYMENT
+                    )
+                }
+                NotificationFilter.BOOKINGS -> allNotifications.count {
+                    it.type in listOf(
+                        NotificationType.BOOKING_APPROVAL,
+                        NotificationType.BOOKING_CONFIRMATION,
+                        NotificationType.BOOKING_REMINDER
+                    )
+                }
+                NotificationFilter.ADMIN -> allNotifications.count {
+                    it.type in listOf(
+                        NotificationType.ADMIN_REPLY,
+                        NotificationType.ADMIN_MESSAGE
+                    )
+                }
+                NotificationFilter.HIGH_PRIORITY -> allNotifications.count {
+                    it.priority in listOf(NotificationPriority.HIGH, NotificationPriority.URGENT)
+                }
+            }
+            
+            FilterChip(
+                onClick = { onFilterSelected(filter) },
+                label = { 
+                    Text(
+                        text = "${filter.displayName} ($count)",
+                        fontSize = 12.sp
+                    ) 
+                },
+                selected = selectedFilter == filter,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Color(0xFF059669),
+                    selectedLabelColor = Color.White,
+                    containerColor = Color(0xFFF3F4F6),
+                    labelColor = Color(0xFF6B7280)
+                )
+            )
+        }
+    }
+}
+
+@Composable
 private fun EmptyState(
+    filter: NotificationFilter,
     onCreateSample: () -> Unit
 ) {
     Column(
@@ -222,12 +333,34 @@ private fun EmptyState(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        val emptyMessage = when (filter) {
+            NotificationFilter.ALL -> "No notifications yet"
+            NotificationFilter.UNREAD -> "No unread notifications"
+            NotificationFilter.PAYMENTS -> "No payment notifications"
+            NotificationFilter.BOOKINGS -> "No booking notifications"
+            NotificationFilter.ADMIN -> "No admin messages"
+            NotificationFilter.HIGH_PRIORITY -> "No priority notifications"
+        }
+
         Text(
-            text = "No new notifications",
+            text = emptyMessage,
             style = MaterialTheme.typography.bodyLarge.copy(
                 color = Color(0xFF6B7280)
             )
         )
+
+        if (filter == NotificationFilter.ALL) {
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            OutlinedButton(
+                onClick = onCreateSample,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Color(0xFF059669)
+                )
+            ) {
+                Text("Create Sample Notifications")
+            }
+        }
     }
 }
 
@@ -334,22 +467,47 @@ private fun NotificationCard(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
-                        // Icon
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(
-                                    color = notification.type.iconBg,
-                                    shape = RoundedCornerShape(12.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = notification.type.icon,
-                                contentDescription = null,
-                                tint = notification.type.iconColor,
-                                modifier = Modifier.size(24.dp)
-                            )
+                        // Icon with priority indicator
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(
+                                        color = notification.type.iconBg,
+                                        shape = RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = notification.type.icon,
+                                    contentDescription = null,
+                                    tint = notification.type.iconColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            
+                            // Priority indicator
+                            if (notification.priority == NotificationPriority.HIGH || 
+                                notification.priority == NotificationPriority.URGENT) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(
+                                            color = if (notification.priority == NotificationPriority.URGENT) 
+                                                Color(0xFFDC2626) else Color(0xFFF59E0B),
+                                            shape = CircleShape
+                                        )
+                                        .align(Alignment.TopEnd),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = "Priority",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(16.dp))
@@ -424,6 +582,11 @@ private fun NotificationCard(
                             onClick = onActionClick,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = when (notification.type) {
+                                    NotificationType.UNPAID_BOOKING -> Color(0xFFDC2626)
+                                    NotificationType.PAYMENT_SUCCESS -> Color(0xFF059669)
+                                    NotificationType.ADMIN_REPLY -> Color(0xFF2563EB)
+                                    NotificationType.PAYMENT_APPROVAL -> Color(0xFF059669)
+                                    NotificationType.BOOKING_APPROVAL -> Color(0xFF059669)
                                     NotificationType.RIDE_COMPLETE -> Color(0xFF059669)
                                     NotificationType.UNPAID_PAYMENT -> Color(0xFFDC2626)
                                     NotificationType.ADMIN_MESSAGE -> Color(0xFF2563EB)

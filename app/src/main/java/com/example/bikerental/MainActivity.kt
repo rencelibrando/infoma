@@ -84,6 +84,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.bikerental.screens.help.HelpSupportScreen
 import com.example.bikerental.utils.PerformanceMonitor
+import com.example.bikerental.services.NotificationService
+import javax.inject.Inject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @AndroidEntryPoint
@@ -93,6 +95,10 @@ class MainActivity : ComponentActivity() {
     // ViewModel injection using Hilt
     private val authViewModel: AuthViewModel by viewModels()
     private val phoneAuthViewModel: PhoneAuthViewModel by viewModels()
+    
+    // Service injection
+    @Inject
+    lateinit var notificationService: NotificationService
     
     // Location services
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -233,11 +239,20 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         
-        // Simplified auth state listener setup
+        // Simplified auth state listener setup with notification monitoring
         if (authStateListener == null) {
             authStateListener = FirebaseAuth.AuthStateListener { auth ->
                 val user = auth.currentUser
                 Log.d(TAG, "Auth state changed: user ${if (user != null) "signed in" else "signed out"}")
+                
+                // Start or stop notification monitoring based on auth state
+                if (user != null) {
+                    Log.d(TAG, "Starting notification monitoring for user: ${user.uid}")
+                    notificationService.startMonitoring()
+                } else {
+                    Log.d(TAG, "Stopping notification monitoring - user signed out")
+                    notificationService.stopMonitoring()
+                }
             }
             FirebaseAuth.getInstance().addAuthStateListener(authStateListener!!)
         }
@@ -262,6 +277,9 @@ class MainActivity : ComponentActivity() {
             }
             
             authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
+            
+            // Stop notification monitoring
+            notificationService.stopMonitoring()
             
             Log.d(TAG, "Resources successfully cleaned up")
         } catch (e: Exception) {

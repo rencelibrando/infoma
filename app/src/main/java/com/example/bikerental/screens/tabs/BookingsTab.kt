@@ -1,24 +1,29 @@
 package com.example.bikerental.screens.tabs
 
-import android.widget.Toast
+import android.annotation.SuppressLint
+import android.os.Build
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -31,18 +36,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Error
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -56,7 +62,6 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -64,6 +69,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,7 +86,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -91,7 +99,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
-import com.example.bikerental.BuildConfig
+import com.example.bikerental.components.BookingCalendar
 import com.example.bikerental.models.Bike
 import com.example.bikerental.models.Booking
 import com.example.bikerental.models.BookingStatus
@@ -109,6 +117,62 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+import android.widget.Toast
+import android.content.Context
+import android.util.Log
+import androidx.compose.ui.draw.rotate
+import com.example.bikerental.R
+import androidx.compose.ui.draw.rotate
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.material.icons.filled.Battery0Bar
+import androidx.compose.material.icons.filled.Battery1Bar
+import androidx.compose.material.icons.filled.Battery2Bar
+import androidx.compose.material.icons.filled.Battery3Bar
+import androidx.compose.material.icons.filled.Battery4Bar
+import androidx.compose.material.icons.filled.Battery5Bar
+import androidx.compose.material.icons.filled.Battery6Bar
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.NearMe
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.NavigateBefore
+import androidx.compose.material.icons.filled.NavigateNext
+import androidx.compose.material.icons.filled.Upcoming
+import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.outlined.DateRange
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.SortByAlpha
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.outlined.Error
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.layout.aspectRatio
 
 // Updated color scheme for white and dark green theme - consistent with PaymentTab
 object BookingColors {
@@ -159,8 +223,7 @@ fun BookingsTab(
     var selectedTime by remember { mutableStateOf<String?>(null) }
     var selectedDuration by remember { mutableStateOf<String?>(null) }
     
-    // Search and filtering state
-    var searchQuery by remember { mutableStateOf("") }
+    // Filtering state (removed search query)
     var selectedCategory by remember { mutableStateOf(BookingCategory.ALL) }
     
     // Collect bookings state
@@ -174,36 +237,11 @@ fun BookingsTab(
     var completedCount by remember { mutableStateOf(0) }
     var cancelledCount by remember { mutableStateOf(0) }
     
-    // Filter bookings based on search query and selected category
-    val filteredBookings by remember(bookings, searchQuery, selectedCategory) {
+    // Filter bookings based on selected category only
+    val filteredBookings by remember(bookings, selectedCategory) {
         derivedStateOf {
             computeScope.launch {
                 // Calculate counts on a background thread
-                val filtered = bookings.filter { booking ->
-                    // First apply category filter
-                    val categoryMatch = when (selectedCategory) {
-                        BookingCategory.ALL -> true
-                        BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
-                        BookingCategory.COMPLETED -> booking.status == "COMPLETED"
-                        BookingCategory.CANCELLED -> booking.status == "CANCELLED"
-                    }
-                    
-                    // Then apply search filter if there's a query
-                    val searchMatch = if (searchQuery.isBlank()) {
-                        true
-                    } else {
-                        val query = searchQuery.lowercase()
-                        booking.bikeName.lowercase().contains(query) ||
-                                booking.userName.lowercase().contains(query) ||
-                                SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-                                    .format(booking.startDate).lowercase().contains(query)
-                    }
-                    
-                    // Item must match both filters
-                    categoryMatch && searchMatch
-                }
-                
-                // Update counts
                 val newAllCount = bookings.size
                 val newActiveCount = bookings.count { it.status == "PENDING" || it.status == "CONFIRMED" }
                 val newCompletedCount = bookings.count { it.status == "COMPLETED" }
@@ -218,29 +256,14 @@ fun BookingsTab(
                 }
             }
             
-            // Return filtered bookings
+            // Return filtered bookings based on category only
             bookings.filter { booking ->
-                // Apply category filter
-                val categoryMatch = when (selectedCategory) {
+                when (selectedCategory) {
                     BookingCategory.ALL -> true
                     BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
                     BookingCategory.COMPLETED -> booking.status == "COMPLETED"
                     BookingCategory.CANCELLED -> booking.status == "CANCELLED"
                 }
-                
-                // Apply search filter
-                val searchMatch = if (searchQuery.isBlank()) {
-                    true
-                } else {
-                    val query = searchQuery.lowercase()
-                    booking.bikeName.lowercase().contains(query) ||
-                            booking.userName.lowercase().contains(query) ||
-                            SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-                                .format(booking.startDate).lowercase().contains(query)
-                }
-                
-                // Return combined result
-                categoryMatch && searchMatch
             }
         }
     }
@@ -388,37 +411,6 @@ fun BookingsTab(
                 } else {
                     // List of bookings
                     Column(modifier = Modifier.fillMaxSize()) {
-                        // Add search bar at the top
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            placeholder = { 
-                                Text(
-                                    "Search bookings...", 
-                                    color = BookingColors.DarkGray
-                                ) 
-                            },
-                            leadingIcon = { 
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = BookingColors.DarkGreen
-                                )
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = BookingColors.DarkGreen,
-                                unfocusedBorderColor = BookingColors.MediumGray,
-                                focusedTextColor = BookingColors.TextGray,
-                                unfocusedTextColor = BookingColors.TextGray,
-                                cursorColor = BookingColors.DarkGreen
-                            )
-                        )
-                        
                         // Category tabs with counts
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -466,48 +458,6 @@ fun BookingsTab(
                             }
                         }
 
-                        // Debug buttons (only in debug builds)
-                        if (BuildConfig.DEBUG) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        bookingViewModel.debugListAllBookings { result ->
-                                            Toast.makeText(context, "Check logs for booking details", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Debug: List All", fontSize = 10.sp)
-                                }
-                                
-                                OutlinedButton(
-                                    onClick = {
-                                        bookingViewModel.refreshBookings()
-                                        Toast.makeText(context, "Refreshing bookings...", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Force Refresh", fontSize = 10.sp)
-                                }
-                                
-                                OutlinedButton(
-                                    onClick = {
-                                        bookingViewModel.checkUserPermissions { result ->
-                                            Toast.makeText(context, "Check logs for permissions", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("Check Perms", fontSize = 10.sp)
-                                }
-                            }
-                        }
-
                         // Show filtered bookings or empty state
                         if (filteredBookings.isEmpty()) {
                             Box(
@@ -528,12 +478,12 @@ fun BookingsTab(
                                         modifier = Modifier.size(64.dp)
                                     )
                                     Text(
-                                        text = "No matching bookings found",
+                                        text = "No bookings found",
                                         style = MaterialTheme.typography.titleMedium,
                                         color = BookingColors.DarkGray
                                     )
                                     Text(
-                                        text = "Try adjusting your search or filters",
+                                        text = "Try adjusting your filters or book a new bike",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = BookingColors.DarkGray.copy(alpha = 0.7f),
                                         textAlign = TextAlign.Center
@@ -1080,7 +1030,7 @@ fun BikeSelectionCard(
                 Text(
                     text = bike.type,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = LocalContentColor.current.copy(alpha = 0.6f)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1696,7 +1646,6 @@ fun BookingDetailSheet(
     val context = LocalContext.current
     val bookingViewModel: BookingViewModel = viewModel()
     val scope = rememberCoroutineScope()
-    var isVerifying by remember { mutableStateOf(false) }
     var isCancelling by remember { mutableStateOf(false) }
     var showCancelConfirmDialog by remember { mutableStateOf(false) }
     
@@ -2042,40 +1991,6 @@ fun BookingDetailSheet(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Rebook")
-                }
-            }
-        }
-        
-        // Debug section - only in debug builds
-        if (BuildConfig.DEBUG) {
-            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedButton(
-                onClick = {
-                    isVerifying = true
-                    bookingViewModel.verifyBookingExists(booking.id) { exists, path ->
-                        isVerifying = false
-                        if (exists) {
-                            Toast.makeText(context, "Booking found at: $path", Toast.LENGTH_LONG).show()
-                        } else {
-                            Toast.makeText(context, "Booking not found in Firestore!", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isVerifying,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            ) {
-                if (isVerifying) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Verifying...")
-                } else {
-                    Text("Verify in Database")
                 }
             }
         }

@@ -2,6 +2,7 @@ package com.example.bikerental.repositories
 
 import android.util.Log
 import com.example.bikerental.models.Notification
+import com.example.bikerental.models.NotificationPriority
 import com.example.bikerental.models.NotificationRequest
 import com.example.bikerental.models.NotificationType
 import com.google.firebase.auth.FirebaseAuth
@@ -227,40 +228,98 @@ class NotificationRepository @Inject constructor(
             val currentUser = auth.currentUser ?: throw Exception("User not authenticated")
             
             val sampleNotifications = listOf(
+                // New Priority Notifications
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.UNPAID_BOOKING,
+                    title = "Payment Required",
+                    message = "Your Bambike Classic booking for Dec 25, 2024 requires payment of ₱180.00. Due: Dec 23, 2024.",
+                    actionText = "Pay Now",
+                    priority = NotificationPriority.HIGH
+                ),
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.PAYMENT_SUCCESS,
+                    title = "Payment Successful!",
+                    message = "Your payment of ₱180.00 has been processed successfully via GCash. Transaction ID: TXN123456789",
+                    actionText = "View Receipt",
+                    priority = NotificationPriority.NORMAL
+                ),
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.ADMIN_REPLY,
+                    title = "New Reply from Support Team",
+                    message = "Thank you for contacting us. We've reviewed your request and here's our response...",
+                    actionText = "View Message",
+                    priority = NotificationPriority.HIGH
+                ),
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.PAYMENT_APPROVAL,
+                    title = "Payment Approved",
+                    message = "Your payment of ₱180.00 has been reviewed and approved by Admin. You can now proceed with your booking.",
+                    actionText = "Continue",
+                    priority = NotificationPriority.NORMAL
+                ),
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.BOOKING_APPROVAL,
+                    title = "Booking Approved!",
+                    message = "Your Bambike Classic booking for Dec 25, 2024 at 2:00 PM has been approved at BGC Station. Get ready for your ride!",
+                    actionText = "View Details",
+                    priority = NotificationPriority.NORMAL
+                ),
+                
+                // Legacy Notifications (Updated)
                 NotificationRequest(
                     userId = currentUser.uid,
                     type = NotificationType.RIDE_COMPLETE,
                     title = "Ride Completed Successfully!",
                     message = "Your 32-minute ride has ended. Distance: 6.8 km. Thank you for choosing Bambike!",
-                    actionText = "View Receipt"
+                    actionText = "View Receipt",
+                    priority = NotificationPriority.NORMAL
                 ),
                 NotificationRequest(
                     userId = currentUser.uid,
                     type = NotificationType.UNPAID_PAYMENT,
                     title = "Payment Reminder",
                     message = "You have an outstanding payment of ₱145.50 for your ride on March 15. Please settle to continue using Bambike.",
-                    actionText = "Pay Now"
+                    actionText = "Pay Now",
+                    priority = NotificationPriority.HIGH
                 ),
                 NotificationRequest(
                     userId = currentUser.uid,
                     type = NotificationType.ADMIN_MESSAGE,
                     title = "Service Update",
                     message = "Scheduled maintenance will occur on March 20, 2-4 AM. Some bikes may be temporarily unavailable.",
-                    actionText = "Learn More"
+                    actionText = "Learn More",
+                    priority = NotificationPriority.NORMAL
                 ),
                 NotificationRequest(
                     userId = currentUser.uid,
                     type = NotificationType.BOOKING_CONFIRMATION,
                     title = "Booking Confirmed",
                     message = "Your bike reservation for tomorrow at 9:00 AM has been confirmed. Remember to arrive 5 minutes early.",
-                    actionText = "View Details"
+                    actionText = "View Details",
+                    priority = NotificationPriority.NORMAL
                 ),
                 NotificationRequest(
                     userId = currentUser.uid,
                     type = NotificationType.EMAIL_VERIFICATION,
                     title = "Email Verified Successfully",
                     message = "Your email address has been verified. You now have full access to all Bambike features.",
-                    actionText = "Continue"
+                    actionText = "Continue",
+                    priority = NotificationPriority.NORMAL
+                ),
+                
+                // High Priority Urgent Sample
+                NotificationRequest(
+                    userId = currentUser.uid,
+                    type = NotificationType.ADMIN_MESSAGE,
+                    title = "🚨 Urgent System Alert",
+                    message = "Critical security update required. Please update your password immediately to maintain account security.",
+                    actionText = "Update Now",
+                    priority = NotificationPriority.URGENT
                 )
             )
 

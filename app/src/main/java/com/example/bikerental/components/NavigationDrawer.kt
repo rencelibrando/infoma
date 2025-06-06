@@ -91,6 +91,9 @@ import coil.size.Size
 import com.example.bikerental.R
 import com.example.bikerental.utils.ColorUtils
 import com.example.bikerental.viewmodels.AuthViewModel
+import com.example.bikerental.viewmodels.NotificationViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -121,6 +124,10 @@ fun AppNavigationDrawer(
     val userEmail = currentUser?.email ?: ""
     val scope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
+    
+    // Get notification count from ViewModel
+    val notificationViewModel: NotificationViewModel = hiltViewModel()
+    val unreadCount by notificationViewModel.unreadCount.collectAsStateWithLifecycle()
     
     // State for profile data
     var profileData by remember { mutableStateOf<Map<String, Any>?>(null) }
@@ -210,8 +217,8 @@ fun AppNavigationDrawer(
                 id = 6,
                 icon = Icons.Default.Notifications,
                 title = "Notifications",
-                onClick = { /* Handle notifications */ },
-                badgeCount = 3 // Example badge count
+                onClick = { onItemSelected(6) },
+                badgeCount = unreadCount
             )
         )
     }

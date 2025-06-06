@@ -8,6 +8,10 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.Payment
+import androidx.compose.material.icons.filled.Reply
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.google.firebase.Timestamp
@@ -19,26 +23,28 @@ import java.util.Date
 data class Notification(
     val id: String = "",
     val userId: String = "",
-    val type: NotificationType = NotificationType.RIDE_COMPLETE,
+    val type: NotificationType = NotificationType.GENERAL,
     val title: String = "",
     val message: String = "",
     val actionText: String = "",
     val actionData: Map<String, Any> = emptyMap(),
     val timestamp: Timestamp = Timestamp.now(),
     val isRead: Boolean = false,
-    val isActionable: Boolean = true
+    val isActionable: Boolean = true,
+    val priority: NotificationPriority = NotificationPriority.NORMAL
 ) {
     constructor() : this(
         id = "",
         userId = "",
-        type = NotificationType.RIDE_COMPLETE,
+        type = NotificationType.GENERAL,
         title = "",
         message = "",
         actionText = "",
         actionData = emptyMap(),
         timestamp = Timestamp.now(),
         isRead = false,
-        isActionable = true
+        isActionable = true,
+        priority = NotificationPriority.NORMAL
     )
     
     /**
@@ -60,6 +66,16 @@ data class Notification(
 }
 
 /**
+ * Enum class representing notification priority levels
+ */
+enum class NotificationPriority {
+    LOW,
+    NORMAL,
+    HIGH,
+    URGENT
+}
+
+/**
  * Enum class representing different notification types
  */
 enum class NotificationType(
@@ -70,6 +86,49 @@ enum class NotificationType(
     val iconColor: Color,
     val iconBg: Color
 ) {
+    // User Journey Notifications
+    UNPAID_BOOKING(
+        displayName = "Unpaid Booking",
+        icon = Icons.Default.Warning,
+        bgColor = Color.White,
+        borderColor = Color(0xFFEF4444),
+        iconColor = Color(0xFFDC2626),
+        iconBg = Color(0xFFFEF2F2)
+    ),
+    PAYMENT_SUCCESS(
+        displayName = "Payment Successful",
+        icon = Icons.Default.Payment,
+        bgColor = Color.White,
+        borderColor = Color(0xFF10B981),
+        iconColor = Color(0xFF059669),
+        iconBg = Color(0xFFECFDF5)
+    ),
+    ADMIN_REPLY(
+        displayName = "Admin Reply",
+        icon = Icons.Default.Reply,
+        bgColor = Color.White,
+        borderColor = Color(0xFF3B82F6),
+        iconColor = Color(0xFF2563EB),
+        iconBg = Color(0xFFEFF6FF)
+    ),
+    PAYMENT_APPROVAL(
+        displayName = "Payment Approved",
+        icon = Icons.Default.Verified,
+        bgColor = Color.White,
+        borderColor = Color(0xFF10B981),
+        iconColor = Color(0xFF059669),
+        iconBg = Color(0xFFECFDF5)
+    ),
+    BOOKING_APPROVAL(
+        displayName = "Booking Approved",
+        icon = Icons.Default.EventAvailable,
+        bgColor = Color.White,
+        borderColor = Color(0xFF10B981),
+        iconColor = Color(0xFF059669),
+        iconBg = Color(0xFFECFDF5)
+    ),
+    
+    // Legacy and General Notifications
     RIDE_COMPLETE(
         displayName = "Ride Complete",
         icon = Icons.Default.CheckCircle,
@@ -137,5 +196,6 @@ data class NotificationRequest(
     val title: String,
     val message: String,
     val actionText: String = "",
-    val actionData: Map<String, Any> = emptyMap()
+    val actionData: Map<String, Any> = emptyMap(),
+    val priority: NotificationPriority = NotificationPriority.NORMAL
 ) 
