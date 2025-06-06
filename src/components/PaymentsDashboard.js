@@ -4,7 +4,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import styled from 'styled-components';
-import { FiSearch, FiFilter, FiDownload, FiUpload, FiCheck, FiX, FiEye, FiSettings, FiDollarSign, FiClock, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
+import { FiSearch, FiFilter, FiDownload, FiUpload, FiCheck, FiX, FiEye, FiSettings, FiDollarSign, FiClock, FiCheckCircle, FiAlertCircle, FiPrinter } from 'react-icons/fi';
 
 // Pine green theme to match BikesList
 const colors = {
@@ -72,6 +72,14 @@ const HeaderButton = styled.button`
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(29, 60, 52, 0.15);
     background-color: ${props => props.secondary ? colors.white : colors.lightPineGreen};
+  }
+  
+  &:disabled {
+    background-color: ${colors.mediumGray};
+    color: ${colors.white};
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 `;
 
@@ -970,6 +978,278 @@ const EmptyState = styled.div`
   }
 `;
 
+// Receipt Modal Styles
+const ReceiptModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+`;
+
+const ReceiptModalContent = styled.div`
+  background: ${colors.white};
+  border-radius: 12px;
+  max-width: 500px;
+  max-height: 90vh;
+  position: relative;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  padding: 20px;
+`;
+
+const ReceiptContainer = styled.div`
+  font-family: 'Courier New', monospace;
+  background: ${colors.white};
+  padding: 20px;
+  border: 2px solid ${colors.darkGray};
+  border-radius: 8px;
+  max-width: 400px;
+  margin: 0 auto;
+  
+  @media print {
+    border: none;
+    padding: 10px;
+    margin: 0;
+    box-shadow: none;
+  }
+`;
+
+const ReceiptHeader = styled.div`
+  text-align: center;
+  border-bottom: 2px dashed ${colors.darkGray};
+  padding-bottom: 15px;
+  margin-bottom: 15px;
+`;
+
+const BusinessName = styled.h2`
+  margin: 0 0 5px 0;
+  font-size: 18px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+`;
+
+const BusinessInfo = styled.div`
+  font-size: 12px;
+  color: ${colors.mediumGray};
+  margin-bottom: 10px;
+`;
+
+const ReceiptTitle = styled.h3`
+  margin: 5px 0;
+  font-size: 16px;
+  font-weight: bold;
+  text-transform: uppercase;
+`;
+
+const ReceiptBody = styled.div`
+  margin-bottom: 15px;
+`;
+
+const ReceiptRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 14px;
+  
+  ${props => props.bold && `
+    font-weight: bold;
+    border-top: 1px solid ${colors.darkGray};
+    border-bottom: 1px solid ${colors.darkGray};
+    padding: 5px 0;
+    margin: 10px 0;
+  `}
+  
+  ${props => props.dashed && `
+    border-top: 1px dashed ${colors.mediumGray};
+    padding-top: 10px;
+    margin-top: 10px;
+  `}
+`;
+
+const ReceiptLabel = styled.span`
+  text-transform: uppercase;
+`;
+
+const ReceiptValue = styled.span`
+  font-weight: ${props => props.bold ? 'bold' : 'normal'};
+`;
+
+const ReceiptFooter = styled.div`
+  text-align: center;
+  border-top: 2px dashed ${colors.darkGray};
+  padding-top: 15px;
+  font-size: 12px;
+  color: ${colors.mediumGray};
+`;
+
+const PrintButton = styled.button`
+  background: ${colors.pineGreen};
+  color: ${colors.white};
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 10px 5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: ${colors.lightPineGreen};
+    transform: translateY(-2px);
+  }
+  
+  @media print {
+    display: none;
+  }
+`;
+
+const ReceiptActions = styled.div`
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+  
+  @media print {
+    display: none;
+  }
+`;
+
+// Add new ActionButton for print receipt in the payment card
+const PrintReceiptButton = styled.button`
+  padding: 6px 12px;
+  background: ${colors.pineGreen};
+  color: ${colors.white};
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  
+  &:hover {
+    background: ${colors.lightPineGreen};
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(29, 60, 52, 0.25);
+  }
+`;
+
+// Print Styles Component
+const PrintStyles = () => (
+  <style>
+    {`
+      @media print {
+        * {
+          -webkit-print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        
+        /* Hide everything by default */
+        body * {
+          visibility: hidden !important;
+        }
+        
+        /* Show only receipt modal and its contents */
+        #receipt-modal,
+        #receipt-modal *,
+        .receipt-modal,
+        .receipt-modal *,
+        #receipt-content,
+        #receipt-content * {
+          visibility: visible !important;
+        }
+        
+        /* Reset body for print */
+        body {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: white !important;
+        }
+        
+        /* Position receipt modal for print */
+        #receipt-modal,
+        .receipt-modal {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          background: white !important;
+          backdrop-filter: none !important;
+          z-index: 9999 !important;
+          display: flex !important;
+          justify-content: center !important;
+          align-items: flex-start !important;
+          padding-top: 20px !important;
+        }
+        
+        /* Style receipt modal content for print */
+        #receipt-modal-content,
+        .receipt-modal-content {
+          position: static !important;
+          background: white !important;
+          box-shadow: none !important;
+          border-radius: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          max-width: none !important;
+          max-height: none !important;
+          width: auto !important;
+          height: auto !important;
+        }
+        
+        /* Style receipt container for print */
+        #receipt-content,
+        .receipt-container {
+          margin: 0 auto !important;
+          padding: 20px !important;
+          border: 1px solid #000 !important;
+          box-shadow: none !important;
+          background: white !important;
+          font-size: 12px !important;
+          line-height: 1.3 !important;
+          max-width: 400px !important;
+          width: 400px !important;
+          font-family: 'Courier New', monospace !important;
+        }
+        
+        /* Hide buttons and actions during print */
+        .no-print {
+          display: none !important;
+          visibility: hidden !important;
+        }
+        
+        /* Ensure dashed borders print correctly */
+        .receipt-container div[style*="border-top: 2px dashed"],
+        .receipt-container div[style*="border-bottom: 2px dashed"] {
+          border-style: dashed !important;
+          border-color: #333 !important;
+        }
+      }
+      
+      @page {
+        margin: 0.5in;
+        size: portrait;
+      }
+    `}
+  </style>
+);
+
 const PaymentsDashboard = () => {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -985,6 +1265,10 @@ const PaymentsDashboard = () => {
   // New state for expanded payment details
   const [expandedPayment, setExpandedPayment] = useState(null);
   
+  // Receipt Modal State
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState(null);
+  
   // Settings states
   const [businessName, setBusinessName] = useState('');
   const [gcashNumber, setGCashNumber] = useState('');
@@ -995,6 +1279,134 @@ const PaymentsDashboard = () => {
   const [currentQRUrl, setCurrentQRUrl] = useState('');
 
   const { user, isAuthenticated, loading: authLoading } = useAuth();
+
+  // Receipt Functions
+  const openReceiptModal = (payment) => {
+    setSelectedPaymentForReceipt(payment);
+    setShowReceiptModal(true);
+  };
+
+  const closeReceiptModal = () => {
+    setShowReceiptModal(false);
+    setSelectedPaymentForReceipt(null);
+  };
+
+  const printReceipt = () => {
+    // Small delay to ensure modal content is fully rendered
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  const generateReceiptId = (paymentId) => {
+    const timestamp = new Date().getTime();
+    return `RCP-${paymentId.slice(-6).toUpperCase()}-${timestamp.toString().slice(-6)}`;
+  };
+
+  const Receipt = ({ payment, userData, businessInfo, onClose, onPrint }) => {
+    const receiptId = generateReceiptId(payment.id);
+    const currentDate = new Date().toLocaleString();
+    
+    return (
+      <ReceiptContainer id="receipt-content" className="receipt-container">
+        <ReceiptHeader>
+          <BusinessName>{businessInfo.businessName || 'Bambike Cycles'}</BusinessName>
+          <BusinessInfo>
+            Eco-Friendly Bicycle Rentals<br/>
+            GCash: {businessInfo.gcashNumber || '09123456789'}<br/>
+            Contact: info@bambikecycles.com
+          </BusinessInfo>
+          <ReceiptTitle>Payment Receipt</ReceiptTitle>
+        </ReceiptHeader>
+
+        <ReceiptBody>
+          <ReceiptRow>
+            <ReceiptLabel>Receipt No:</ReceiptLabel>
+            <ReceiptValue bold>{receiptId}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Date:</ReceiptLabel>
+            <ReceiptValue>{formatDate(payment.createdAt)}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Payment ID:</ReceiptLabel>
+            <ReceiptValue>{payment.id.slice(-8).toUpperCase()}</ReceiptValue>
+          </ReceiptRow>
+
+          <ReceiptRow dashed>
+            <ReceiptLabel>Customer:</ReceiptLabel>
+            <ReceiptValue>{userData?.name || 'Unknown Customer'}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Email:</ReceiptLabel>
+            <ReceiptValue>{userData?.email || 'N/A'}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Phone:</ReceiptLabel>
+            <ReceiptValue>{userData?.phone || payment.mobileNumber || 'N/A'}</ReceiptValue>
+          </ReceiptRow>
+
+          <ReceiptRow dashed>
+            <ReceiptLabel>Service:</ReceiptLabel>
+            <ReceiptValue>Bike Rental</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Bike Type:</ReceiptLabel>
+            <ReceiptValue>{payment.bikeType || 'Standard Bike'}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Duration:</ReceiptLabel>
+            <ReceiptValue>{payment.duration || 'N/A'}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Reference:</ReceiptLabel>
+            <ReceiptValue>{payment.referenceNumber || 'N/A'}</ReceiptValue>
+          </ReceiptRow>
+
+          <ReceiptRow bold>
+            <ReceiptLabel>Total Amount:</ReceiptLabel>
+            <ReceiptValue bold>{formatAmount(payment.amount)}</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Payment Method:</ReceiptLabel>
+            <ReceiptValue>GCash</ReceiptValue>
+          </ReceiptRow>
+          
+          <ReceiptRow>
+            <ReceiptLabel>Status:</ReceiptLabel>
+            <ReceiptValue>{payment.status === 'CONFIRMED' ? 'PAID' : payment.status}</ReceiptValue>
+          </ReceiptRow>
+        </ReceiptBody>
+
+        <ReceiptFooter>
+          Thank you for choosing Bambike Cycles!<br/>
+          Help us protect the environment.<br/>
+          <br/>
+          Generated on: {currentDate}<br/>
+          This is an official receipt.
+        </ReceiptFooter>
+
+        <ReceiptActions className="no-print">
+          <PrintButton onClick={onPrint}>
+            <FiPrinter size={16} />
+            Print Receipt
+          </PrintButton>
+          <PrintButton onClick={onClose} style={{ background: colors.mediumGray }}>
+            <FiX size={16} />
+            Close
+          </PrintButton>
+        </ReceiptActions>
+      </ReceiptContainer>
+    );
+  };
 
   // Function to fetch user data for payments
   const fetchUsersForPayments = async (paymentsData) => {
@@ -1383,13 +1795,24 @@ const PaymentsDashboard = () => {
           Payments Dashboard
         </Title>
         <HeaderActions>
-          <HeaderButton>
-            <FiDownload size={20} />
-            Export Payments
-          </HeaderButton>
-          <HeaderButton>
-            <FiUpload size={20} />
-            Import Payments
+          <HeaderButton 
+            onClick={() => {
+              if (filteredPayments.length === 0) {
+                alert('No payments available to print receipts for.');
+                return;
+              }
+              // For multiple payments, we'll open the first confirmed payment as an example
+              const confirmedPayment = filteredPayments.find(p => p.status === 'CONFIRMED');
+              if (confirmedPayment) {
+                openReceiptModal(confirmedPayment);
+              } else {
+                alert('Please select a confirmed payment to print receipt.');
+              }
+            }}
+            disabled={filteredPayments.length === 0}
+          >
+            <FiPrinter size={20} />
+            Print Receipt
           </HeaderButton>
         </HeaderActions>
       </Header>
@@ -1728,6 +2151,19 @@ const PaymentsDashboard = () => {
                       </ActionButton>
                     </PaymentActions>
                   )}
+                  
+                  {/* Print Receipt Button - Available for all payments */}
+                  <PaymentActions style={{ marginTop: '12px', justifyContent: 'center' }}>
+                    <PrintReceiptButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openReceiptModal(payment);
+                      }}
+                    >
+                      <FiPrinter size={12} />
+                      Print Receipt
+                    </PrintReceiptButton>
+                  </PaymentActions>
                 </PaymentDetails>
               </PaymentCard>
             ))}
@@ -1747,6 +2183,23 @@ const PaymentsDashboard = () => {
           </ModalContent>
         </Modal>
       )}
+
+      {/* Receipt Modal */}
+      {showReceiptModal && (
+        <ReceiptModal id="receipt-modal" className="receipt-modal" onClick={closeReceiptModal}>
+          <ReceiptModalContent id="receipt-modal-content" className="receipt-modal-content" onClick={(e) => e.stopPropagation()}>
+            <Receipt
+              payment={selectedPaymentForReceipt}
+              userData={users[selectedPaymentForReceipt?.userId]}
+              businessInfo={{ businessName, gcashNumber }}
+              onClose={closeReceiptModal}
+              onPrint={printReceipt}
+            />
+          </ReceiptModalContent>
+        </ReceiptModal>
+      )}
+
+      <PrintStyles />
     </Container>
   );
 };
