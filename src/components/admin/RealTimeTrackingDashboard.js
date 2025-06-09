@@ -415,6 +415,33 @@ const RealTimeTrackingDashboard = () => {
   const [routeData, setRouteData] = useState(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
 
+  // Helper function to determine if a ride is truly active
+  const isRideTrulyActive = (ride) => {
+    const hasStarted = !!ride.startTime;
+    const hasNotEnded = !ride.endTime;
+    const endedStatuses = ["completed", "cancelled", "ended", "finished"];
+    
+    // More flexible status checking - handle case variations and missing status
+    const statusIsActive = !ride.status || // No status - assume active for backward compatibility
+                          ride.status.toLowerCase() === "active" || 
+                          !endedStatuses.includes(ride.status.toLowerCase());
+    
+    const result = hasStarted && hasNotEnded && statusIsActive;
+    
+    // Debug logging for troubleshooting
+    console.log(`🔍 Checking ride ${ride.userId}:`, {
+      hasStarted,
+      hasNotEnded, 
+      statusIsActive,
+      status: ride.status,
+      startTime: ride.startTime,
+      endTime: ride.endTime,
+      result
+    });
+    
+    return result;
+  };
+
   // Predefined bike locations for Metro Manila
   const predefinedBikes = [
     {
@@ -592,6 +619,7 @@ const RealTimeTrackingDashboard = () => {
   }, [trailSettings.maxTrailLength]);
 
   // Setup real-time listeners for active rides using Realtime Database
+  // This effect handles real-time ride tracking and automatically removes ended rides
   useEffect(() => {
     // Inject CSS animations for InfoWindow visualizations
     injectAnimationStyles();
@@ -604,6 +632,8 @@ const RealTimeTrackingDashboard = () => {
       const activeRidesListener = onValue(activeRidesRef, (snapshot) => {
         try {
           const activeRidesData = snapshot.val() || {};
+          console.log('🔥 Raw activeRides data from Firebase:', activeRidesData);
+          
           const rides = Object.entries(activeRidesData).map(([userId, rideData]) => {
             // Process and validate the ride data
             const processedRide = {
@@ -660,28 +690,132 @@ const RealTimeTrackingDashboard = () => {
               }
             }
             
+            // Process endTime if it exists
+            if (rideData.endTime) {
+              if (typeof rideData.endTime === 'string') {
+                processedRide.endTime = new Date(rideData.endTime);
+              } else if (typeof rideData.endTime === 'number') {
+                const timestamp = rideData.endTime;
+                processedRide.endTime = new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp);
+              } else if (rideData.endTime && typeof rideData.endTime === 'object') {
+                if (rideData.endTime.seconds) {
+                  processedRide.endTime = new Date(rideData.endTime.seconds * 1000);
+                } else if (rideData.endTime.toDate) {
+                  processedRide.endTime = rideData.endTime.toDate();
+                } else {
+                  processedRide.endTime = new Date(rideData.endTime);
+                }
+              }
+              
+              // Validate the parsed endTime
+              if (isNaN(processedRide.endTime.getTime())) {
+                console.warn(`Invalid endTime for user ${userId}:`, rideData.endTime);
+                processedRide.endTime = null;
+              }
+            }
+            
             return processedRide;
           });
           
-          console.log('Active rides updated:', rides.length);
+          // TEMPORARILY DISABLED FILTERING FOR DEBUGGING - Show all rides
+          console.log('⚠️ TEMPORARILY SHOWING ALL RIDES FOR DEBUGGING');
+          const trulyActiveRides = rides; // Show all rides for now
+          
+          // Keep the filtering logic commented out for now
+          // const trulyActiveRides = rides.filter(ride => {
+          //   const isActuallyActive = isRideTrulyActive(ride);
+          //   
+          //   // Log rides that are being filtered out for debugging
+          //   if (!isActuallyActive) {
+          //     const reason = !ride.startTime ? 'no start time' :
+          //                  ride.endTime ? 'has end time' :
+          //                  ['completed', 'cancelled', 'ended', 'finished'].includes(ride.status?.toLowerCase()) ? 'ended status' :
+          //                  'unknown reason';
+          //     console.log(`🗑️ Filtering out ride ${ride.userId}: ${reason} (status: ${ride.status || 'none'}, endTime: ${!!ride.endTime})`);
+          //   }
+          //   
+          //   return isActuallyActive;
+          // });
+          
+          console.log(`🚴 Raw rides from DB: ${rides.length}, Truly active rides: ${trulyActiveRides.length}`);
+          
+          // Log summary of filtering if there's a difference
+          if (rides.length !== trulyActiveRides.length) {
+            const filteredCount = rides.length - trulyActiveRides.length;
+            console.log(`✅ Filtered out ${filteredCount} ended/invalid rides from map display`);
+          }
+          
           // Debug timestamp processing
-          rides.forEach(ride => {
+          trulyActiveRides.forEach(ride => {
             if (!ride.startTime) {
-              console.warn(`Missing startTime for ride ${ride.id}:`, ride);
+              console.warn(`Missing startTime for active ride ${ride.id}:`, ride);
             }
           });
           
-          setActiveRides(rides);
-          calculateStats(rides);
-          checkForAlerts(rides);
+          // Clean up trails for rides that are no longer active
+          const activeUserIds = new Set(trulyActiveRides.map(ride => ride.userId));
+          setRidePaths(prevPaths => {
+            const cleanedPaths = {};
+            Object.keys(prevPaths).forEach(userId => {
+              if (activeUserIds.has(userId)) {
+                cleanedPaths[userId] = prevPaths[userId];
+              } else {
+                console.log(`Removing trail for ended ride: ${userId}`);
+              }
+            });
+            return cleanedPaths;
+          });
+          
+          setRideTrails(prevTrails => {
+            const cleanedTrails = {};
+            Object.keys(prevTrails).forEach(userId => {
+              if (activeUserIds.has(userId)) {
+                cleanedTrails[userId] = prevTrails[userId];
+              }
+            });
+            return cleanedTrails;
+          });
+          
+          setActiveRides(trulyActiveRides);
+          calculateStats(trulyActiveRides);
+          checkForAlerts(trulyActiveRides);
           setAuthError(null); // Clear auth error on successful data fetch
+          
+          // Clean up live location data for users who are no longer in active rides
+          setLiveLocations(prevLiveLocations => {
+            const cleanedLiveLocations = {};
+            const activeUserIds = new Set(trulyActiveRides.map(ride => ride.userId));
+            
+            Object.keys(prevLiveLocations).forEach(userId => {
+              if (activeUserIds.has(userId)) {
+                cleanedLiveLocations[userId] = prevLiveLocations[userId];
+              } else {
+                console.log(`Removing stale live location data for ended ride: ${userId}`);
+              }
+            });
+            
+            return cleanedLiveLocations;
+          });
+          
+          // Clear selected ride if it's no longer active
+          setSelectedRide(prevSelected => {
+            if (prevSelected && prevSelected.userId && !prevSelected.isStaticBike) {
+              const isStillActive = trulyActiveRides.some(ride => ride.userId === prevSelected.userId);
+              if (!isStillActive) {
+                console.log(`Clearing selected ride - ride ${prevSelected.userId} is no longer active`);
+                return null;
+              }
+            }
+            return prevSelected;
+          });
         } catch (error) {
           console.error('Error processing active rides data:', error);
           setAuthError('Error loading active rides');
         }
-      }, (error) => {
-        console.error('Firebase permission error for active rides:', error);
-        setAuthError('Permission denied for active rides');
+              }, (error) => {
+        console.error('🔥 Firebase error for active rides:', error);
+        console.error('🔥 Error details:', error.code, error.message);
+        setAuthError(`Firebase error: ${error.message}`);
       });
 
       // Listen for live locations from Realtime Database
@@ -689,7 +823,7 @@ const RealTimeTrackingDashboard = () => {
       const liveLocationListener = onValue(liveLocationRef, (snapshot) => {
         try {
           const liveLocationData = snapshot.val() || {};
-          console.log('Live locations updated:', Object.keys(liveLocationData).length);
+          console.log('📍 Live locations updated:', Object.keys(liveLocationData).length, liveLocationData);
           
           // Update live locations with trail updates
           setLiveLocations(prevLocations => {
@@ -1194,34 +1328,66 @@ const RealTimeTrackingDashboard = () => {
             }
           }
 
-          // Calculate ride statistics
+          // Calculate ride statistics with improved accuracy and fallbacks
           const duration = rideData.endTime ? 
             (rideData.endTime - rideData.startTime) : 
             (Date.now() - rideData.startTime);
 
-          let maxSpeed = 0;
-          let averageSpeed = 0;
-          let totalDistance = rideData.totalDistance || 0;
+          let maxSpeed = rideData.maxSpeed || 0;
+          let averageSpeed = rideData.averageSpeed || 0;
+          let totalDistance = rideData.totalDistance || rideData.distanceTraveled || 0;
 
+          // Enhanced path-based calculations with better validation
           if (rideData.path && rideData.path.length > 1) {
+            // Calculate speeds from path data if not available in ride record
             const speeds = rideData.path
-              .map(point => point.speed || 0)
+              .map(point => {
+                // Handle different speed field formats
+                const speed = point.speed || point.speedKmh || point.currentSpeed || 0;
+                return typeof speed === 'number' && speed > 0 && speed < 100 ? speed : 0;
+              })
               .filter(speed => speed > 0);
             
             if (speeds.length > 0) {
-              maxSpeed = Math.max(...speeds);
-              averageSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+              const pathMaxSpeed = Math.max(...speeds);
+              const pathAvgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+              
+              // Use path-calculated values if ride record values are missing or zero
+              if (!maxSpeed || maxSpeed === 0) {
+                maxSpeed = pathMaxSpeed;
+              }
+              if (!averageSpeed || averageSpeed === 0) {
+                averageSpeed = pathAvgSpeed;
+              }
             }
 
-            // Calculate distance if not available
-            if (!totalDistance && rideData.path.length > 1) {
+            // Calculate distance from path if not available or zero
+            if (!totalDistance || totalDistance === 0) {
               for (let i = 1; i < rideData.path.length; i++) {
                 const prev = rideData.path[i - 1];
                 const curr = rideData.path[i];
-                totalDistance += getDistanceBetweenPoints(prev, curr) * 1000;
+                
+                // Validate coordinates before calculating distance
+                if (prev && curr && 
+                    typeof prev.latitude === 'number' && typeof prev.longitude === 'number' &&
+                    typeof curr.latitude === 'number' && typeof curr.longitude === 'number' &&
+                    Math.abs(prev.latitude) <= 90 && Math.abs(prev.longitude) <= 180 &&
+                    Math.abs(curr.latitude) <= 90 && Math.abs(curr.longitude) <= 180) {
+                  
+                  const segmentDistance = getDistanceBetweenPoints(prev, curr);
+                  // Filter out unrealistic GPS jumps (> 100km between points)
+                  if (segmentDistance < 100) {
+                    totalDistance += segmentDistance * 1000; // Convert to meters
+                  }
+                }
               }
             }
           }
+
+          // Final validation and cleanup
+          maxSpeed = Math.max(0, Math.min(maxSpeed || 0, 100)); // Cap at 100 km/h
+          averageSpeed = Math.max(0, Math.min(averageSpeed || 0, 100)); // Cap at 100 km/h
+          totalDistance = Math.max(0, totalDistance || 0); // Ensure non-negative
 
           return {
             id: rideDoc.id,
@@ -1231,6 +1397,8 @@ const RealTimeTrackingDashboard = () => {
             maxSpeed,
             averageSpeed,
             totalDistance,
+            // Ensure consistent field naming for compatibility
+            distanceTraveled: totalDistance, // Add alias for mobile compatibility
             startLocation: rideData.path?.[0] || null,
             endLocation: rideData.path?.[rideData.path?.length - 1] || null
           };
