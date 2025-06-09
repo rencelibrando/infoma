@@ -32,47 +32,47 @@ fun BikeUnlockDialog(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(12.dp),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Animated loading indicator
+                    // Animated loading indicator - Smaller
                     CircularProgressIndicator(
-                        modifier = Modifier.size(64.dp),
+                        modifier = Modifier.size(40.dp),
                         color = MaterialTheme.colorScheme.primary,
-                        strokeWidth = 4.dp
+                        strokeWidth = 3.dp
                     )
                     
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     
-                    // Title
+                    // Title - Smaller font
                     Text(
                         text = "Unlocking Bike",
-                        fontSize = 20.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center
                     )
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     
                     // Animated status message
                     UnlockStatusMessage()
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     
-                    // Info text
+                    // Info text - More compact
                     Text(
                         text = "Please wait while we verify the QR code and unlock your bike...",
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         textAlign = TextAlign.Center,
-                        lineHeight = 20.sp
+                        lineHeight = 16.sp
                     )
                 }
             }
@@ -101,7 +101,7 @@ private fun UnlockStatusMessage() {
     
     Text(
         text = messages[currentMessageIndex],
-        fontSize = 16.sp,
+        fontSize = 13.sp,
         color = MaterialTheme.colorScheme.primary,
         textAlign = TextAlign.Center,
         fontWeight = FontWeight.Medium

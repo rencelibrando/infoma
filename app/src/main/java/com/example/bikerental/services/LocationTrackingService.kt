@@ -225,9 +225,20 @@ class LocationTrackingService : Service() {
                 val bikeLocation = BikeLocation.fromLocation(location)
                 sendLocationUpdate(location, rideId, isActive = true)
                 
-                // Update ride statistics via BikeViewModel (UI updates only)
+                // Update ride statistics and POV navigation via BikeViewModel
                 val bikeViewModel = com.example.bikerental.viewmodels.BikeViewModel.getInstance()
-                bikeViewModel?.updateRideStats(rideId, bikeLocation)
+                bikeViewModel?.let { vm ->
+                    // Update traditional ride stats
+                    vm.updateRideStats(rideId, bikeLocation)
+                    
+                    // Update POV navigation with new location
+                    val latLng = com.google.android.gms.maps.model.LatLng(location.latitude, location.longitude)
+                    vm.updateCurrentLocation(latLng)
+                    
+                    // Update speed for real-time display
+                    vm.updateCurrentSpeed(currentSpeed)
+                    vm.updateMaxSpeed(maxSpeed)
+                }
             }
         }
         

@@ -167,6 +167,14 @@ class BikeViewModel : ViewModel() {
     private val _completedRide = MutableStateFlow<BikeRide?>(null)
     val completedRide: StateFlow<BikeRide?> = _completedRide
     
+    // POV Navigation and Emergency Features
+    private val _currentLocation = MutableStateFlow<LatLng?>(null)
+    val currentLocation: StateFlow<LatLng?> = _currentLocation
+    
+    // Emergency state
+    private val _emergencyState = MutableStateFlow<String?>(null)
+    val emergencyState: StateFlow<String?> = _emergencyState
+    
     init {
         setInstance(this)
         fetchAllBikes()
@@ -549,17 +557,7 @@ class BikeViewModel : ViewModel() {
         _bikeLocation.value = null
     }
     
-    // Calculate distance between two LatLng points
-    private fun calculateDistance(start: LatLng, end: LatLng): Float {
-        val results = FloatArray(1)
-        android.location.Location.distanceBetween(
-            start.latitude, start.longitude,
-            end.latitude, end.longitude,
-            results
-        )
-        return results[0] // Distance in meters
-    }
-    
+    // Calculate distance between two LatLng point
     // Add missing calculateDistance method with 4 double parameters (returns distance in kilometers)
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
         val results = FloatArray(1)
@@ -1855,6 +1853,168 @@ class BikeViewModel : ViewModel() {
                 onError("Failed to delete review: ${e.message}")
             }
         }
+    }
+    
+    /**
+     * Update current location for POV navigation
+     */
+    fun updateCurrentLocation(location: LatLng) {
+        _currentLocation.value = location
+        
+        // Update bearing calculation if we have path data
+        val path = _ridePath.value
+        if (path.size >= 2) {
+            val lastTwo = path.takeLast(2)
+            val bearing = calculateBearing(lastTwo[0], lastTwo[1])
+            _userBearing.value = bearing
+        }
+        
+        // Add to ride path if ride is active
+        if (_activeRide.value != null) {
+            val updatedPath = _ridePath.value.toMutableList()
+            updatedPath.add(location)
+            _ridePath.value = updatedPath
+            
+            // Update ride distance
+            if (updatedPath.size >= 2) {
+                val lastDistance = calculateDistance(
+                    updatedPath[updatedPath.size - 2], 
+                    updatedPath[updatedPath.size - 1]
+                )
+                _rideDistance.value += lastDistance
+            }
+        }
+    }
+    
+    /**
+     * Send emergency alert with current location
+     */
+    fun sendEmergencyAlert(emergencyType: String, location: LatLng) {
+        auth.currentUser?.let { user ->
+            viewModelScope.launch {
+                try {
+                    _emergencyState.value = "Sending emergency alert..."
+                    
+                    val emergencyId = UUID.randomUUID().toString()
+                    val currentRide = _activeRide.value
+                    
+                    val emergencyData = mapOf(
+                        "id" to emergencyId,
+                        "userId" to user.uid,
+                        "userName" to (user.displayName ?: user.email ?: "Unknown User"),
+                        "emergencyType" to emergencyType,
+                        "location" to mapOf(
+                            "latitude" to location.latitude,
+                            "longitude" to location.longitude
+                        ),
+                        "timestamp" to System.currentTimeMillis(),
+                        "rideId" to (currentRide?.id ?: ""),
+                        "bikeId" to (currentRide?.bikeId ?: ""),
+                        "status" to "active",
+                        "priority" to when (emergencyType) {
+                            "Medical Emergency", "Accident" -> "HIGH"
+                            "Security Issue" -> "HIGH"
+                            else -> "MEDIUM"
+                        }
+                    )
+                    
+                    withContext(Dispatchers.IO) {
+                        // Save to Firebase Realtime Database for immediate admin notification
+                        database.getReference("emergencies")
+                            .child(emergencyId)
+                            .setValue(emergencyData)
+                            .await()
+                        
+                        // Also save to Firestore for persistent records
+                        firestore.collection("emergencies")
+                            .document(emergencyId)
+                            .set(emergencyData)
+                            .await()
+                        
+                        // Update ride status if active
+                        currentRide?.let { ride ->
+                            database.getReference("rides")
+                                .child(ride.id)
+                                .child("emergencyStatus")
+                                .setValue(emergencyType)
+                                .await()
+                        }
+                    }
+                    
+                    _emergencyState.value = "Emergency alert sent successfully"
+                    Log.d(TAG, "Emergency alert sent: $emergencyType at ${location.latitude}, ${location.longitude}")
+                    
+                    // Clear state after 3 seconds
+                    kotlinx.coroutines.delay(3000)
+                    _emergencyState.value = null
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending emergency alert", e)
+                    _emergencyState.value = "Failed to send emergency alert"
+                    
+                    // Clear error state after 5 seconds
+                    kotlinx.coroutines.delay(5000)
+                    _emergencyState.value = null
+                }
+            }
+        }
+    }
+    
+    /**
+     * Calculate bearing between two points for navigation
+     */
+    private fun calculateBearing(start: LatLng, end: LatLng): Float {
+        val lat1 = Math.toRadians(start.latitude)
+        val lat2 = Math.toRadians(end.latitude)
+        val deltaLong = Math.toRadians(end.longitude - start.longitude)
+        
+        val y = sin(deltaLong) * cos(lat2)
+        val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLong)
+        
+        val bearing = Math.toDegrees(atan2(y, x))
+        return ((bearing + 360) % 360).toFloat()
+    }
+    
+    /**
+     * Calculate distance between two points in meters
+     */
+    private fun calculateDistance(start: LatLng, end: LatLng): Float {
+        val results = FloatArray(1)
+        android.location.Location.distanceBetween(
+            start.latitude, start.longitude,
+            end.latitude, end.longitude,
+            results
+        )
+        return results[0]
+    }
+    
+    /**
+     * Update current speed for real-time display
+     */
+    fun updateCurrentSpeed(speedKmh: Float) {
+        _currentSpeed.value = speedKmh / 3.6f // Convert km/h to m/s for consistency
+    }
+    
+    /**
+     * Update maximum speed if current exceeds it
+     */
+    fun updateMaxSpeed(speedKmh: Float) {
+        val speedMps = speedKmh / 3.6f // Convert km/h to m/s
+        if (speedMps > _maxSpeed.value) {
+            _maxSpeed.value = speedMps
+        }
+    }
+    
+    /**
+     * Reset POV navigation state
+     */
+    fun resetNavigationState() {
+        _ridePath.value = emptyList()
+        _userBearing.value = 0f
+        _rideDistance.value = 0f
+        _currentSpeed.value = 0f
+        _maxSpeed.value = 0f
+        _currentLocation.value = null
     }
     
     /**

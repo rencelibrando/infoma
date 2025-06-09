@@ -30,60 +30,62 @@ fun StartRideDialog(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
+                    .padding(12.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
                 Column(
-                    modifier = Modifier.padding(24.dp),
+                    modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Icon
+                    // Icon - Smaller
                     Icon(
                         imageVector = Icons.Default.DirectionsBike,
                         contentDescription = "Start Ride",
-                        modifier = Modifier.size(64.dp),
+                        modifier = Modifier.size(40.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     
-                    // Title
+                    // Title - Smaller font
                     Text(
                         text = "Start Your Ride",
-                        fontSize = 24.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
                         textAlign = TextAlign.Center
                     )
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     
-                    // Description
+                    // Description - More compact
                     Text(
-                        text = "Scan the QR code on your bike to unlock it and start your ride. Make sure you're standing next to the bike you want to use.",
-                        fontSize = 16.sp,
+                        text = "Scan the QR code on your bike to unlock and start riding. Stand next to the bike before scanning.",
+                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                         textAlign = TextAlign.Center,
-                        lineHeight = 22.sp
+                        lineHeight = 18.sp
                     )
                     
-                    Spacer(modifier = Modifier.height(32.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     
-                    // Buttons
+                    // Buttons - More compact
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         // Cancel Button
                         OutlinedButton(
                             onClick = onDismiss,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp),
+                            shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = "Cancel",
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -94,8 +96,10 @@ fun StartRideDialog(
                                 onDismiss()
                                 onStartQRScan()
                             },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp),
+                            shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF2E7D32)
                             )
@@ -103,12 +107,12 @@ fun StartRideDialog(
                             Icon(
                                 imageVector = Icons.Default.QrCodeScanner,
                                 contentDescription = null,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "Scan QR",
-                                fontSize = 16.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -134,22 +138,22 @@ private fun StartRideDialogContent(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        shape = RoundedCornerShape(16.dp),
+            .padding(12.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = cardColors
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             StartRideIcon(isLoading = isLoading)
             
             StartRideContent(isLoading = isLoading)
             
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             
             StartRideActions(
                 onDismiss = onDismiss,
@@ -165,15 +169,15 @@ private fun StartRideDialogContent(
 private fun StartRideIcon(isLoading: Boolean) {
     if (isLoading) {
         CircularProgressIndicator(
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(40.dp),
             color = ColorUtils.DarkGreen,
-            strokeWidth = 4.dp
+            strokeWidth = 3.dp
         )
     } else {
         Icon(
             imageVector = Icons.Default.QrCodeScanner,
             contentDescription = "QR Scanner",
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(40.dp),
             tint = ColorUtils.DarkGreen
         )
     }
@@ -195,7 +199,7 @@ private fun StartRideContent(isLoading: Boolean) {
     
     Text(
         text = title,
-        fontSize = 24.sp,
+        fontSize = 18.sp,
         fontWeight = FontWeight.Bold,
         color = MaterialTheme.colorScheme.onSurface,
         textAlign = TextAlign.Center
@@ -203,10 +207,10 @@ private fun StartRideContent(isLoading: Boolean) {
     
     Text(
         text = description,
-        fontSize = 16.sp,
+        fontSize = 13.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
-        lineHeight = 22.sp
+        lineHeight = 18.sp
     )
 }
 
@@ -219,44 +223,50 @@ private fun StartRideActions(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (!isLoading) {
             OutlinedButton(
                 onClick = onDismiss,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
             ) {
-                Text("Cancel")
+                Text("Cancel", fontSize = 14.sp)
             }
         }
         
         Button(
             onClick = if (isLoading) { {} } else onScanQRCode,
-            modifier = Modifier.weight(if (isLoading) 2f else 1f),
+            modifier = Modifier
+                .weight(if (isLoading) 2f else 1f)
+                .height(36.dp),
             colors = buttonColors,
             enabled = !isLoading
         ) {
             if (isLoading) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(12.dp),
                         color = Color.White,
-                        strokeWidth = 2.dp
+                        strokeWidth = 1.5.dp
                     )
                     Text(
                         text = "Processing...",
                         color = Color.White,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp
                     )
                 }
             } else {
                 Text(
                     text = "Scan QR Code",
                     color = Color.White,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
                 )
             }
         }

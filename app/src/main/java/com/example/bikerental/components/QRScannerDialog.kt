@@ -144,7 +144,7 @@ private fun QRScannerContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             // Top Bar
@@ -156,7 +156,7 @@ private fun QRScannerContent(
                 Text(
                     text = title,
                     color = Color.White,
-                    fontSize = 20.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 
@@ -165,7 +165,7 @@ private fun QRScannerContent(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -177,18 +177,18 @@ private fun QRScannerContent(
                     .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                // Scanning frame
+                // Scanning frame - Smaller
                 Box(
                     modifier = Modifier
-                        .size(250.dp)
+                        .size(200.dp)
                         .background(
                             Color.Transparent,
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(8.dp)
                         )
                 ) {
                     // Corner indicators
-                    val cornerSize = 20.dp
-                    val cornerWidth = 3.dp
+                    val cornerSize = 16.dp
+                    val cornerWidth = 2.dp
                     
                     // Top-left corner
                     Box(
@@ -282,7 +282,7 @@ private fun QRScannerContent(
             Text(
                 text = "Position the QR code within the frame to scan",
                 color = Color.White,
-                fontSize = 16.sp,
+                fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -309,36 +309,37 @@ private fun PermissionDeniedContent(onDismiss: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(32.dp),
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = "Camera Permission Required",
             color = Color.White,
-            fontSize = 24.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         
         Text(
             text = "To scan QR codes, please grant camera permission in app settings.",
             color = Color.White,
-            fontSize = 16.sp,
+            fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
         
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         
         Button(
             onClick = onDismiss,
+            modifier = Modifier.height(36.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
             )
         ) {
-            Text("Close")
+            Text("Close", fontSize = 14.sp)
         }
     }
 }

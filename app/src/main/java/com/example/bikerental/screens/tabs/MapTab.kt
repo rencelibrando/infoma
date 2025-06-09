@@ -30,6 +30,10 @@ import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Emergency
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -40,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -70,6 +75,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -94,6 +100,7 @@ import com.example.bikerental.components.QRScannerDialog
 import com.example.bikerental.components.StartRideDialog
 import com.example.bikerental.components.BikeUnlockDialog
 import com.example.bikerental.components.RideRatingDialog
+import com.example.bikerental.components.SOSDialog
 import com.example.bikerental.viewmodels.BikeViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -103,6 +110,12 @@ import com.example.bikerental.BuildConfig
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.atan2
+import kotlin.math.sqrt
+import android.content.Intent
+import android.net.Uri
 
 // Singleton HTTP client for better performance
 private val httpClient: OkHttpClient by lazy {
@@ -204,14 +217,15 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     // Default location (Manila)
     val defaultLocation = LatLng(14.5890, 120.9760)
     
-    // Camera position state
+    // Camera position state with POV configuration
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(defaultLocation, 15f)
+        position = CameraPosition.fromLatLngZoom(defaultLocation, 18f) // Higher zoom for POV
     }
     
     // State for Start Ride flow
     var showStartRideDialog by remember { mutableStateOf(false) }
     var showQRScanner by remember { mutableStateOf(false) }
+    var showSOSDialog by remember { mutableStateOf(false) }
     
     // Observe bike unlocking states
     val isUnlockingBike by bikeViewModel.isUnlockingBike.collectAsState()
@@ -219,23 +233,57 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     val unlockSuccess by bikeViewModel.unlockSuccess.collectAsState()
     val activeRide by bikeViewModel.activeRide.collectAsState()
     
+    // Enhanced ride tracking states
+    val ridePath by bikeViewModel.ridePath.collectAsState()
+    val userBearing by bikeViewModel.userBearing.collectAsState()
+    val currentLocation by bikeViewModel.currentLocation.collectAsState()
+    
+    // POV Navigation states
+    var isPOVMode by remember { mutableStateOf(false) }
+    var showRouteOverview by remember { mutableStateOf(false) }
+    
+    // Auto-enable POV mode when ride starts
+    LaunchedEffect(activeRide) {
+        if (activeRide != null) {
+            isPOVMode = true
+        } else {
+            isPOVMode = false
+            showRouteOverview = false
+        }
+    }
+    
+    // Update camera position for POV mode
+    LaunchedEffect(currentLocation, userBearing, isPOVMode) {
+        if (isPOVMode && currentLocation != null && activeRide != null) {
+            val newPosition = CameraPosition.Builder()
+                .target(currentLocation!!)
+                .zoom(19f) // Close zoom for navigation
+                .bearing(userBearing) // Follow user's heading
+                .tilt(60f) // Tilted view for POV effect
+                .build()
+            
+            cameraPositionState.animate(
+                CameraUpdateFactory.newCameraPosition(newPosition),
+                durationMs = 1000
+            )
+        }
+    }
+    
     // Handle unlock error
     LaunchedEffect(unlockError) {
         unlockError?.let { error ->
-            // Show error snackbar or dialog
             Log.e("MapTab", "Unlock error: $error")
-            // Reset error after showing for longer to ensure user sees it
-            kotlinx.coroutines.delay(5000) // Show error for 5 seconds
+            kotlinx.coroutines.delay(5000)
             bikeViewModel.resetUnlockStates()
         }
     }
     
-    // Handle successful unlock - navigate to ride screen
+    // Handle successful unlock
     LaunchedEffect(unlockSuccess) {
         if (unlockSuccess) {
             showQRScanner = false
             showStartRideDialog = false
-            Log.d("MapTab", "Ride started successfully, resetting UI states")
+            Log.d("MapTab", "Ride started successfully, enabling POV mode")
             bikeViewModel.resetUnlockStates()
         }
     }
@@ -245,10 +293,12 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         if (hasLocationPermission) {
             try {
                 val location = getCurrentLocationSuspend(fusedLocationProviderClient)
-                cameraPositionState.animate(
-                    CameraUpdateFactory.newLatLngZoom(location, 15f),
-                    durationMs = 1000
-                )
+                if (!isPOVMode) {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(location, 15f),
+                        durationMs = 1000
+                    )
+                }
             } catch (e: Exception) {
                 Log.e("MapTab", "Error getting location", e)
             }
@@ -262,99 +312,26 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         }
     }
 
-    // Optimized directions fetching with caching
-    suspend fun fetchDirections(origin: LatLng, destination: LatLng): List<RouteInfo> {
-        val cacheKey = "${origin.latitude},${origin.longitude}-${destination.latitude},${destination.longitude}"
-        
-        // Check cache first
-        routeCache[cacheKey]?.let { return it }
-        
-        return withContext(Dispatchers.IO) {
-            try {
-                val apiKey = "AIzaSyASfb-LFSstZrbPUIgPn1rKOqNTFF6mhhk" // Replace with your API key
-                val url = "https://maps.googleapis.com/maps/api/directions/json?" +
-                        "origin=${origin.latitude},${origin.longitude}" +
-                        "&destination=${destination.latitude},${destination.longitude}" +
-                        "&mode=bicycling" +
-                        "&alternatives=true" +
-                        "&key=$apiKey"
-
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("User-Agent", "BikeRental/1.0")
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val jsonData = response.body?.string() ?: ""
-                
-                // Process JSON in computation thread
-                val routes = withContext(Dispatchers.Default) {
-                    val routeList = mutableListOf<RouteInfo>()
-                    val jsonObject = JSONObject(jsonData)
-                    
-                    if (jsonObject.getString("status") == "OK") {
-                        val routesArray = jsonObject.getJSONArray("routes")
-                        
-                        // Process routes in parallel
-                        val deferredRoutes = (0 until routesArray.length()).map { i ->
-                            async {
-                                val route = routesArray.getJSONObject(i)
-                                val leg = route.getJSONArray("legs").getJSONObject(0)
-                                val steps = mutableListOf<String>()
-                                
-                                // Extract steps
-                                val stepsArray = leg.getJSONArray("steps")
-                                for (j in 0 until stepsArray.length()) {
-                                    val step = stepsArray.getJSONObject(j)
-                                    steps.add(step.getString("html_instructions"))
-                                }
-
-                                // Decode polyline asynchronously
-                                val polylinePoints = decodePoly(
-                                    route.getJSONObject("overview_polyline").getString("points")
-                                )
-
-                                RouteInfo(
-                                    distance = leg.getJSONObject("distance").getString("text"),
-                                    duration = leg.getJSONObject("duration").getString("text"),
-                                    polylinePoints = polylinePoints,
-                                    steps = steps,
-                                    isAlternative = i > 0
-                                )
-                            }
-                        }
-                        
-                        routeList.addAll(deferredRoutes.map { it.await() })
-                    }
-                    routeList
-                }
-                
-                // Cache the result
-                routeCache[cacheKey] = routes
-                routes
-                
-            } catch (e: Exception) {
-                Log.e("MapTab", "Error fetching directions: ${e.message}")
-                emptyList()
-            }
-        }
-    }
-
-    // Memoized map properties
-    val mapProperties = remember(hasLocationPermission) {
+    // Memoized map properties with POV optimizations
+    val mapProperties = remember(hasLocationPermission, isPOVMode) {
         MapProperties(
-            isMyLocationEnabled = hasLocationPermission,
-            mapType = MapType.NORMAL
+            isMyLocationEnabled = hasLocationPermission && !isPOVMode, // Hide default location button in POV
+            mapType = MapType.NORMAL,
+            isTrafficEnabled = true // Enable traffic for navigation
         )
     }
 
-    // Memoized UI settings
-    val uiSettings = remember {
+    // Enhanced UI settings for POV navigation
+    val uiSettings = remember(isPOVMode) {
         MapUiSettings(
-            zoomControlsEnabled = false,
-            myLocationButtonEnabled = false,
+            zoomControlsEnabled = !isPOVMode,
+            myLocationButtonEnabled = !isPOVMode,
             mapToolbarEnabled = false,
-            compassEnabled = false
+            compassEnabled = isPOVMode, // Show compass in POV mode
+            rotationGesturesEnabled = !isPOVMode, // Disable rotation in POV
+            scrollGesturesEnabled = !isPOVMode, // Limit scrolling in POV
+            tiltGesturesEnabled = false,
+            zoomGesturesEnabled = true
         )
     }
 
@@ -364,7 +341,114 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
             cameraPositionState = cameraPositionState,
             properties = mapProperties,
             uiSettings = uiSettings
-        )
+        ) {
+            // Render ride path as polyline
+            if (ridePath.isNotEmpty()) {
+                Polyline(
+                    points = ridePath,
+                    color = Color(0xFF2E7D32), // Green path color
+                    width = 8f,
+                    pattern = null,
+                    geodesic = true
+                )
+            }
+            
+            // Current location marker with direction indicator
+            currentLocation?.let { location ->
+                if (activeRide != null) {
+                    Marker(
+                        state = MarkerState(position = location),
+                        title = "You are here",
+                        snippet = "Current location",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE),
+                        rotation = userBearing,
+                        flat = true
+                    )
+                }
+            }
+        }
+
+        // POV Mode Controls (Top)
+        if (activeRide != null) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // POV Toggle
+                    FloatingActionButton(
+                        onClick = { isPOVMode = !isPOVMode },
+                        modifier = Modifier.size(48.dp),
+                        containerColor = if (isPOVMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Navigation,
+                            contentDescription = if (isPOVMode) "Exit POV" else "Enter POV",
+                            tint = if (isPOVMode) Color.White else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    // Center on location
+                    FloatingActionButton(
+                        onClick = {
+                            currentLocation?.let { location ->
+                                val newPosition = if (isPOVMode) {
+                                    CameraPosition.Builder()
+                                        .target(location)
+                                        .zoom(19f)
+                                        .bearing(userBearing)
+                                        .tilt(60f)
+                                        .build()
+                                } else {
+                                    CameraPosition.fromLatLngZoom(location, 15f)
+                                }
+                                
+                                backgroundScope.launch {
+                                    cameraPositionState.animate(
+                                        CameraUpdateFactory.newCameraPosition(newPosition),
+                                        durationMs = 1000
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.size(48.dp),
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Center on location",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        // Enhanced SOS Button (Left side during active ride)
+        if (activeRide != null) {
+            FloatingActionButton(
+                onClick = { showSOSDialog = true },
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 16.dp),
+                containerColor = Color.Red,
+                contentColor = Color.White
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Emergency,
+                    contentDescription = "Emergency SOS",
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
 
         // Bottom Action Buttons
         Column(
@@ -380,6 +464,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 // Enhanced Ride Dashboard with real-time data
                 val rideDistance by bikeViewModel.rideDistance.collectAsState()
                 val currentSpeed by bikeViewModel.currentSpeed.collectAsState()
+                val maxSpeed by bikeViewModel.maxSpeed.collectAsState()
                 val activeRideStartTime = activeRide?.startTime ?: System.currentTimeMillis()
                 
                 Card(
@@ -387,7 +472,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                     ),
                     elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                     shape = RoundedCornerShape(12.dp)
@@ -398,18 +483,28 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                             .padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Header with live indicator
+                        // Header with live indicator and POV status
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Ride in Progress",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Column {
+                                Text(
+                                    text = "Ride in Progress",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                if (isPOVMode) {
+                                    Text(
+                                        text = "Navigation Mode",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
                             
                             // Live indicator
                             Row(
@@ -432,7 +527,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                             }
                         }
                         
-                        // Real-time stats row
+                        // Enhanced stats row with 4 columns
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
@@ -445,7 +540,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             
                             // Distance
                             RideStatCard(
@@ -455,46 +550,87 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                 modifier = Modifier.weight(1f)
                             )
                             
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
                             
-                            // Speed
+                            // Current Speed
                             RideStatCard(
                                 icon = Icons.Default.Speed,
                                 label = "Speed",
                                 value = formatSpeed(currentSpeed),
                                 modifier = Modifier.weight(1f)
                             )
+                            
+                            Spacer(modifier = Modifier.width(3.dp))
+                            
+                            // Max Speed
+                            RideStatCard(
+                                icon = Icons.Default.Speed,
+                                label = "Max",
+                                value = formatSpeed(maxSpeed),
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                         
-                        // End Ride Button
-                        Button(
-                            onClick = {
-                                // End the ride using current location
-                                if (hasLocationPermission) {
-                                    endCurrentRide(fusedLocationProviderClient, bikeViewModel)
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            ),
-                            shape = RoundedCornerShape(10.dp)
+                        // Action buttons row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Stop,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "End Ride",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
+                            // SOS Button (smaller)
+                            Button(
+                                onClick = { showSOSDialog = true },
+                                modifier = Modifier
+                                    .weight(0.3f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.Red
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "SOS",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            
+                            // End Ride Button (larger)
+                            Button(
+                                onClick = {
+                                    if (hasLocationPermission) {
+                                        endCurrentRide(fusedLocationProviderClient, bikeViewModel)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(0.7f)
+                                    .height(44.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "End Ride",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -548,7 +684,6 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         // Error Snackbar
         unlockError?.let { error ->
             LaunchedEffect(error) {
-                // Show error for a few seconds then clear
                 kotlinx.coroutines.delay(3000)
                 bikeViewModel.resetUnlockStates()
             }
@@ -627,13 +762,13 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 Column {
                     Text("To start a bike ride, we need:")
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("• Location access for GPS tracking")
+                    Text("• Location access for GPS tracking and navigation")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         Text("• Notification permission for ride updates")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "These permissions ensure your safety and enable real-time tracking during rides.",
+                        "These permissions enable POV navigation and emergency features during rides.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -659,6 +794,24 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         )
     }
     
+    // SOS Dialog
+    SOSDialog(
+        isVisible = showSOSDialog,
+        onDismiss = { showSOSDialog = false },
+        onConfirmEmergency = { emergencyType ->
+            // Handle emergency - send location and alert
+            if (hasLocationPermission && activeRide != null) {
+                handleEmergency(
+                    context = context,
+                    emergencyType = emergencyType,
+                    bikeViewModel = bikeViewModel,
+                    fusedLocationProviderClient = fusedLocationProviderClient
+                )
+            }
+            showSOSDialog = false
+        }
+    )
+    
     // Start Ride Dialog
     StartRideDialog(
         isVisible = showStartRideDialog,
@@ -679,13 +832,10 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         onQRCodeScanned = { qrCode ->
             Log.d("MapTab", "QR Code scanned: $qrCode")
             
-            // Debug the QR code using the enhanced helper
             QRCodeHelper.debugQRCode(qrCode)
             
-            // Validate QR code format first
             if (!QRCodeHelper.isValidQRCodeFormat(qrCode)) {
                 Log.w("MapTab", "Invalid QR code format detected")
-                Log.e("MapTab", "Invalid QR code format. Please try scanning again.")
                 showQRScanner = false
                 bikeViewModel.resetUnlockStates()
                 return@QRScannerDialog
@@ -694,7 +844,6 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
             if (hasLocationPermission) {
                 showQRScanner = false
                 Log.d("MapTab", "Starting bike unlock process with valid QR code")
-                // Get current location and unlock bike
                 getCurrentLocationAndUnlockBike(
                     fusedLocationProviderClient = fusedLocationProviderClient,
                     qrCode = qrCode,
@@ -702,7 +851,6 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 )
             } else {
                 Log.w("MapTab", "Location permission not granted")
-                Log.e("MapTab", "Location permission is required to unlock bikes")
                 bikeViewModel.resetUnlockStates()
                 showQRScanner = false
             }
@@ -740,71 +888,6 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
 }
 
 @Composable
-fun MapLegendItem(color: Color, label: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(12.dp)
-                .background(color, shape = MaterialTheme.shapes.small)
-        )
-        Spacer(modifier = Modifier.width(4.dp))
-        Text(
-            text = label,
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-// OPTIMIZED: Enhanced location retrieval with better error handling and coroutine optimization
-@SuppressLint("MissingPermission")
-private suspend fun getCurrentLocationSuspend(fusedLocationProviderClient: FusedLocationProviderClient?): LatLng {
-    return withContext(Dispatchers.IO) {
-        try {
-            if (fusedLocationProviderClient == null) {
-                Log.w("MapTab", "Location provider is null, using default coordinates")
-                return@withContext LatLng(14.5890, 120.9760) // Default coordinates for Philippines
-            }
-
-            val location = fusedLocationProviderClient.lastLocation.await()
-            if (location != null) {
-                Log.d("MapTab", "Location obtained: ${location.latitude}, ${location.longitude}")
-                LatLng(location.latitude, location.longitude)
-            } else {
-                Log.w("MapTab", "Last known location is null, using default coordinates")
-                LatLng(14.5890, 120.9760)
-            }
-        } catch (e: SecurityException) {
-            Log.e("MapTab", "Location permission denied: ${e.message}")
-            LatLng(14.5890, 120.9760)
-        } catch (e: Exception) {
-            Log.e("MapTab", "Error getting location: ${e.message}")
-            LatLng(14.5890, 120.9760)
-        }
-    }
-}
-
-// OPTIMIZED: Simplified location-based bike unlock with improved coroutine scope
-private fun getCurrentLocationAndUnlockBike(
-    fusedLocationProviderClient: FusedLocationProviderClient,
-    qrCode: String,
-    bikeViewModel: BikeViewModel
-) {
-    // Use proper coroutine scope instead of GlobalScope
-    CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
-        try {
-            val location = getCurrentLocationSuspend(fusedLocationProviderClient)
-            bikeViewModel.validateQRCodeAndUnlockBike(qrCode, location)
-        } catch (e: Exception) {
-            Log.e("MapTab", "Error getting location for bike unlock", e)
-            bikeViewModel.resetUnlockStates()
-        }
-    }
-}
-
-@Composable
 private fun RideStatCard(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
@@ -821,7 +904,7 @@ private fun RideStatCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
@@ -829,7 +912,7 @@ private fun RideStatCard(
                 imageVector = icon,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(14.dp)
             )
             
             Text(
@@ -837,7 +920,7 @@ private fun RideStatCard(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                fontSize = 13.sp
+                fontSize = 11.sp
             )
             
             Text(
@@ -845,7 +928,7 @@ private fun RideStatCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                fontSize = 10.sp
+                fontSize = 9.sp
             )
         }
     }
@@ -858,7 +941,7 @@ private fun formatDuration(startTime: Long): String {
     LaunchedEffect(Unit) {
         while (true) {
             currentTime = System.currentTimeMillis()
-            delay(1000) // Update every second
+            delay(1000)
         }
     }
     
@@ -887,6 +970,51 @@ private fun formatSpeed(speedInMps: Float): String {
     return "${speedKmh.roundToInt()} km/h"
 }
 
+// Enhanced location retrieval with better error handling
+@SuppressLint("MissingPermission")
+private suspend fun getCurrentLocationSuspend(fusedLocationProviderClient: FusedLocationProviderClient?): LatLng {
+    return withContext(Dispatchers.IO) {
+        try {
+            if (fusedLocationProviderClient == null) {
+                Log.w("MapTab", "Location provider is null, using default coordinates")
+                return@withContext LatLng(14.5890, 120.9760)
+            }
+
+            val location = fusedLocationProviderClient.lastLocation.await()
+            if (location != null) {
+                Log.d("MapTab", "Location obtained: ${location.latitude}, ${location.longitude}")
+                LatLng(location.latitude, location.longitude)
+            } else {
+                Log.w("MapTab", "Last known location is null, using default coordinates")
+                LatLng(14.5890, 120.9760)
+            }
+        } catch (e: SecurityException) {
+            Log.e("MapTab", "Location permission denied: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        } catch (e: Exception) {
+            Log.e("MapTab", "Error getting location: ${e.message}")
+            LatLng(14.5890, 120.9760)
+        }
+    }
+}
+
+// Location-based bike unlock
+private fun getCurrentLocationAndUnlockBike(
+    fusedLocationProviderClient: FusedLocationProviderClient,
+    qrCode: String,
+    bikeViewModel: BikeViewModel
+) {
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+        try {
+            val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+            bikeViewModel.validateQRCodeAndUnlockBike(qrCode, location)
+        } catch (e: Exception) {
+            Log.e("MapTab", "Error getting location for bike unlock", e)
+            bikeViewModel.resetUnlockStates()
+        }
+    }
+}
+
 // Function to end the current ride
 private fun endCurrentRide(
     fusedLocationProviderClient: FusedLocationProviderClient,
@@ -898,8 +1026,39 @@ private fun endCurrentRide(
             bikeViewModel.endRideWithTracking(location)
         } catch (e: Exception) {
             Log.e("MapTab", "Error getting location for ending ride", e)
-            // End ride with last known location or default
             bikeViewModel.endRideWithTracking(LatLng(14.5890, 120.9760))
+        }
+    }
+}
+
+// Enhanced emergency handling
+private fun handleEmergency(
+    context: android.content.Context,
+    emergencyType: String,
+    bikeViewModel: BikeViewModel,
+    fusedLocationProviderClient: FusedLocationProviderClient
+) {
+    CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+        try {
+            val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+            
+            // Send emergency alert with location
+            bikeViewModel.sendEmergencyAlert(emergencyType, location)
+            
+            // Also trigger system emergency if needed
+            when (emergencyType) {
+                "Medical Emergency", "Accident" -> {
+                    // Consider launching emergency dialer
+                    val intent = Intent(Intent.ACTION_DIAL).apply {
+                        data = Uri.parse("tel:911") // or local emergency number
+                    }
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    context.startActivity(intent)
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e("MapTab", "Error handling emergency", e)
         }
     }
 } 

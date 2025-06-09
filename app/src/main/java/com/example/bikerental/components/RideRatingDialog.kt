@@ -2,6 +2,8 @@ package com.example.bikerental.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -38,8 +40,8 @@ fun RideRatingDialog(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(16.dp),
+                    .padding(12.dp),
+                shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -71,26 +73,27 @@ private fun RideRatingContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(24.dp),
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Header
+        // Header - Smaller
         Icon(
             imageVector = Icons.Default.CheckCircle,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(48.dp)
+            modifier = Modifier.size(32.dp)
         )
         
         Text(
             text = "Ride Completed!",
-            style = MaterialTheme.typography.headlineSmall,
+            fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
         
-        // Ride Summary
+        // Ride Summary - More compact
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -100,12 +103,12 @@ private fun RideRatingContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
                     text = "Ride Summary",
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 
@@ -113,10 +116,11 @@ private fun RideRatingContent(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Duration:")
+                    Text("Duration:", fontSize = 12.sp)
                     Text(
                         text = formatDuration(rideDuration),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp
                     )
                 }
                 
@@ -124,10 +128,11 @@ private fun RideRatingContent(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Distance:")
+                    Text("Distance:", fontSize = 12.sp)
                     Text(
                         text = formatDistance(distanceTraveled),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp
                     )
                 }
                 
@@ -135,11 +140,12 @@ private fun RideRatingContent(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("Total Cost:")
+                    Text("Total Cost:", fontSize = 12.sp)
                     Text(
                         text = "₱${String.format("%.2f", totalCost)}",
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -148,24 +154,24 @@ private fun RideRatingContent(
         // Rating Section
         Text(
             text = "How was your ride?",
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold
         )
         
-        // Star Rating
+        // Star Rating - Smaller
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             repeat(5) { index ->
                 IconButton(
                     onClick = { selectedRating = index + 1 },
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         imageVector = if (index < selectedRating) Icons.Default.Star else Icons.Default.StarBorder,
                         contentDescription = "Star ${index + 1}",
                         tint = if (index < selectedRating) Color(0xFFFFD700) else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -182,37 +188,40 @@ private fun RideRatingContent(
                     5 -> "Excellent"
                     else -> ""
                 },
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Medium
             )
         }
         
-        // Feedback TextField
+        // Feedback TextField - More compact
         OutlinedTextField(
             value = feedback,
             onValueChange = { feedback = it },
-            label = { Text("Additional feedback (optional)") },
-            placeholder = { Text("Tell us about your experience...") },
+            label = { Text("Feedback (optional)", fontSize = 12.sp) },
+            placeholder = { Text("Tell us about your experience...", fontSize = 12.sp) },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp),
-            maxLines = 3,
-            shape = RoundedCornerShape(12.dp)
+                .height(80.dp),
+            maxLines = 2,
+            shape = RoundedCornerShape(8.dp),
+            textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
         )
         
-        // Action Buttons
+        // Action Buttons - More compact
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Skip Button
             OutlinedButton(
                 onClick = onDismiss,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp),
                 enabled = !isSubmitting
             ) {
-                Text("Skip")
+                Text("Skip", fontSize = 14.sp)
             }
             
             // Submit Button
@@ -223,17 +232,19 @@ private fun RideRatingContent(
                         onRatingSubmit(selectedRating, feedback)
                     }
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp),
                 enabled = selectedRating > 0 && !isSubmitting
             ) {
                 if (isSubmitting) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 1.5.dp,
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                 } else {
-                    Text("Submit")
+                    Text("Submit", fontSize = 14.sp)
                 }
             }
         }
