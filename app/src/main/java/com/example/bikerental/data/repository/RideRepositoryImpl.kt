@@ -6,6 +6,7 @@ import com.example.bikerental.models.BikeLocation
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -95,9 +96,45 @@ class RideRepositoryImpl @Inject constructor(
                 "status" to "completed",
                 "updatedAt" to endTime
             )
-            updateRide(rideId, updates)
+            
+            // Update Firestore
+            val result = updateRide(rideId, updates)
+            
+            // Clean up real-time tracking data
+            if (result.isSuccess) {
+                cleanupRealTimeTrackingData(rideId)
+            }
+            
+            result
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+    
+    /**
+     * Clean up real-time tracking data when ride ends
+     */
+    private suspend fun cleanupRealTimeTrackingData(rideId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        
+        try {
+            val realtimeDb = FirebaseDatabase.getInstance()
+            
+            // Remove from active rides
+            realtimeDb.getReference("activeRides")
+                .child(userId)
+                .removeValue()
+                .await()
+            
+            // Remove from live location tracking
+            realtimeDb.getReference("liveLocation")
+                .child(userId)
+                .removeValue()
+                .await()
+                
+        } catch (e: Exception) {
+            // Log error but don't fail the ride completion
+            println("Error cleaning up real-time data: ${e.message}")
         }
     }
 

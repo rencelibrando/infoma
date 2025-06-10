@@ -65,18 +65,19 @@ fun SOSDialog(
                         textAlign = TextAlign.Center
                     )
                     
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     
-                    // Description - More compact
+                    // Description - More compact with better spacing
                     Text(
                         text = "Select emergency type. Location will be sent to emergency services.",
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                         textAlign = TextAlign.Center,
-                        lineHeight = 16.sp
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     
                     // Emergency type selection
                     var selectedEmergency by remember { mutableStateOf("") }
@@ -90,7 +91,7 @@ fun SOSDialog(
                     )
                     
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         emergencyTypes.forEach { emergency ->
                             EmergencyOptionCard(
@@ -101,7 +102,7 @@ fun SOSDialog(
                         }
                     }
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     
                     // Buttons - More compact
                     Row(
@@ -113,7 +114,7 @@ fun SOSDialog(
                             onClick = onDismiss,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(36.dp),
+                                .height(40.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
@@ -132,7 +133,7 @@ fun SOSDialog(
                             },
                             modifier = Modifier
                                 .weight(1f)
-                                .height(36.dp),
+                                .height(40.dp),
                             shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color.Red
@@ -148,15 +149,16 @@ fun SOSDialog(
                         }
                     }
                     
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     
-                    // Warning text - Smaller
+                    // Warning text - Better spacing and readability
                     Text(
                         text = "⚠️ Only use for real emergencies. False alarms may result in account suspension.",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         textAlign = TextAlign.Center,
-                        lineHeight = 12.sp
+                        lineHeight = 14.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
             }
@@ -196,37 +198,42 @@ private fun EmergencyOptionCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(10.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
                 imageVector = emergencyType.icon,
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
                 tint = if (isSelected) Color.Red else MaterialTheme.colorScheme.onSurface
             )
             
             Column(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
                     text = emergencyType.type,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isSelected) Color.Red else MaterialTheme.colorScheme.onSurface
+                    color = if (isSelected) Color.Red else MaterialTheme.colorScheme.onSurface,
+                    lineHeight = 16.sp,
+                    maxLines = 2
                 )
                 Text(
                     text = emergencyType.description,
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    lineHeight = 14.sp,
+                    maxLines = 2
                 )
             }
             
             RadioButton(
                 selected = isSelected,
                 onClick = onSelect,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(18.dp),
                 colors = RadioButtonDefaults.colors(
                     selectedColor = Color.Red
                 )

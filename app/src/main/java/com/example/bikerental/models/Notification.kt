@@ -34,16 +34,10 @@ data class Notification(
     val priority: NotificationPriority = NotificationPriority.NORMAL
 ) {
     constructor() : this(
-        id = "",
-        userId = "",
+
         type = NotificationType.GENERAL,
-        title = "",
-        message = "",
-        actionText = "",
         actionData = emptyMap(),
         timestamp = Timestamp.now(),
-        isRead = false,
-        isActionable = true,
         priority = NotificationPriority.NORMAL
     )
     

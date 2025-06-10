@@ -79,7 +79,7 @@ dependencies {
     implementation libs.hilt.android
     kapt libs.hilt.android.compiler
     implementation libs.androidx.hilt.navigation.compose
-    // Google Maps
+    // Google Maps - Enhanced with modern APIs
     implementation libs.play.services.maps.v1910
     implementation libs.places
     implementation libs.maps.ktx
@@ -89,6 +89,10 @@ dependencies {
     implementation libs.android.maps.utils
     implementation libs.slf4j.simple
     implementation libs.play.services.location.v2130
+    
+    // Standard Google Maps APIs (publicly available)
+    implementation 'com.google.maps:google-maps-services:2.2.0'
+    implementation 'com.google.maps.android:android-maps-utils:3.4.0'
     implementation libs.material.icons.extended
     implementation libs.androidx.material.v154
     // Remove Google Sign-In

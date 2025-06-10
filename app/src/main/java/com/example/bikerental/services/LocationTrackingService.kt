@@ -15,11 +15,13 @@ import androidx.core.app.NotificationCompat
 import com.example.bikerental.R
 import com.example.bikerental.models.BikeLocation
 import com.example.bikerental.utils.LogManager
+import com.example.bikerental.utils.DistanceCalculationUtils
 import com.google.android.gms.location.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import java.util.*
 
 /**
@@ -183,6 +185,9 @@ class LocationTrackingService : Service() {
                 lastLocation?.let { location ->
                     sendLocationUpdate(location, rideId, isActive = false)
                 }
+                
+                // Ensure complete cleanup of real-time data
+                cleanupRealTimeData(rideId)
             }
         }
         
@@ -194,27 +199,75 @@ class LocationTrackingService : Service() {
         currentSpeed = 0f
         rideStartTime = 0L
         locationCount = 0
+        currentRideId = null
         
         stopForeground(true)
         stopSelf()
     }
     
+    /**
+     * Cleanup all real-time tracking data when ride ends
+     */
+    private suspend fun cleanupRealTimeData(rideId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val realtimeDb = FirebaseDatabase.getInstance()
+        
+        try {
+            // Remove from active rides
+            realtimeDb.getReference("activeRides")
+                .child(userId)
+                .removeValue()
+                .await()
+            
+            // Remove live location tracking
+            realtimeDb.getReference("liveLocation")
+                .child(userId)
+                .removeValue()
+                .await()
+            
+            LogManager.logInfo("LocationTrackingService", "Real-time data cleanup completed for ride: $rideId")
+        } catch (e: Exception) {
+            LogManager.logError("LocationTrackingService", "Error during real-time data cleanup: ${e.message}")
+        }
+    }
+    
     private fun handleLocationUpdate(location: Location) {
-        // Calculate ride statistics
+        // Calculate ride statistics with GPS noise filtering using centralized utility
         lastLocation?.let { previousLocation ->
-            val distance = FloatArray(1)
-            Location.distanceBetween(
+            val distanceMeters = DistanceCalculationUtils.calculateDistance(
                 previousLocation.latitude, previousLocation.longitude,
-                location.latitude, location.longitude,
-                distance
+                location.latitude, location.longitude
             )
-            totalDistance += distance[0] // Add distance in meters
+            
+            // Filter out unrealistic GPS jumps
+            val timeDiffMs = location.time - previousLocation.time
+            if (timeDiffMs > 0) {
+                val timeDiffHours = timeDiffMs / 3600000.0 // Convert to hours
+                val calculatedSpeed = (distanceMeters / 1000.0) / timeDiffHours // km/h
+                
+                // Only add distance if calculated speed is realistic (< 100 km/h for bikes)
+                if (calculatedSpeed < 100.0) {
+                    totalDistance += distanceMeters // Add distance in meters
+                } else {
+                    LogManager.logWarning("LocationTrackingService", "Filtering unrealistic GPS jump: ${String.format("%.2f", calculatedSpeed)} km/h")
+                }
+            } else {
+                // If no time difference, add distance anyway (could be same timestamp)
+                totalDistance += distanceMeters
+            }
         }
         
-        // Update speed statistics
-        currentSpeed = location.speed * 3.6f // Convert m/s to km/h
-        if (currentSpeed > maxSpeed) {
-            maxSpeed = currentSpeed
+        // Update speed statistics with validation
+        val rawSpeed = if (location.hasSpeed()) location.speed else 0f
+        currentSpeed = rawSpeed * 3.6f // Convert m/s to km/h
+        
+        // Filter unrealistic speeds and update max
+        if (currentSpeed > 0 && currentSpeed < 100) {
+            if (currentSpeed > maxSpeed) {
+                maxSpeed = currentSpeed
+            }
+        } else {
+            currentSpeed = 0f // Reset to 0 if unrealistic
         }
         
         lastLocation = location

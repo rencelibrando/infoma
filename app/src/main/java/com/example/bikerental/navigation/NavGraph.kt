@@ -1,11 +1,7 @@
 package com.example.bikerental.navigation
-
-import androidx.compose.runtime.Composable
-import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
-import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.example.bikerental.screens.BikeDetailScreen
@@ -15,22 +11,7 @@ import com.example.bikerental.screens.tabs.MapTab
 import com.example.bikerental.screens.tabs.ProfileScreen
 import com.example.bikerental.screens.tabs.RideHistoryTab
 import com.google.android.gms.location.FusedLocationProviderClient
-import com.example.bikerental.viewmodels.AuthViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
-
-@Composable
-fun NavGraph(
-    navController: NavHostController,
-    startDestination: String,
-    fusedLocationProviderClient: FusedLocationProviderClient? = null
-) {
-    NavHost(
-        navController = navController,
-        startDestination = startDestination
-    ) {
-        setUpHomeNavGraph(navController, fusedLocationProviderClient)
-    }
-}
 
 fun NavGraphBuilder.setUpHomeNavGraph(
     navController: NavHostController,

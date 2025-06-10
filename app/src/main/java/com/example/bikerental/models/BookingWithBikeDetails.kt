@@ -27,27 +27,6 @@ data class BookingWithBikeDetails(
     val isHourly: Boolean = false
 ) {
     /**
-     * Secondary constructor that accepts Booking and Bike objects
-     */
-    constructor(booking: Booking, bike: Bike) : this(
-        id = booking.id,
-        userId = booking.userId,
-        userName = booking.userName,
-        bikeId = booking.bikeId,
-        startDate = booking.startDate,
-        endDate = booking.endDate,
-        status = booking.status.name,
-        totalPrice = booking.totalPrice.toString(),
-        createdAt = booking.createdAt,
-        bikeName = bike.name,
-        bikeType = bike.type,
-        bikeImageUrl = bike.imageUrl,
-        location = "${bike.latitude},${bike.longitude}",
-        bikePricePerHour = bike.priceValue,
-        isHourly = booking.isHourly
-    )
-    
-    /**
      * Secondary constructor that accepts Booking and specific bike details
      */
     constructor(
@@ -108,26 +87,7 @@ data class BookingWithBikeDetails(
         
         return "$startTimeStr - $endTimeStr"
     }
-    
-    /**
-     * Get a formatted date string for the booking creation date
-     */
-    fun getFormattedCreationDate(): String {
-        val date = Date(createdAt)
-        val format = java.text.SimpleDateFormat("MMM dd, yyyy 'at' h:mm a", Locale.getDefault())
-        return format.format(date)
-    }
-    
-    /**
-     * Get a formatted date range string for the booking period
-     */
-    fun getFormattedBookingPeriod(): String {
-        val dateFormat = java.text.SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
-        val startStr = dateFormat.format(Date(startDate))
-        val endStr = dateFormat.format(Date(endDate))
-        return "$startStr to $endStr"
-    }
-    
+
     /**
      * Get formatted hourly rate of the bike
      */

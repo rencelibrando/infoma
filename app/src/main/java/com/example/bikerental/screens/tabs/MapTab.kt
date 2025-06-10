@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -106,7 +107,6 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
-import com.example.bikerental.BuildConfig
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -116,6 +116,10 @@ import kotlin.math.atan2
 import kotlin.math.sqrt
 import android.content.Intent
 import android.net.Uri
+import com.example.bikerental.utils.FormattingUtils.formatDistance
+import com.example.bikerental.utils.FormattingUtils.formatDuration
+import com.example.bikerental.utils.FormattingUtils
+import com.example.bikerental.utils.RideMetricsUtils.formatSpeed
 
 // Singleton HTTP client for better performance
 private val httpClient: OkHttpClient by lazy {
@@ -170,6 +174,16 @@ suspend fun decodePoly(encoded: String): List<LatLng> = withContext(Dispatchers.
 fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     val context = LocalContext.current
     rememberScrollState()
+    
+    // SharedPreferences for ride session persistence
+    val prefs = remember { 
+        context.getSharedPreferences("ride_session", android.content.Context.MODE_PRIVATE) 
+    }
+    
+    // SharedPreferences for camera state persistence
+    val cameraPrefs = remember {
+        context.getSharedPreferences("camera_state", android.content.Context.MODE_PRIVATE)
+    }
     
     // Create optimized coroutine scopes with proper lifecycle management
     val backgroundScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
@@ -238,34 +252,157 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     val userBearing by bikeViewModel.userBearing.collectAsState()
     val currentLocation by bikeViewModel.currentLocation.collectAsState()
     
-    // POV Navigation states
-    var isPOVMode by remember { mutableStateOf(false) }
+    // POV Navigation states with SharedPreferences persistence
+    var isPOVMode by remember { mutableStateOf(prefs.getBoolean("isPOVMode", false)) }
     var showRouteOverview by remember { mutableStateOf(false) }
+    var isRideResumed by remember { mutableStateOf(false) }
+    var isRestoringCamera by remember { mutableStateOf(false) }
     
-    // Auto-enable POV mode when ride starts
-    LaunchedEffect(activeRide) {
-        if (activeRide != null) {
-            isPOVMode = true
-        } else {
-            isPOVMode = false
-            showRouteOverview = false
+    // Persistent camera state for POV restoration
+    var lastKnownPOVLocation: LatLng? by remember { 
+        mutableStateOf(
+            if (cameraPrefs.contains("last_lat") && cameraPrefs.contains("last_lng")) {
+                LatLng(
+                    cameraPrefs.getFloat("last_lat", 0f).toDouble(),
+                    cameraPrefs.getFloat("last_lng", 0f).toDouble()
+                )
+            } else null
+        )
+    }
+    var lastKnownBearing by remember { mutableStateOf(cameraPrefs.getFloat("last_bearing", 0f)) }
+    var lastKnownZoom by remember { mutableStateOf(cameraPrefs.getFloat("last_zoom", 19f)) }
+    var lastKnownTilt by remember { mutableStateOf(cameraPrefs.getFloat("last_tilt", 60f)) }
+    
+    // Function to save camera state for POV restoration
+    val saveCameraState = remember {
+        { location: LatLng, bearing: Float, zoom: Float, tilt: Float ->
+            cameraPrefs.edit().apply {
+                putFloat("last_lat", location.latitude.toFloat())
+                putFloat("last_lng", location.longitude.toFloat())
+                putFloat("last_bearing", bearing)
+                putFloat("last_zoom", zoom)
+                putFloat("last_tilt", tilt)
+                apply()
+            }
+            lastKnownPOVLocation = location
+            lastKnownBearing = bearing
+            lastKnownZoom = zoom
+            lastKnownTilt = tilt
         }
     }
     
-    // Update camera position for POV mode
-    LaunchedEffect(currentLocation, userBearing, isPOVMode) {
+    // Function to clear camera state when ride ends
+    val clearCameraState = remember {
+        {
+            cameraPrefs.edit().clear().apply()
+            lastKnownPOVLocation = null
+            lastKnownBearing = 0f
+            lastKnownZoom = 19f
+            lastKnownTilt = 60f
+        }
+    }
+    
+    // ENHANCED: Auto-enable POV mode when ride starts OR is resumed
+    LaunchedEffect(activeRide) {
+        val currentRide = activeRide
+        if (currentRide != null) {
+            Log.d("MapTab", "Active ride detected: ${currentRide.id}")
+            val wasAlreadyInPOV = prefs.getBoolean("isPOVMode", false)
+            isPOVMode = true
+            isRideResumed = !wasAlreadyInPOV // Only mark as resumed if POV wasn't already enabled
+            
+            // Save POV state to SharedPreferences
+            prefs.edit().putBoolean("isPOVMode", true).apply()
+            
+            // Start location tracking if ride is active
+            bikeViewModel.startLocationTracking()
+            
+            // If resuming ride and we have saved camera state, restore it immediately
+            if (isRideResumed && lastKnownPOVLocation != null) {
+                Log.d("MapTab", "Resuming ride - restoring camera state to saved position")
+                isRestoringCamera = true
+                
+                val restoredPosition = CameraPosition.Builder()
+                    .target(lastKnownPOVLocation!!)
+                    .zoom(lastKnownZoom)
+                    .bearing(lastKnownBearing)
+                    .tilt(lastKnownTilt)
+                    .build()
+                
+                withContext(Dispatchers.Main) {
+                    try {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newCameraPosition(restoredPosition),
+                            durationMs = 2500 // Slightly longer animation for smooth restoration
+                        )
+                        Log.d("MapTab", "Camera state restored successfully")
+                        
+                        // Brief delay before allowing normal updates
+                        delay(2500)
+                        isRestoringCamera = false
+                    } catch (e: Exception) {
+                        Log.e("MapTab", "Error restoring camera state", e)
+                        isRestoringCamera = false
+                    }
+                }
+            }
+            
+            Log.d("MapTab", "POV mode enabled and location tracking started")
+        } else {
+            isPOVMode = false
+            showRouteOverview = false
+            isRideResumed = false
+            isRestoringCamera = false
+            
+            // Clear POV state and camera state when ride ends
+            prefs.edit().putBoolean("isPOVMode", false).apply()
+            clearCameraState()
+            
+            Log.d("MapTab", "No active ride - POV mode disabled and camera state cleared")
+        }
+    }
+    
+    // ENHANCED: Update camera position for POV mode with better handling and state persistence
+    LaunchedEffect(currentLocation, userBearing, isPOVMode, isRideResumed, isRestoringCamera) {
+        // Skip updates during camera restoration to avoid conflicts
+        if (isRestoringCamera) {
+            Log.d("MapTab", "Skipping camera update during restoration")
+            return@LaunchedEffect
+        }
+        
         if (isPOVMode && currentLocation != null && activeRide != null) {
+            val newZoom = 19f
+            val newTilt = 60f
+            
             val newPosition = CameraPosition.Builder()
                 .target(currentLocation!!)
-                .zoom(19f) // Close zoom for navigation
+                .zoom(newZoom) // Close zoom for navigation
                 .bearing(userBearing) // Follow user's heading
-                .tilt(60f) // Tilted view for POV effect
+                .tilt(newTilt) // Tilted view for POV effect
                 .build()
             
-            cameraPositionState.animate(
-                CameraUpdateFactory.newCameraPosition(newPosition),
-                durationMs = 1000
-            )
+            // Ensure we're on main thread for Google Maps API
+            withContext(Dispatchers.Main) {
+                try {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newCameraPosition(newPosition),
+                        durationMs = if (isRideResumed) 2000 else 1000 // Slower animation on resume
+                    )
+                    
+                    // Save current camera state for persistence
+                    saveCameraState(currentLocation!!, userBearing, newZoom, newTilt)
+                    
+                    if (isRideResumed) {
+                        Log.d("MapTab", "Camera position updated after ride resume")
+                        // Reset the flag after first position update
+                        isRideResumed = false
+                    }else{
+                        Log.d("MapTab", "Camera position updated")
+                    }
+                } catch (e: Exception) {
+                    Log.e("MapTab", "Error animating camera to POV position", e)
+                }
+            }
         }
     }
     
@@ -294,13 +431,44 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
             try {
                 val location = getCurrentLocationSuspend(fusedLocationProviderClient)
                 if (!isPOVMode) {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLngZoom(location, 15f),
-                        durationMs = 1000
-                    )
+                    // Fix: Ensure we're on main thread for Google Maps API
+                    withContext(Dispatchers.Main) {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(location, 15f),
+                            durationMs = 1000
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("MapTab", "Error getting location", e)
+            }
+        }
+    }
+    
+    // Fallback restoration: If we have saved POV state but no current location yet
+    LaunchedEffect(hasLocationPermission, isPOVMode, activeRide) {
+        if (hasLocationPermission && isPOVMode && activeRide != null && 
+            currentLocation == null && lastKnownPOVLocation != null && !isRestoringCamera) {
+            
+            Log.d("MapTab", "Fallback restoration: Using saved location while waiting for GPS")
+            
+            val fallbackPosition = CameraPosition.Builder()
+                .target(lastKnownPOVLocation!!)
+                .zoom(lastKnownZoom)
+                .bearing(lastKnownBearing)
+                .tilt(lastKnownTilt)
+                .build()
+            
+            withContext(Dispatchers.Main) {
+                try {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newCameraPosition(fallbackPosition),
+                        durationMs = 1500
+                    )
+                    Log.d("MapTab", "Fallback camera position applied successfully")
+                } catch (e: Exception) {
+                    Log.e("MapTab", "Error applying fallback camera position", e)
+                }
             }
         }
     }
@@ -385,7 +553,16 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 ) {
                     // POV Toggle
                     FloatingActionButton(
-                        onClick = { isPOVMode = !isPOVMode },
+                        onClick = { 
+                            isPOVMode = !isPOVMode
+                            // Save POV state to SharedPreferences
+                            prefs.edit().putBoolean("isPOVMode", isPOVMode).apply()
+                            
+                            // Clear camera state if exiting POV mode
+                            if (!isPOVMode) {
+                                clearCameraState()
+                            }
+                        },
                         modifier = Modifier.size(48.dp),
                         containerColor = if (isPOVMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
                     ) {
@@ -401,12 +578,18 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                         onClick = {
                             currentLocation?.let { location ->
                                 val newPosition = if (isPOVMode) {
-                                    CameraPosition.Builder()
+                                    val newZoom = 19f
+                                    val newTilt = 60f
+                                    val position = CameraPosition.Builder()
                                         .target(location)
-                                        .zoom(19f)
+                                        .zoom(newZoom)
                                         .bearing(userBearing)
-                                        .tilt(60f)
+                                        .tilt(newTilt)
                                         .build()
+                                    
+                                    // Save camera state when manually centering in POV mode
+                                    saveCameraState(location, userBearing, newZoom, newTilt)
+                                    position
                                 } else {
                                     CameraPosition.fromLatLngZoom(location, 15f)
                                 }
@@ -498,9 +681,9 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                 )
                                 if (isPOVMode) {
                                     Text(
-                                        text = "Navigation Mode",
+                                        text = if (isRestoringCamera) "Restoring Navigation..." else "Navigation Mode",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.secondary,
+                                        color = if (isRestoringCamera) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -536,7 +719,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                             RideStatCard(
                                 icon = Icons.Default.Timer,
                                 label = "Duration",
-                                value = formatDuration(activeRideStartTime),
+                                value = FormattingUtils.formatDurationFromStart(activeRideStartTime),
                                 modifier = Modifier.weight(1f)
                             )
                             
@@ -580,26 +763,32 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                             Button(
                                 onClick = { showSOSDialog = true },
                                 modifier = Modifier
-                                    .weight(0.3f)
-                                    .height(44.dp),
+                                    .weight(0.35f)
+                                    .height(48.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Color.Red
                                 ),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = Color.White
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "SOS",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "SOS",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
                             }
                             
                             // End Ride Button (larger)
@@ -610,26 +799,32 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                     }
                                 },
                                 modifier = Modifier
-                                    .weight(0.7f)
-                                    .height(44.dp),
+                                    .weight(0.65f)
+                                    .height(48.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.error
                                 ),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Stop,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = Color.White
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "End Ride",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Stop,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "End Ride",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
@@ -734,6 +929,91 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 12.sp
                             )
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Emergency State Feedback
+        val emergencyState by bikeViewModel.emergencyState.collectAsState()
+        emergencyState?.let { state ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(12.dp)
+                    .fillMaxWidth()
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = when {
+                            state.contains("success") -> MaterialTheme.colorScheme.primaryContainer
+                            state.contains("Failed") -> MaterialTheme.colorScheme.errorContainer
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = when {
+                                state.contains("success") -> "🚨 Emergency Alert Sent"
+                                state.contains("Sending") -> "📡 Sending Emergency Alert..."
+                                state.contains("Failed") -> "❌ Emergency Alert Failed"
+                                else -> "🚨 Emergency Alert"
+                            },
+                            color = when {
+                                state.contains("success") -> MaterialTheme.colorScheme.onPrimaryContainer
+                                state.contains("Failed") -> MaterialTheme.colorScheme.onErrorContainer
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = when {
+                                state.contains("success") -> "Emergency services have been notified with your location"
+                                state.contains("Sending") -> "Sending your location to emergency services..."
+                                state.contains("Failed") -> "Failed to send emergency alert. Please try again."
+                                else -> state
+                            },
+                            color = when {
+                                state.contains("success") -> MaterialTheme.colorScheme.onPrimaryContainer
+                                state.contains("Failed") -> MaterialTheme.colorScheme.onErrorContainer
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        
+                        if (state.contains("success") || state.contains("Failed")) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { 
+                                    // Emergency state auto-clears, but button provides user acknowledgment
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = when {
+                                        state.contains("success") -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.error
+                                    }
+                                ),
+                                modifier = Modifier.height(32.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    "OK",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -945,7 +1225,18 @@ private fun formatDuration(startTime: Long): String {
         }
     }
     
+    // Validate startTime to prevent invalid duration calculations
+    if (startTime <= 0 || startTime > currentTime) {
+        return "00:00"
+    }
+    
     val duration = currentTime - startTime
+    
+    // Handle negative or excessively large durations
+    if (duration < 0 || duration > TimeUnit.DAYS.toMillis(1)) {
+        return "00:00"
+    }
+    
     val hours = TimeUnit.MILLISECONDS.toHours(duration)
     val minutes = TimeUnit.MILLISECONDS.toMinutes(duration) % 60
     val seconds = TimeUnit.MILLISECONDS.toSeconds(duration) % 60
@@ -1061,4 +1352,5 @@ private fun handleEmergency(
             Log.e("MapTab", "Error handling emergency", e)
         }
     }
-} 
+}
+

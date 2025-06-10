@@ -25,21 +25,6 @@ import com.example.bikerental.navigation.NavigationUtils
 
 @Composable
 fun GearTickLoginScreen(navController: NavHostController) {
-    // Create safe navigation functions
-    val safeNavigate = remember(navController) {
-        { route: String ->
-            try {
-                // Check if the NavController is ready
-                if (navController.graph.route != null) {
-                    navController.navigate(route)
-                } else {
-                    Log.w("GearTickLoginScreen", "Navigation attempted before graph was ready")
-                }
-            } catch (e: Exception) {
-                Log.e("GearTickLoginScreen", "Navigation error: ${e.message}")
-            }
-        }
-    }
 
     Box(
         modifier = Modifier

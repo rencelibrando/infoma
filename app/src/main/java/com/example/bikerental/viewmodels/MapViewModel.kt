@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bikerental.models.Bike
 import com.example.bikerental.domain.repository.BikeRepository
+import com.example.bikerental.utils.DistanceCalculationUtils
 import com.google.android.gms.maps.model.LatLng
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -166,17 +167,11 @@ class MapViewModel @Inject constructor(
         }
     }
 
-    // Optimized distance calculation with caching
+    // Optimized distance calculation with caching - using centralized utility
     private fun calculateDistance(start: LatLng, end: LatLng): Float {
         val key = "${start.latitude},${start.longitude}-${end.latitude},${end.longitude}"
         return _distanceCache.getOrPut(key) {
-            val results = FloatArray(1)
-            Location.distanceBetween(
-                start.latitude, start.longitude,
-                end.latitude, end.longitude,
-                results
-            )
-            results[0]
+            DistanceCalculationUtils.calculateDistance(start, end)
         }
     }
 
@@ -241,7 +236,6 @@ class MapViewModel @Inject constructor(
             }
         }
     }
-
     // Get the closest bike to a location
     suspend fun getClosestBike(location: LatLng): Bike? {
         return withContext(Dispatchers.Default) {
@@ -250,7 +244,6 @@ class MapViewModel @Inject constructor(
             }
         }
     }
-
     // Batch bike updates for better performance
     suspend fun updateBikes(bikes: List<Bike>) {
         withContext(Dispatchers.Default) {

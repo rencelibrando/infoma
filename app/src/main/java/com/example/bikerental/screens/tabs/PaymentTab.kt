@@ -118,6 +118,12 @@ fun PaymentTab(
     // State for selected unpaid booking
     val selectedUnpaidBooking by viewModel.selectedUnpaidBooking.collectAsStateWithLifecycle()
     
+    // Get current user info for personalization
+    val currentUser = remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
+    val userName = remember { 
+        currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
+    }
+    
     // Load user payments and unpaid bookings on first composition
     LaunchedEffect(Unit) {
         viewModel.loadUserPayments()
@@ -129,8 +135,18 @@ fun PaymentTab(
             .fillMaxSize()
             .background(PaymentColors.White)
             .verticalScroll(rememberScrollState())
-            .padding(12.dp)
+            .padding(8.dp)
     ) {
+        // Add personalized header
+        if (currentStep == 1 && selectedUnpaidBooking == null) {
+            PersonalizedHeader(
+                userName = userName,
+                unpaidBookingsCount = unpaidBookings.size,
+                hasPaymentHistory = userPayments.isNotEmpty()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+        
         val currentUiState = uiState
         when (currentUiState) {
             is PaymentUiState.Success -> {
@@ -176,6 +192,7 @@ fun PaymentTab(
                     UnpaidBookingsSection(
                         unpaidBookings = unpaidBookings,
                         isLoading = isLoadingUnpaidBookings,
+                        userName = userName,
                         onPayBooking = { booking ->
                             // Pre-fill payment details with booking information
                             viewModel.selectUnpaidBookingForPayment(booking)
@@ -183,43 +200,26 @@ fun PaymentTab(
                         }
                     )
                     
-                    if (unpaidBookings.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        
-                        // Divider between unpaid bookings and new payment
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Divider(
-                                modifier = Modifier.weight(1f),
-                                color = PaymentColors.MediumGray
-                            )
-                            Text(
-                                text = "OR",
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                color = PaymentColors.DarkGray,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Divider(
-                                modifier = Modifier.weight(1f),
-                                color = PaymentColors.MediumGray
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(24.dp))
+                    // Show "No unpaid bookings" message if list is empty and not loading
+                    if (unpaidBookings.isEmpty() && !isLoadingUnpaidBookings) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        NoUnpaidBookingsMessage(userName = userName)
                     }
                 }
                 
                 when (currentStep) {
-                    1 -> PaymentMethodSelection(
-                        onGCashSelected = { viewModel.setCurrentStep(2) },
-                        onCashSelected = { viewModel.setCurrentStep(4) },
-                        selectedBooking = selectedUnpaidBooking,
-                        onBackClick = { viewModel.clearSelectedUnpaidBooking() },
-                        paymentSettings = paymentSettings
-                    )
+                    1 -> {
+                        // Only show payment method selection if there are unpaid bookings or if coming from booking selection
+                        if (selectedUnpaidBooking != null) {
+                            PaymentMethodSelection(
+                                onGCashSelected = { viewModel.setCurrentStep(2) },
+                                onCashSelected = { viewModel.setCurrentStep(4) },
+                                selectedBooking = selectedUnpaidBooking,
+                                onBackClick = { viewModel.clearSelectedUnpaidBooking() },
+                                paymentSettings = paymentSettings
+                            )
+                        }
+                    }
                     2 -> GCashQRCodeScreen(
                         onBackClick = { 
                             viewModel.clearSelectedUnpaidBooking()
@@ -268,10 +268,10 @@ fun PaymentTab(
             }
         }
         
-        // Show payment history if not in payment flow
-        if (currentStep == 1 && currentUiState !is PaymentUiState.Success && currentUiState !is PaymentUiState.Loading) {
+        // Show payment history if not in payment flow and there are no selected bookings
+        if (currentStep == 1 && selectedUnpaidBooking == null && currentUiState !is PaymentUiState.Success && currentUiState !is PaymentUiState.Loading) {
             Spacer(modifier = Modifier.height(16.dp))
-            PaymentHistory(payments = userPayments)
+            PaymentHistory(payments = userPayments, userName = userName)
         }
     }
 }
@@ -289,67 +289,67 @@ fun PaymentMethodSelection(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Choose Payment Method",
-            fontSize = 22.sp,
+            text = "How would you like to pay?",
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             color = PaymentColors.DarkGreen,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 12.dp)
         )
         
-        // Rental Summary - More compact
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = PaymentColors.White),
-            shape = RoundedCornerShape(12.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            border = BorderStroke(1.dp, PaymentColors.MediumGray)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = if (selectedBooking != null) "Payment Summary" else "Rental Summary",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = PaymentColors.DarkGreen,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = selectedBooking?.bikeType ?: "Mountain Bike",
-                            color = PaymentColors.TextGray,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "Duration: ${selectedBooking?.getFormattedDuration() ?: "2 hours"}",
-                            color = PaymentColors.DarkGray,
-                            fontSize = 13.sp
-                        )
-                        if (selectedBooking != null) {
+        // Payment Summary - Only show if there's a selected booking
+        selectedBooking?.let { booking ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = PaymentColors.White),
+                shape = RoundedCornerShape(12.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                border = BorderStroke(1.dp, PaymentColors.MediumGray)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Payment Summary",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = PaymentColors.DarkGreen,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
                             Text(
-                                text = "Booking: ${selectedBooking.bookingId.takeLast(8)}",
+                                text = booking.bikeType,
+                                color = PaymentColors.TextGray,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Duration: ${booking.getFormattedDuration()}",
                                 color = PaymentColors.DarkGray,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(top = 2.dp)
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = "Booking: ${booking.bookingId.takeLast(8)}",
+                                color = PaymentColors.DarkGray,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 1.dp)
                             )
                         }
+                        Text(
+                            text = booking.getFormattedPrice(),
+                            color = PaymentColors.DarkGreen,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                    Text(
-                        text = selectedBooking?.getFormattedPrice() ?: "₱150.00",
-                        color = PaymentColors.DarkGreen,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             }
+            
+            Spacer(modifier = Modifier.height(12.dp))
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
         
         // Payment Options - More compact
         PaymentMethodCard(
@@ -359,7 +359,7 @@ fun PaymentMethodSelection(
             onClick = onGCashSelected
         )
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         
         PaymentMethodCard(
             icon = Icons.Default.CreditCard,
@@ -370,26 +370,26 @@ fun PaymentMethodSelection(
         
         // Add back to bookings button if paying for a specific booking
         if (selectedBooking != null) {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             
             OutlinedButton(
                 onClick = onBackClick,
                 modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(2.dp, PaymentColors.DarkGray),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(vertical = 14.dp)
+                border = BorderStroke(1.dp, PaymentColors.DarkGray),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(vertical = 10.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.ArrowBack,
                     contentDescription = null,
                     tint = PaymentColors.DarkGray,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "Back to Unpaid Bookings",
                     color = PaymentColors.DarkGray,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -416,12 +416,12 @@ fun PaymentMethodCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .background(PaymentColors.DarkGreen, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
@@ -429,29 +429,29 @@ fun PaymentMethodCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = PaymentColors.White,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 16.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = PaymentColors.DarkGreen
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     color = PaymentColors.DarkGray,
-                    lineHeight = 18.sp
+                    lineHeight = 16.sp
                 )
             }
             Icon(
                 imageVector = Icons.Default.ArrowForward,
                 contentDescription = null,
                 tint = PaymentColors.DarkGreen,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -1106,6 +1106,11 @@ fun PaymentSuccessScreen(
     onMakeAnotherPayment: () -> Unit,
     wasBookingPayment: Boolean
 ) {
+    val currentUser = remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
+    val userName = remember { 
+        currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
+    }
+    
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1125,16 +1130,16 @@ fun PaymentSuccessScreen(
         }
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Payment Successful!",
+            text = "Perfect, $userName! 🎉",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = PaymentColors.DarkGreen
         )
         Text(
             text = if (wasBookingPayment) {
-                "Your bike rental has been confirmed. You can now proceed to pick up your bike."
+                "Your payment went through successfully! Your bike is now reserved and ready for pickup. Safe riding! 🚴‍♀️"
             } else {
-                "Payment successful! Your booking details have been sent to your email."
+                "Payment completed! We've sent the confirmation details to your email. Thanks for choosing us! 🚲"
             },
             fontSize = 16.sp,
             color = PaymentColors.DarkGray,
@@ -1167,8 +1172,15 @@ fun PaymentSuccessScreen(
             shape = RoundedCornerShape(16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
+            Icon(
+                imageVector = Icons.Default.Payment,
+                contentDescription = null,
+                tint = PaymentColors.White,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "Make Another Payment",
+                text = "Continue with Payments",
                 color = PaymentColors.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
@@ -1178,22 +1190,41 @@ fun PaymentSuccessScreen(
 }
 
 @Composable
-fun PaymentHistory(payments: List<Payment>) {
+fun PaymentHistory(payments: List<Payment>, userName: String) {
     if (payments.isEmpty()) return
     
     Column {
-        Text(
-            text = "Payment History",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = PaymentColors.DarkGreen,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Your Payment History",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PaymentColors.DarkGreen
+            )
+            
+            Text(
+                text = "${payments.size} ${if (payments.size == 1) "transaction" else "transactions"}",
+                fontSize = 12.sp,
+                color = PaymentColors.DarkGray,
+                modifier = Modifier
+                    .background(
+                        PaymentColors.LightGray,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
         
         // Use LazyColumn for better performance with many items
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.height(240.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.height(200.dp)
         ) {
             items(payments) { payment ->
                 PaymentHistoryCard(payment = payment)
@@ -1211,7 +1242,7 @@ fun PaymentHistoryCard(payment: Payment) {
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         border = BorderStroke(0.5.dp, PaymentColors.MediumGray)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1220,20 +1251,20 @@ fun PaymentHistoryCard(payment: Payment) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = payment.bikeType,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PaymentColors.DarkGreen
                     )
                     Text(
                         text = "Ref: ${payment.referenceNumber}",
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         color = PaymentColors.DarkGray,
                         modifier = Modifier.padding(top = 1.dp)
                     )
                 }
                 PaymentStatusChip(status = payment.status)
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1241,20 +1272,20 @@ fun PaymentHistoryCard(payment: Payment) {
             ) {
                 Text(
                     text = "₱${payment.amount}",
-                    fontSize = 16.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = PaymentColors.DarkGreen
                 )
                 Text(
                     text = payment.duration,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     color = PaymentColors.DarkGray,
                     modifier = Modifier
                         .background(
                             PaymentColors.LightGray,
-                            RoundedCornerShape(6.dp)
+                            RoundedCornerShape(4.dp)
                         )
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 )
             }
         }
@@ -1285,9 +1316,139 @@ fun PaymentStatusChip(status: PaymentStatus) {
 }
 
 @Composable
+fun PersonalizedHeader(
+    userName: String,
+    unpaidBookingsCount: Int,
+    hasPaymentHistory: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = PaymentColors.DarkGreen),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Hi, $userName! 👋",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PaymentColors.White
+                )
+                
+                val statusMessage = when {
+                    unpaidBookingsCount > 0 -> {
+                        "You have $unpaidBookingsCount ${if (unpaidBookingsCount == 1) "booking" else "bookings"} waiting for payment"
+                    }
+                    hasPaymentHistory -> {
+                        "All caught up! Your payments are up to date ✅"
+                    }
+                    else -> {
+                        "Ready to start your cycling adventure?"
+                    }
+                }
+                
+                Text(
+                    text = statusMessage,
+                    fontSize = 14.sp,
+                    color = PaymentColors.White.copy(alpha = 0.9f),
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            
+            // Status indicator
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        color = if (unpaidBookingsCount > 0) PaymentColors.Warning else PaymentColors.Success,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (unpaidBookingsCount > 0) {
+                    Text(
+                        text = unpaidBookingsCount.toString(),
+                        color = PaymentColors.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = PaymentColors.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NoUnpaidBookingsMessage(userName: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = PaymentColors.White),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, PaymentColors.MediumGray)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(PaymentColors.LightGray, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Payment,
+                    contentDescription = null,
+                    tint = PaymentColors.DarkGray,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = "You're all set, $userName! 🎉",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PaymentColors.DarkGreen,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                text = "No pending payments right now. When you make a new booking, you'll see payment options here.",
+                fontSize = 13.sp,
+                color = PaymentColors.DarkGray,
+                textAlign = TextAlign.Center,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun UnpaidBookingsSection(
     unpaidBookings: List<UnpaidBooking>,
     isLoading: Boolean,
+    userName: String,
     onPayBooking: (UnpaidBooking) -> Unit
 ) {
     if (isLoading) {
@@ -1304,23 +1465,30 @@ fun UnpaidBookingsSection(
                     .padding(32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = PaymentColors.DarkGreen,
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 3.dp
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Loading unpaid bookings...",
-                        color = PaymentColors.DarkGray,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            color = PaymentColors.DarkGreen,
+                            modifier = Modifier.size(32.dp),
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Checking your bookings...",
+                            color = PaymentColors.DarkGray,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "This won't take long! 🔍",
+                            color = PaymentColors.DarkGray.copy(alpha = 0.7f),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
             }
         }
         return
@@ -1331,17 +1499,36 @@ fun UnpaidBookingsSection(
     }
     
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Unpaid Bookings",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = PaymentColors.DarkGreen,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Your Pending Payments",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = PaymentColors.DarkGreen
+            )
+            
+            Text(
+                text = "${unpaidBookings.size} ${if (unpaidBookings.size == 1) "item" else "items"}",
+                fontSize = 12.sp,
+                color = PaymentColors.DarkGray,
+                modifier = Modifier
+                    .background(
+                        PaymentColors.LightGray,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
         
         LazyColumn(
-            modifier = Modifier.height(300.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.height(280.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(unpaidBookings) { booking ->
                 UnpaidBookingCard(
@@ -1380,7 +1567,7 @@ fun UnpaidBookingCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         border = BorderStroke(2.dp, urgencyColor.copy(alpha = 0.3f))
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             // Urgency Badge and Booking ID Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1389,21 +1576,21 @@ fun UnpaidBookingCard(
             ) {
                 Surface(
                     color = urgencyColor,
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.padding(bottom = 6.dp)
                 ) {
                     Text(
                         text = urgencyText,
                         color = PaymentColors.White,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                     )
                 }
                 
                 Text(
                     text = "ID: ${booking.bookingId.takeLast(8)}",
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = PaymentColors.DarkGray,
                     fontWeight = FontWeight.Medium
                 )
@@ -1420,34 +1607,34 @@ fun UnpaidBookingCard(
                         model = booking.bikeImageUrl,
                         contentDescription = "Bike image",
                         modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(6.dp))
                             .background(PaymentColors.LightGray),
                         contentScale = ContentScale.Crop
                     )
                 } else {
                     Box(
                         modifier = Modifier
-                            .size(64.dp)
-                            .background(PaymentColors.LightGray, RoundedCornerShape(8.dp)),
+                            .size(48.dp)
+                            .background(PaymentColors.LightGray, RoundedCornerShape(6.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.DirectionsBike,
                             contentDescription = null,
                             tint = PaymentColors.DarkGray,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
                 
-                Spacer(modifier = Modifier.width(16.dp))
+                Spacer(modifier = Modifier.width(12.dp))
                 
                 // Bike Details
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = booking.bikeName,
-                        fontSize = 16.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PaymentColors.DarkGreen,
                         maxLines = 1,
@@ -1455,15 +1642,15 @@ fun UnpaidBookingCard(
                     )
                     Text(
                         text = booking.bikeType,
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = PaymentColors.DarkGray,
-                        modifier = Modifier.padding(top = 2.dp)
+                        modifier = Modifier.padding(top = 1.dp)
                     )
                     Text(
                         text = booking.getFormattedDuration(),
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         color = PaymentColors.DarkGray,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
                 
@@ -1471,20 +1658,20 @@ fun UnpaidBookingCard(
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = booking.getFormattedPrice(),
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = PaymentColors.DarkGreen
                     )
                     Text(
                         text = "Due",
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         color = PaymentColors.DarkGray,
-                        modifier = Modifier.padding(top = 2.dp)
+                        modifier = Modifier.padding(top = 1.dp)
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             
             // Dates Row
             Row(
@@ -1494,14 +1681,14 @@ fun UnpaidBookingCard(
                 Column {
                     Text(
                         text = "START DATE",
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         color = PaymentColors.DarkGray,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
                             .format(Date(booking.startDate)),
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         color = PaymentColors.TextGray,
                         fontWeight = FontWeight.Medium
                     )
@@ -1510,21 +1697,21 @@ fun UnpaidBookingCard(
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = "END DATE",
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         color = PaymentColors.DarkGray,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
                             .format(Date(booking.endDate)),
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         color = PaymentColors.TextGray,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             
             // Pay Now Button
             Button(
@@ -1533,20 +1720,26 @@ fun UnpaidBookingCard(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = urgencyColor
                 ),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(vertical = 14.dp)
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(vertical = 10.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Payment,
                     contentDescription = null,
                     tint = PaymentColors.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                val buttonText = when (urgency) {
+                    PaymentUrgency.OVERDUE -> "Pay Overdue Amount"
+                    PaymentUrgency.URGENT -> "Pay Now - Urgent!"
+                    PaymentUrgency.MODERATE -> "Complete Payment"
+                    PaymentUrgency.LOW -> "Pay for This Booking"
+                }
                 Text(
-                    text = if (urgency == PaymentUrgency.OVERDUE) "Pay Overdue Amount" else "Pay Now",
+                    text = buttonText,
                     color = PaymentColors.White,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }

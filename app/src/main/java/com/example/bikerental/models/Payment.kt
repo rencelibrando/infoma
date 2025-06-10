@@ -71,14 +71,7 @@ data class UnpaidBooking(
     fun getFormattedPrice(): String {
         return "₱%.2f".format(totalPrice)
     }
-    
-    /**
-     * Check if booking is overdue for payment
-     */
-    fun isOverdue(): Boolean {
-        // Consider overdue if end date has passed and still unpaid
-        return System.currentTimeMillis() > endDate
-    }
+
     
     /**
      * Get payment urgency level

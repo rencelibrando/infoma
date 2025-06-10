@@ -15,6 +15,8 @@ import com.example.bikerental.models.TrackableBike
 import com.example.bikerental.utils.ErrorHandler
 import com.example.bikerental.utils.QRCodeHelper
 import com.example.bikerental.utils.FirestoreUtils
+import com.example.bikerental.utils.DistanceCalculationUtils
+import com.example.bikerental.utils.toBikeRideSafe
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
@@ -212,52 +214,164 @@ class BikeViewModel : ViewModel() {
     }
     
     /**
-     * Check if the user has an active ride
+     * Check if the user has an active ride - ENHANCED with Firestore integration and status validation
      */
     private fun checkForActiveRide() {
         auth.currentUser?.let { user ->
-            ridesRef.orderByChild("userId").equalTo(user.uid)
-                .addListenerForSingleValueEvent(object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        var foundActiveRide = false
+            viewModelScope.launch {
+                try {
+                    // ENHANCED: Check both Firestore and Realtime Database for active rides
+                    // Priority: Firestore -> Realtime Database
+                    
+                    // First check Firestore (primary source)
+                    val firestoreActiveRide = checkForActiveRideInFirestore(user.uid)
+                    
+                    if (firestoreActiveRide != null) {
+                        Log.d(TAG, "Found active ride in Firestore: ${firestoreActiveRide.id}")
+                        _activeRide.value = firestoreActiveRide
+                        startTrackingBike(firestoreActiveRide.bikeId)
+                        return@launch
+                    }
+                    
+                    // Fallback: Check Realtime Database
+                    checkActiveRideInRealtimeDatabase(user.uid)
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking for active rides", e)
+                    // Fallback to Realtime Database only
+                    checkActiveRideInRealtimeDatabase(user.uid)
+                }
+            }
+        }
+    }
+    
+    /**
+     * Check for active ride in Firestore with enhanced validation
+     */
+    private suspend fun checkForActiveRideInFirestore(userId: String): BikeRide? {
+        return try {
+            val query = firestore.collection("rides")
+                .whereEqualTo("userId", userId)
+                .whereEqualTo("status", "active")
+                .orderBy("startTime", Query.Direction.DESCENDING)
+                .limit(1)
+                .get()
+                .await()
+            
+            val rideDoc = query.documents.firstOrNull()
+            if (rideDoc != null) {
+                val ride = rideDoc.toBikeRideSafe()
+                
+                // CRITICAL: Validate ride status consistency
+                if (ride != null) {
+                    val currentTime = System.currentTimeMillis()
+                    val rideAge = currentTime - ride.startTime
+                    val maxRideAge = 24 * 60 * 60 * 1000L // 24 hours
+                    
+                    // Check if ride has endTime but status is still active (inconsistent state)
+                    if (ride.endTime > 0) {
+                        Log.w(TAG, "FIXING: Found active ride ${ride.id} with endTime - correcting status to completed")
                         
-                        for (rideSnapshot in snapshot.children) {
-                            val ride = rideSnapshot.getValue(BikeRide::class.java)
+                        // Fix the status in Firestore
+                        firestore.collection("rides").document(ride.id)
+                            .update(mapOf(
+                                "status" to "completed",
+                                "isActive" to false,
+                                "statusFixedAt" to com.google.firebase.Timestamp.now()
+                            ))
+                        
+                        return null // Don't treat this as an active ride
+                    }
+                    
+                    // Check if ride is too old (stale)
+                    if (rideAge > maxRideAge) {
+                        Log.w(TAG, "Found stale active ride: ${ride.id}, auto-completing")
+                        
+                        // Auto-complete stale ride
+                        val endTime = System.currentTimeMillis()
+                        firestore.collection("rides").document(ride.id)
+                            .update(mapOf(
+                                "status" to "completed",
+                                "isActive" to false,
+                                "endTime" to endTime,
+                                "autoCompleted" to true,
+                                "autoCompletedAt" to com.google.firebase.Timestamp.now()
+                            ))
+                        
+                        return null // Don't treat this as an active ride
+                    }
+                    
+                    // Ride is valid and truly active
+                    Log.d(TAG, "Valid active ride found: ${ride.id}, started ${rideAge / 60000} minutes ago")
+                    return ride
+                }
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking active ride in Firestore", e)
+            null
+        }
+    }
+    
+    /**
+     * Fallback check in Realtime Database
+     */
+    private fun checkActiveRideInRealtimeDatabase(userId: String) {
+        ridesRef.orderByChild("userId").equalTo(userId)
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    var foundActiveRide = false
+                    
+                    for (rideSnapshot in snapshot.children) {
+                        val ride = rideSnapshot.getValue(BikeRide::class.java)
+                        
+                        // Only restore rides that are truly active and recent
+                        if (ride?.status == "active") {
+                            val currentTime = System.currentTimeMillis()
+                            val rideAge = currentTime - ride.startTime
+                            val maxRideAge = 24 * 60 * 60 * 1000L // 24 hours in milliseconds
                             
-                            // Only restore rides that are truly active and recent
-                            if (ride?.status == "active") {
-                                val currentTime = System.currentTimeMillis()
-                                val rideAge = currentTime - ride.startTime
-                                val maxRideAge = 24 * 60 * 60 * 1000L // 24 hours in milliseconds
-                                
-                                // Only restore rides that are less than 24 hours old
-                                if (rideAge < maxRideAge) {
-                                    Log.d(TAG, "Restoring active ride: ${ride.id}, started ${rideAge / 60000} minutes ago")
-                                    _activeRide.value = ride
-                                    startTrackingBike(ride.bikeId)
-                                    foundActiveRide = true
-                                    break
-                                } else {
-                                    // Auto-complete very old rides that might be stuck
-                                    Log.w(TAG, "Found stale active ride: ${ride.id}, auto-completing")
-                                    ridesRef.child(ride.id).child("status").setValue("completed")
-                                        .addOnSuccessListener {
-                                            Log.d(TAG, "Stale ride ${ride.id} marked as completed")
-                                        }
-                                }
+                            // Check for inconsistent state (has endTime but marked active)
+                            if (ride.endTime > 0) {
+                                Log.w(TAG, "FIXING: Found RT DB active ride ${ride.id} with endTime - correcting status")
+                                ridesRef.child(ride.id).updateChildren(mapOf(
+                                    "status" to "completed",
+                                    "isActive" to false,
+                                    "statusFixedAt" to System.currentTimeMillis()
+                                ))
+                                continue
                             }
-                        }
-                        
-                        if (!foundActiveRide) {
-                            Log.d(TAG, "No active rides found for user")
+                            
+                            // Only restore rides that are less than 24 hours old
+                            if (rideAge < maxRideAge) {
+                                Log.d(TAG, "Restoring active ride from RT DB: ${ride.id}, started ${rideAge / 60000} minutes ago")
+                                _activeRide.value = ride
+                                startTrackingBike(ride.bikeId)
+                                foundActiveRide = true
+                                break
+                            } else {
+                                // Auto-complete very old rides that might be stuck
+                                Log.w(TAG, "Found stale active ride in RT DB: ${ride.id}, auto-completing")
+                                ridesRef.child(ride.id).updateChildren(mapOf(
+                                    "status" to "completed",
+                                    "isActive" to false,
+                                    "endTime" to currentTime,
+                                    "autoCompleted" to true
+                                ))
+                            }
                         }
                     }
                     
-                    override fun onCancelled(error: DatabaseError) {
-                        Log.e(TAG, "Error checking for active rides", error.toException())
+                    if (!foundActiveRide) {
+                        Log.d(TAG, "No active rides found for user")
                     }
-                })
-        }
+                }
+                
+                override fun onCancelled(error: DatabaseError) {
+                    Log.e(TAG, "Error checking for active rides in RT DB", error.toException())
+                }
+            })
     }
     
     // Fetch bikes from Firestore
@@ -557,12 +671,23 @@ class BikeViewModel : ViewModel() {
         _bikeLocation.value = null
     }
     
-    // Calculate distance between two LatLng point
-    // Add missing calculateDistance method with 4 double parameters (returns distance in kilometers)
+    // CENTRALIZED DISTANCE CALCULATION - Use DistanceCalculationUtils for consistency
+    /**
+     * Calculate distance between two geographic points in meters
+     * Uses centralized DistanceCalculationUtils for consistency across the app
+     */
+    private fun calculateDistanceInMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
+        return DistanceCalculationUtils.calculateDistance(lat1, lon1, lat2, lon2)
+    }
+
+    // CENTRALIZED - Use DistanceCalculationUtils (returns distance in kilometers)
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
-        val results = FloatArray(1)
-        android.location.Location.distanceBetween(lat1, lon1, lat2, lon2, results)
-        return results[0] / 1000f // Distance in kilometers
+        return DistanceCalculationUtils.calculateDistanceKm(lat1, lon1, lat2, lon2)
+    }
+
+    // CENTRALIZED DISTANCE CALCULATION for LatLng objects
+    private fun calculateDistance(start: LatLng, end: LatLng): Float {
+        return DistanceCalculationUtils.calculateDistance(start, end)
     }
     
     /**
@@ -1223,6 +1348,32 @@ class BikeViewModel : ViewModel() {
                                 // Continue with ride ending even if service stop fails
                             }
                             
+                            // CRITICAL FIX: Consolidate location history into ride path BEFORE saving
+                            val consolidatedRideData = consolidateRideData(ride.id, endTime, durationMinutes)
+                            
+                            // Use the consolidated metrics or fall back to local state
+                            val finalTotalDistance = if (consolidatedRideData.totalDistance > 0) {
+                                consolidatedRideData.totalDistance
+                            } else {
+                                _rideDistance.value.toDouble()
+                            }
+                            
+                            val finalMaxSpeed = if (consolidatedRideData.maxSpeed > 0) {
+                                consolidatedRideData.maxSpeed
+                            } else {
+                                _maxSpeed.value.toDouble()
+                            }
+                            
+                            val finalAverageSpeed = if (consolidatedRideData.averageSpeed > 0) {
+                                consolidatedRideData.averageSpeed
+                            } else if (durationMinutes > 0) {
+                                (finalTotalDistance / 1000.0) / (durationMinutes / 60.0)
+                            } else {
+                                0.0
+                            }
+                            
+                            Log.d(TAG, "Final ride metrics - Distance: ${String.format("%.2f", finalTotalDistance/1000)}km, Max Speed: ${String.format("%.1f", finalMaxSpeed)}km/h, Avg Speed: ${String.format("%.1f", finalAverageSpeed)}km/h, Path Points: ${consolidatedRideData.path.size}")
+                            
                             // FOCUS ON FIRESTORE ONLY - Avoid Realtime DB permission issues
                             val bikeRef = firestore.collection("bikes").document(ride.bikeId)
                             
@@ -1247,7 +1398,7 @@ class BikeViewModel : ViewModel() {
                                 null // Return value not needed
                             }.await()
                             
-                            // Update ride in Firestore
+                            // ENHANCED: Update ride in Firestore with consolidated path data - CRITICAL STATUS FIX
                             val firestoreRideUpdates = mapOf(
                                 "endTime" to endTime,
                                 "endLocation" to mapOf(
@@ -1256,16 +1407,29 @@ class BikeViewModel : ViewModel() {
                                     "timestamp" to endLocation.timestamp
                                 ),
                                 "cost" to cost,
-                                "status" to "completed",
-                                "isActive" to false,
+                                "status" to "completed", // CRITICAL: Ensure status is set to completed
+                                "isActive" to false, // CRITICAL: Mark as not active
                                 "duration" to (endTime - ride.startTime),
-                                "totalDistance" to _rideDistance.value.toDouble(),
-                                "maxSpeed" to _maxSpeed.value.toDouble(),
-                                "averageSpeed" to if (durationMinutes > 0) (_rideDistance.value / 1000.0) / (durationMinutes / 60.0) else 0.0,
-                                "updatedAt" to com.google.firebase.Timestamp.now()
+                                // CRITICAL: Save consolidated metrics and path
+                                "totalDistance" to finalTotalDistance,
+                                "maxSpeed" to finalMaxSpeed,
+                                "averageSpeed" to finalAverageSpeed,
+                                "distanceTraveled" to finalTotalDistance, // Ensure distanceTraveled is also updated
+                                "path" to consolidatedRideData.path, // Save complete path for frontend calculations
+                                "pathPointCount" to consolidatedRideData.path.size,
+                                "metricsSource" to if (consolidatedRideData.totalDistance > 0) "locationHistory" else "localState",
+                                "updatedAt" to com.google.firebase.Timestamp.now(),
+                                "completedAt" to com.google.firebase.Timestamp.now() // Add completion timestamp
                             )
                             
-                            firestore.collection("rides").document(ride.id).update(firestoreRideUpdates).await()
+                            // CRITICAL: Use Firestore transaction to ensure atomic updates
+                            firestore.runTransaction { transaction ->
+                                val rideRef = firestore.collection("rides").document(ride.id)
+                                transaction.update(rideRef, firestoreRideUpdates)
+                                null
+                            }.await()
+                            
+                            Log.d(TAG, "CRITICAL: Ride status updated to 'completed' in Firestore for ride: ${ride.id}")
                             
                             // TRY Realtime Database updates (but don't fail the ride ending for Realtime DB issues)
                             try {
@@ -1276,7 +1440,10 @@ class BikeViewModel : ViewModel() {
                                     "cost" to cost,
                                     "status" to "completed",
                                     "isActive" to false,
-                                    "duration" to (endTime - ride.startTime)
+                                    "duration" to (endTime - ride.startTime),
+                                    "totalDistance" to finalTotalDistance,
+                                    "maxSpeed" to finalMaxSpeed,
+                                    "averageSpeed" to finalAverageSpeed
                                 )
                                 
                                 ridesRef.child(ride.id).updateChildren(rideUpdates).await()
@@ -1295,7 +1462,7 @@ class BikeViewModel : ViewModel() {
                                 Log.w(TAG, "Realtime Database updates failed (non-critical): ${realtimeError.message}")
                             }
                             
-                            // Add to user's ride history in Firestore
+                            // Add to user's ride history in Firestore with enhanced data
                             try {
                                 auth.currentUser?.uid?.let { userId ->
                                     firestore.collection("users")
@@ -1305,10 +1472,15 @@ class BikeViewModel : ViewModel() {
                                         .set(mapOf(
                                             "rideId" to ride.id,
                                             "bikeId" to ride.bikeId,
+                                            "startTime" to ride.startTime,
                                             "endTime" to endTime,
                                             "cost" to cost,
                                             "duration" to (endTime - ride.startTime),
-                                            "distance" to _rideDistance.value.toDouble()
+                                            "distance" to finalTotalDistance,
+                                            "maxSpeed" to finalMaxSpeed,
+                                            "averageSpeed" to finalAverageSpeed,
+                                            "pathPointCount" to consolidatedRideData.path.size,
+                                            "createdAt" to com.google.firebase.Timestamp.now()
                                         ))
                                         .await()
                                 }
@@ -1316,7 +1488,7 @@ class BikeViewModel : ViewModel() {
                                 Log.w(TAG, "Failed to save ride history (non-critical): ${historyError.message}")
                             }
                             
-                            Log.d(TAG, "Ride ended successfully with cost: ₱${String.format("%.2f", cost)}")
+                            Log.d(TAG, "Ride ended successfully with cost: ₱${String.format("%.2f", cost)} and ${consolidatedRideData.path.size} GPS points saved")
                             
                             // Show ride rating dialog on main thread
                             withContext(Dispatchers.Main) {
@@ -1325,8 +1497,8 @@ class BikeViewModel : ViewModel() {
                                     endLocation = endLocation,
                                     cost = cost,
                                     status = "completed",
-                                    distanceTraveled = _rideDistance.value.toDouble(),
-                                    maxSpeed = _maxSpeed.value.toDouble()
+                                    distanceTraveled = finalTotalDistance,
+                                    maxSpeed = finalMaxSpeed
                                 )
                                 _completedRide.value = completedRide
                                 _showRideRating.value = true
@@ -1357,6 +1529,24 @@ class BikeViewModel : ViewModel() {
                                 )
                                 firestore.collection("bikes").document(ride.bikeId).update(emergencyBikeUpdate).await()
                                 Log.d(TAG, "Emergency bike status reset completed")
+                                
+                                // Try to save ride with local state as emergency fallback
+                                try {
+                                    val emergencyRideUpdate = mapOf(
+                                        "endTime" to System.currentTimeMillis(),
+                                        "status" to "completed",
+                                        "isActive" to false,
+                                        "totalDistance" to _rideDistance.value.toDouble(),
+                                        "maxSpeed" to _maxSpeed.value.toDouble(),
+                                        "averageSpeed" to if (durationMinutes > 0) (_rideDistance.value / 1000.0) / (durationMinutes / 60.0) else 0.0,
+                                        "updatedAt" to com.google.firebase.Timestamp.now(),
+                                        "emergencyCompletion" to true
+                                    )
+                                    firestore.collection("rides").document(ride.id).update(emergencyRideUpdate).await()
+                                    Log.d(TAG, "Emergency ride completion saved with local metrics")
+                                } catch (emergencyRideError: Exception) {
+                                    Log.e(TAG, "Emergency ride save also failed", emergencyRideError)
+                                }
                                 
                                 // Clear active ride state even if some operations failed
                                 withContext(Dispatchers.Main) {
@@ -1401,6 +1591,191 @@ class BikeViewModel : ViewModel() {
                 }
             }
         }
+    }
+    
+    /**
+     * Data class to hold consolidated ride metrics and path
+     */
+    private data class ConsolidatedRideData(
+        val totalDistance: Double,
+        val maxSpeed: Double,
+        val averageSpeed: Double,
+        val path: List<Map<String, Any>>
+    )
+    
+    /**
+     * CRITICAL FIX: Consolidate location history from Firebase into final ride metrics
+     * This ensures that all tracked GPS points are converted to metrics when the ride ends
+     */
+    private suspend fun consolidateRideData(rideId: String, endTime: Long, durationMinutes: Double): ConsolidatedRideData {
+        return try {
+            // Fetch location history from Realtime Database first (faster)
+            val realtimeLocations = fetchLocationHistoryFromRealtime(rideId)
+            
+            // If Realtime DB has sufficient data, use it
+            if (realtimeLocations.size >= 2) {
+                Log.d(TAG, "Using Realtime DB location history: ${realtimeLocations.size} points")
+                calculateMetricsFromLocationHistory(realtimeLocations, durationMinutes)
+            } else {
+                // Fallback to Firestore if Realtime DB is insufficient
+                Log.d(TAG, "Realtime DB insufficient (${realtimeLocations.size} points), trying Firestore...")
+                val firestoreLocations = fetchLocationHistoryFromFirestore(rideId)
+                
+                if (firestoreLocations.size >= 2) {
+                    Log.d(TAG, "Using Firestore location history: ${firestoreLocations.size} points")
+                    calculateMetricsFromLocationHistory(firestoreLocations, durationMinutes)
+                } else {
+                    Log.w(TAG, "Insufficient location history in both databases (RT: ${realtimeLocations.size}, FS: ${firestoreLocations.size})")
+                    // Return empty data to fall back to local state
+                    ConsolidatedRideData(0.0, 0.0, 0.0, emptyList())
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consolidating ride data: ${e.message}")
+            // Return empty data to fall back to local state
+            ConsolidatedRideData(0.0, 0.0, 0.0, emptyList())
+        }
+    }
+    
+    /**
+     * Fetch location history from Realtime Database
+     */
+    private suspend fun fetchLocationHistoryFromRealtime(rideId: String): List<Map<String, Any>> {
+        return try {
+            val snapshot = FirebaseDatabase.getInstance()
+                .getReference("rideLocationHistory")
+                .child(rideId)
+                .orderByChild("deviceTimestamp")
+                .get()
+                .await()
+            
+            val locations = mutableListOf<Map<String, Any>>()
+            snapshot.children.forEach { child ->
+                val locationData = child.value as? Map<String, Any>
+                if (locationData != null) {
+                    locations.add(locationData)
+                }
+            }
+            
+            locations
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching Realtime DB location history: ${e.message}")
+            emptyList()
+        }
+    }
+    
+    /**
+     * Fetch location history from Firestore (fallback)
+     */
+    private suspend fun fetchLocationHistoryFromFirestore(rideId: String): List<Map<String, Any>> {
+        return try {
+            val snapshot = firestore.collection("rideLocationHistory")
+                .whereEqualTo("rideId", rideId)
+                .orderBy("deviceTimestamp")
+                .get()
+                .await()
+            
+            snapshot.documents.mapNotNull { doc ->
+                doc.data
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching Firestore location history: ${e.message}")
+            emptyList()
+        }
+    }
+    
+    /**
+     * Calculate ride metrics from location history with GPS noise filtering
+     */
+    private fun calculateMetricsFromLocationHistory(locations: List<Map<String, Any>>, durationMinutes: Double): ConsolidatedRideData {
+        if (locations.size < 2) {
+            return ConsolidatedRideData(0.0, 0.0, 0.0, emptyList())
+        }
+        
+        var totalDistance = 0.0 // in meters
+        var maxSpeed = 0.0 // in km/h
+        val validSpeeds = mutableListOf<Double>()
+        val pathPoints = mutableListOf<Map<String, Any>>()
+        
+        for (i in 1 until locations.size) {
+            val prev = locations[i - 1]
+            val curr = locations[i]
+            
+            try {
+                val prevLat = (prev["latitude"] as? Number)?.toDouble() ?: continue
+                val prevLng = (prev["longitude"] as? Number)?.toDouble() ?: continue
+                val currLat = (curr["latitude"] as? Number)?.toDouble() ?: continue
+                val currLng = (curr["longitude"] as? Number)?.toDouble() ?: continue
+                
+                val prevTime = (prev["deviceTimestamp"] as? Number)?.toLong() ?: continue
+                val currTime = (curr["deviceTimestamp"] as? Number)?.toLong() ?: continue
+                
+                // Validate coordinates
+                if (Math.abs(prevLat) <= 90 && Math.abs(prevLng) <= 180 &&
+                    Math.abs(currLat) <= 90 && Math.abs(currLng) <= 180 &&
+                    prevLat != 0.0 && prevLng != 0.0 && currLat != 0.0 && currLng != 0.0) {
+                    
+                    // Calculate distance using centralized utility
+                    val distance = DistanceCalculationUtils.calculateDistance(prevLat, prevLng, currLat, currLng)
+                    
+                    // Filter out unrealistic GPS jumps
+                    val timeDiffMs = currTime - prevTime
+                    if (timeDiffMs > 0) {
+                        val timeDiffHours = timeDiffMs / 3600000.0
+                        val calculatedSpeed = (distance / 1000.0) / timeDiffHours // km/h
+                        
+                        // Only add distance if speed is realistic (< 100 km/h for bikes)
+                        if (calculatedSpeed < 100.0) {
+                            totalDistance += distance
+                        }
+                    } else {
+                        // If no time difference, add distance anyway (could be same timestamp)
+                        totalDistance += distance
+                    }
+                    
+                    // Process speed data
+                    val speed = (curr["speed"] as? Number)?.toDouble() ?: 0.0
+                    if (speed > 0 && speed < 100.0) { // Realistic speed range
+                        validSpeeds.add(speed)
+                        if (speed > maxSpeed) {
+                            maxSpeed = speed
+                        }
+                    }
+                    
+                    // Add to path for frontend use
+                    pathPoints.add(mapOf(
+                        "latitude" to currLat,
+                        "longitude" to currLng,
+                        "timestamp" to currTime,
+                        "speed" to speed,
+                        "accuracy" to ((curr["accuracy"] as? Number)?.toDouble() ?: 0.0),
+                        "bearing" to ((curr["bearing"] as? Number)?.toDouble() ?: 0.0)
+                    ))
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error processing location point $i: ${e.message}")
+                continue
+            }
+        }
+        
+        // Calculate average speed
+        val averageSpeed = if (validSpeeds.isNotEmpty()) {
+            validSpeeds.average()
+        } else if (durationMinutes > 0) {
+            // Fallback: calculate from distance and time
+            (totalDistance / 1000.0) / (durationMinutes / 60.0)
+        } else {
+            0.0
+        }
+        
+        Log.d(TAG, "Calculated metrics from ${locations.size} points: Distance=${String.format("%.2f", totalDistance/1000)}km, Max Speed=${String.format("%.1f", maxSpeed)}km/h, Avg Speed=${String.format("%.1f", averageSpeed)}km/h")
+        
+        return ConsolidatedRideData(
+            totalDistance = totalDistance,
+            maxSpeed = maxSpeed,
+            averageSpeed = averageSpeed,
+            path = pathPoints
+        )
     }
     
     /**
@@ -1496,6 +1871,20 @@ class BikeViewModel : ViewModel() {
     }
     
     /**
+     * Start location tracking for active ride
+     */
+    fun startLocationTracking() {
+        val ride = _activeRide.value
+        if (ride != null) {
+            val context = BikeRentalApplication.instance
+            com.example.bikerental.services.LocationTrackingService.startLocationTracking(context, ride.id)
+            Log.d(TAG, "Location tracking started for ride: ${ride.id}")
+        } else {
+            Log.w(TAG, "Cannot start location tracking - no active ride")
+        }
+    }
+
+    /**
      * Clear error messages
      */
     fun clearError() {
@@ -1532,23 +1921,39 @@ class BikeViewModel : ViewModel() {
                 val ride = _activeRide.value ?: return@launch
                 if (ride.id != rideId) return@launch
                 
-                // Calculate distance if we have a previous location
+                // Calculate distance if we have a previous location with proper validation
                 val lastLocation = ride.lastLocation
                 if (lastLocation.latitude != 0.0 && lastLocation.longitude != 0.0) {
-                    val distance = calculateDistance(
+                    // Use consolidated distance calculation in meters
+                    val distanceInMeters = calculateDistanceInMeters(
                         lastLocation.latitude, lastLocation.longitude,
                         location.latitude, location.longitude
                     )
-                    // Convert to meters and add to total distance
-                    _rideDistance.value += distance * 1000f
+                    
+                    // Filter out unrealistic jumps (GPS noise/errors)
+                    val timeDiffMs = location.timestamp - lastLocation.timestamp
+                    if (timeDiffMs > 0) {
+                        val timeDiffHours = timeDiffMs / 3600000.0 // Convert to hours
+                        val speedKmh = (distanceInMeters / 1000.0) / timeDiffHours
+                        
+                        // Only add distance if speed is realistic (< 100 km/h for bikes)
+                        if (speedKmh < 100.0) {
+                            _rideDistance.value += distanceInMeters
+                        } else {
+                            Log.w(TAG, "Filtering unrealistic GPS jump: ${String.format("%.2f", speedKmh)} km/h")
+                        }
+                    } else {
+                        // If no time difference, add distance anyway (could be same timestamp)
+                        _rideDistance.value += distanceInMeters
+                    }
                 }
                 
-                // Update speed statistics
-                val currentSpeed = location.speedKmh.toFloat()
-                if (currentSpeed > 0) {
-                    _currentSpeed.value = currentSpeed
-                    if (currentSpeed > _maxSpeed.value) {
-                        _maxSpeed.value = currentSpeed
+                // Update speed statistics with improved validation
+                val currentSpeedKmh = location.speedKmh
+                if (currentSpeedKmh > 0 && currentSpeedKmh < 100) { // Filter unrealistic speeds
+                    _currentSpeed.value = currentSpeedKmh
+                    if (currentSpeedKmh > _maxSpeed.value) {
+                        _maxSpeed.value = currentSpeedKmh
                     }
                 }
                 
@@ -1565,7 +1970,7 @@ class BikeViewModel : ViewModel() {
                 )
                 _activeRide.value = updatedRide
                 
-                Log.d(TAG, "Ride stats updated - Distance: ${String.format("%.2f", _rideDistance.value/1000)}km, Speed: ${String.format("%.1f", currentSpeed)}km/h")
+                Log.d(TAG, "Ride stats updated - Distance: ${String.format("%.2f", _rideDistance.value/1000)}km, Speed: ${String.format("%.1f", currentSpeedKmh)}km/h, Max: ${String.format("%.1f", _maxSpeed.value)}km/h")
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating ride statistics", e)
@@ -1589,6 +1994,8 @@ class BikeViewModel : ViewModel() {
             Triple(0L, 0f, 0f)
         }
     }
+
+
     
     /**
      * End ride with tracking service cleanup
@@ -1940,74 +2347,43 @@ class BikeViewModel : ViewModel() {
                                 .await()
                         }
                     }
-                    
                     _emergencyState.value = "Emergency alert sent successfully"
                     Log.d(TAG, "Emergency alert sent: $emergencyType at ${location.latitude}, ${location.longitude}")
-                    
-                    // Clear state after 3 seconds
                     kotlinx.coroutines.delay(3000)
                     _emergencyState.value = null
                     
                 } catch (e: Exception) {
                     Log.e(TAG, "Error sending emergency alert", e)
                     _emergencyState.value = "Failed to send emergency alert"
-                    
-                    // Clear error state after 5 seconds
                     kotlinx.coroutines.delay(5000)
                     _emergencyState.value = null
                 }
             }
         }
     }
-    
-    /**
-     * Calculate bearing between two points for navigation
-     */
     private fun calculateBearing(start: LatLng, end: LatLng): Float {
         val lat1 = Math.toRadians(start.latitude)
         val lat2 = Math.toRadians(end.latitude)
         val deltaLong = Math.toRadians(end.longitude - start.longitude)
-        
         val y = sin(deltaLong) * cos(lat2)
         val x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLong)
-        
         val bearing = Math.toDegrees(atan2(y, x))
         return ((bearing + 360) % 360).toFloat()
     }
-    
-    /**
-     * Calculate distance between two points in meters
-     */
-    private fun calculateDistance(start: LatLng, end: LatLng): Float {
-        val results = FloatArray(1)
-        android.location.Location.distanceBetween(
-            start.latitude, start.longitude,
-            end.latitude, end.longitude,
-            results
-        )
-        return results[0]
-    }
-    
-    /**
-     * Update current speed for real-time display
-     */
     fun updateCurrentSpeed(speedKmh: Float) {
-        _currentSpeed.value = speedKmh / 3.6f // Convert km/h to m/s for consistency
-    }
-    
-    /**
-     * Update maximum speed if current exceeds it
-     */
-    fun updateMaxSpeed(speedKmh: Float) {
-        val speedMps = speedKmh / 3.6f // Convert km/h to m/s
-        if (speedMps > _maxSpeed.value) {
-            _maxSpeed.value = speedMps
+        if (speedKmh >= 0 && speedKmh < 100 && speedKmh.isFinite()) {
+            _currentSpeed.value = speedKmh / 3.6f
         }
     }
-    
-    /**
-     * Reset POV navigation state
-     */
+    fun updateMaxSpeed(speedKmh: Float) {
+        if (speedKmh >= 0 && speedKmh < 100 && speedKmh.isFinite()) {
+            val speedMps = speedKmh / 3.6f // Convert km/h to m/s
+            if (speedMps > _maxSpeed.value) {
+                _maxSpeed.value = speedMps
+            }
+        }
+    }
+
     fun resetNavigationState() {
         _ridePath.value = emptyList()
         _userBearing.value = 0f
@@ -2016,10 +2392,7 @@ class BikeViewModel : ViewModel() {
         _maxSpeed.value = 0f
         _currentLocation.value = null
     }
-    
-    /**
-     * Clean up listeners and resources when ViewModel is destroyed
-     */
+
     override fun onCleared() {
         super.onCleared()
         

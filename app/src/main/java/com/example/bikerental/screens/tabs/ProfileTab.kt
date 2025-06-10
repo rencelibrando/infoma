@@ -869,11 +869,11 @@ fun ProfileScreen(
     if (showProfileDialog) {
         AlertDialog(
             onDismissRequest = { showProfileDialog = false },
-            modifier = Modifier.widthIn(max = 480.dp),
+            modifier = Modifier.widthIn(max = 400.dp),
             title = {
                 Text(
                     text = "Profile Information",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     color = ColorUtils.DarkGreen
                 )
             },
@@ -881,120 +881,87 @@ fun ProfileScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp)
+                        .padding(vertical = 4.dp)
                         .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    AsyncImage(
-                        model = profileData?.get("profilePictureUrl") ?: user?.photoUrl,
-                        contentDescription = "Profile Picture",
-                        modifier = Modifier
-                            .size(120.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop,
-                        error = painterResource(id = R.drawable.default_profile_picture),
-                        fallback = painterResource(id = R.drawable.default_profile_picture),
-                        placeholder = painterResource(id = R.drawable.default_profile_picture)
-                    )
+                    // Compact profile picture with info
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        AsyncImage(
+                            model = profileData?.get("profilePictureUrl") ?: user?.photoUrl,
+                            contentDescription = "Profile Picture",
+                            modifier = Modifier
+                                .size(60.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                            error = painterResource(id = R.drawable.default_profile_picture),
+                            fallback = painterResource(id = R.drawable.default_profile_picture),
+                            placeholder = painterResource(id = R.drawable.default_profile_picture)
+                        )
+                        
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = ColorUtils.DarkGreen,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = profileData?.get("email")?.toString() ?: user?.email ?: "Not available",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ColorUtils.blackcol(),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
 
+                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                    // Compact information sections
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Personal Information
                         Text(
-                            text = "Personal Information",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.DarkGreen
+                            text = "Personal",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = ColorUtils.DarkGreen,
+                            modifier = Modifier.padding(bottom = 2.dp)
                         )
-                        InfoRow("Full Name", profileData?.get("fullName")?.toString() ?: user?.displayName ?: "Not available", ColorUtils.blackcol())
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            val email = profileData?.get("email")?.toString() ?: user?.email ?: ""
-                            
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp)
-                            ) {
-                                OutlinedTextField(
-                                    value = email,
-                                    onValueChange = { /* Email is not editable */ },
-                                    readOnly = true,
-                                    label = { Text("Email") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Email,
-                                            contentDescription = "Email"
-                                        )
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
                         
-                        // Replace the InfoRow for phone with editable version
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = formattedPhoneNumber,
-                                    onValueChange = { input: String ->
-                                        // Allow only digits and some special characters
-                                        val filteredInput = input.replace(Regex("[^0-9+]"), "")
-                                        formattedPhoneNumber = filteredInput
-                                    },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                                    label = { Text("Phone Number") },
-                                    placeholder = { Text("+639XXXXXXXXX") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Phone,
-                                            contentDescription = "Phone Number"
-                                        )
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                
-                                Spacer(modifier = Modifier.width(8.dp))
-                                
-                                Button(
-                                    onClick = {
-                                        // Format the phone number and update it
-                                        val formattedNumber = formatPhilippinePhoneNumber(formattedPhoneNumber)
-                                        updatePhoneNumber(formattedNumber)
-                                    },
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                ) {
-                                    Text("Save")
-                                }
-                            }
-                        }
-                        
-                        InfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("Phone", profileData?.get("phoneNumber")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("Member Since", profileData?.get("memberSince")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
                         // Address Information
                         Text(
                             text = "Address",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.DarkGreen
+                            style = MaterialTheme.typography.labelLarge,
+                            color = ColorUtils.DarkGreen,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                         )
-                        InfoRow("Street", profileData?.get("street")?.toString() ?: "Not available", ColorUtils.blackcol())
-                        InfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available", ColorUtils.blackcol())
-                        InfoRow("City", profileData?.get("city")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("Street", profileData?.get("street")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("Barangay", profileData?.get("barangay")?.toString() ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("City", profileData?.get("city")?.toString() ?: "Not available", ColorUtils.blackcol())
                         
                         // Account Information
                         Text(
-                            text = "Account Details",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = ColorUtils.DarkGreen
+                            text = "Account",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = ColorUtils.DarkGreen,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
                         )
-                        InfoRow("Account Type", profileData?.get("authProvider")?.toString()?.replaceFirstChar { 
+                        CompactInfoRow("Type", profileData?.get("authProvider")?.toString()?.replaceFirstChar { 
                             if (it.isLowerCase()) it.titlecase() else it.toString() 
                         } ?: "Email", ColorUtils.blackcol())
-                        InfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No", ColorUtils.blackcol())
-                        InfoRow("Last Sign In", user?.metadata?.lastSignInTimestamp?.let { 
-                            java.util.Date(it).toString() 
-                        } ?: "Not available", ColorUtils.blackcol())
+                        CompactInfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No", ColorUtils.blackcol())
                     }
                 }
             },
@@ -1228,6 +1195,32 @@ private fun InfoRow(label: String, value: String, purple200: Color) {
             style = MaterialTheme.typography.bodyMedium,
             color = purple200,
             modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun CompactInfoRow(label: String, value: String, textColor: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor.copy(alpha = 0.7f),
+            modifier = Modifier.weight(0.4f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor,
+            modifier = Modifier.weight(0.6f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

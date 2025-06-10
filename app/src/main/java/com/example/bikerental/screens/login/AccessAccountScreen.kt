@@ -1,8 +1,4 @@
 package com.example.bikerental.screens.login
-
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -16,7 +12,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.bikerental.components.ResponsiveButton
 import com.example.bikerental.components.ResponsiveTextField
@@ -24,7 +19,6 @@ import com.example.bikerental.models.AuthState
 import com.example.bikerental.navigation.Screen
 import com.example.bikerental.viewmodels.AuthViewModel
 import android.util.Log
-import android.util.Log.e
 import android.util.Patterns
 import android.widget.Toast
 import com.example.bikerental.navigation.NavigationUtils
@@ -33,7 +27,6 @@ import com.google.firebase.FirebaseException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun AccessAccountScreen(

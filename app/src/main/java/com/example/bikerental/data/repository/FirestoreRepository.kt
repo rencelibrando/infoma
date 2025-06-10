@@ -20,7 +20,6 @@ class FirestoreRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "FirestoreRepository"
-        private const val BATCH_SIZE = 20 // Limit batch operations
         private const val QUERY_LIMIT = 50 // Default query size to prevent large result sets
     }
     

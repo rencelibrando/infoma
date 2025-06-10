@@ -12,7 +12,6 @@ sealed class Screen(val route: String) {
     // Auth screens
     object SignIn : Screen("signIn")
     object SignUp : Screen("signUp")
-    object AccessAccount : Screen("accessAccount")
     object EmailVerification : Screen("emailVerification")
     
     // Profile related screens
@@ -26,11 +25,6 @@ sealed class Screen(val route: String) {
     object BikeDetails : Screen("bikeDetails/{bikeId}") {
         fun createRoute(bikeId: String) = "bikeDetails/$bikeId"
     }
-    
-    // Admin screens
-    object BikeUpload : Screen("bikeUpload")
-    object AdminBikeTracking : Screen("adminBikeTracking")
-    
     // Booking related screens
     object Bookings : Screen("bookings?bikeId={bikeId}") {
         fun createRoute(bikeId: String? = null): String {
