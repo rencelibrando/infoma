@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
 import { updateUserBlockStatus, deleteUser } from '../services/userService';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // Pine green and gray theme colors
 const colors = {
@@ -218,7 +219,7 @@ const UserDetailsDialog = ({
 }) => {
   const [activeTab, setActiveTab] = useState('info');
   const [editingRole, setEditingRole] = useState(false);
-  const [selectedRole, setSelectedRole] = useState(user?.role || 'User');
+  const [selectedRole, setSelectedRole] = useState(user?.role?.toLowerCase() || 'user');
   const [confirmingBlock, setConfirmingBlock] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -354,7 +355,7 @@ const UserDetailsDialog = ({
               </DetailItem>
               <DetailItem>
                 <DetailLabel>Role</DetailLabel>
-                <DetailValue>{user.role || 'User'}</DetailValue>
+                <DetailValue>{user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}</DetailValue>
               </DetailItem>
               <DetailItem>
                 <DetailLabel>User ID</DetailLabel>
@@ -503,9 +504,9 @@ const UserDetailsDialog = ({
                     value={selectedRole} 
                     onChange={e => setSelectedRole(e.target.value)}
                   >
-                    <option value="User">User</option>
-                    <option value="Admin">Admin</option>
-                    <option value="Manager">Manager</option>
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
                   </RoleSelect>
                   
                   <ActionSection>
@@ -524,7 +525,7 @@ const UserDetailsDialog = ({
                 </div>
               ) : (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <DetailValue>{user.role || 'User'}</DetailValue>
+                  <DetailValue>{user.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}</DetailValue>
                   <Button 
                     secondary
                     onClick={() => setEditingRole(true)}

@@ -50,7 +50,14 @@ exports.deleteUser = (0, https_1.onCall)({ cors: true }, async (request) => {
     const db = (0, firestore_1.getFirestore)();
     const userDoc = await db.collection('users').doc(auth.uid).get();
     const userData = userDoc.data();
-    if (!userData || (userData.role !== 'Admin' && !userData.isAdmin)) {
+    // More flexible admin check - case insensitive and multiple fields
+    const isAdmin = userData && (
+        userData.role?.toLowerCase() === 'admin' ||
+        userData.isAdmin === true ||
+        userData.isAdmin === 'true' ||
+        userData.role?.toLowerCase() === 'administrator'
+    );
+    if (!isAdmin) {
         throw new https_1.HttpsError("permission-denied", "Only admins can delete users");
     }
     const { userId } = data;
@@ -83,7 +90,14 @@ exports.updateUserBlockStatus = (0, https_1.onCall)({ cors: true }, async (reque
     const db = (0, firestore_1.getFirestore)();
     const userDoc = await db.collection('users').doc(auth.uid).get();
     const userData = userDoc.data();
-    if (!userData || (userData.role !== 'Admin' && !userData.isAdmin)) {
+    // More flexible admin check - case insensitive and multiple fields
+    const isAdmin = userData && (
+        userData.role?.toLowerCase() === 'admin' ||
+        userData.isAdmin === true ||
+        userData.isAdmin === 'true' ||
+        userData.role?.toLowerCase() === 'administrator'
+    );
+    if (!isAdmin) {
         throw new https_1.HttpsError("permission-denied", "Only admins can block/unblock users");
     }
     const { userId, isBlocked } = data;

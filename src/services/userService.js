@@ -38,7 +38,7 @@ export const getUsers = async () => {
     return usersSnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data(),
-      role: doc.data().role || (doc.data().isAdmin ? 'Admin' : 'User')
+      role: doc.data().role || (doc.data().isAdmin ? 'admin' : 'user')
     }));
   } catch (error) {
     console.error('Error getting users:', error);
@@ -80,7 +80,7 @@ export const subscribeToUsers = (callback) => {
       const users = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        role: doc.data().role || (doc.data().isAdmin ? 'Admin' : 'User')
+        role: doc.data().role || (doc.data().isAdmin ? 'admin' : 'user')
       }));
       callback(users);
     }, (error) => {

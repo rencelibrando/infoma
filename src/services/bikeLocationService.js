@@ -1,5 +1,5 @@
 import { db, realtimeDb } from '../firebase';
-import { collection, addDoc, updateDoc, doc, getDoc, query, where, getDocs, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, getDoc, query, where, getDocs, serverTimestamp, orderBy, limit as query_limit } from "firebase/firestore";
 import { ref, onValue, off, push, set, update, remove } from "firebase/database";
 
 // Real-time location listeners
@@ -392,7 +392,7 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
     }
     
     // Update ride status with proper structure
-    await updateDoc(rideRef, {
+    const rideUpdateData = {
       endTime: currentTimestamp,
       endLocation: {
         accuracy: 0,
@@ -411,8 +411,15 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
       // Keep legacy fields for backward compatibility
       isActive: false,
       endLatitude: latitude, 
-      endLongitude: longitude
-    });
+      endLongitude: longitude,
+      // Ensure these fields are properly set for history display
+      duration: currentTimestamp - startTime,
+      lastUpdated: serverTimestamp()
+    };
+
+    console.log('Updating ride with data:', rideUpdateData);
+    await updateDoc(rideRef, rideUpdateData);
+    console.log('Ride updated successfully');
     
     console.log(`Ending ride for bike ${bikeId}, locking bike and marking as available.`);
     
@@ -428,8 +435,16 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
       lastUpdated: serverTimestamp()
     });
     
+    // Verify ride was updated correctly
+    const verificationDoc = await getDoc(rideRef);
+    if (!verificationDoc.exists() || verificationDoc.data().status !== "completed") {
+      throw new Error("Failed to properly update ride status");
+    }
+
     // Clean up real-time tracking data
     await cleanupRideTracking(rideId, userId);
+    
+    console.log(`Ride ${rideId} completed successfully with status: ${verificationDoc.data().status}`);
     
     return {
       rideId,
@@ -438,7 +453,8 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
       endLatitude: latitude,
       endLongitude: longitude,
       cost: calculatedCost,
-      distanceTraveled: totalDistance
+      distanceTraveled: totalDistance,
+      status: "completed"
     };
   } catch (error) {
     console.error('Error ending bike ride:', error);
@@ -547,7 +563,11 @@ export const getActiveRides = async () => {
 export const getUserRideHistory = async (userId) => {
   try {
     const ridesCollection = collection(db, "rides");
-    const q = query(ridesCollection, where("userId", "==", userId));
+    const q = query(
+      ridesCollection, 
+      where("userId", "==", userId),
+      orderBy("startTime", "desc")
+    );
     const snapshot = await getDocs(q);
     
     return snapshot.docs.map(doc => ({
@@ -558,6 +578,147 @@ export const getUserRideHistory = async (userId) => {
     }));
   } catch (error) {
     console.error('Error getting user ride history:', error);
+    throw error;
+  }
+};
+
+// Get a user's completed ride history (excludes active rides)
+export const getUserCompletedRideHistory = async (userId) => {
+  try {
+    const ridesCollection = collection(db, "rides");
+    const q = query(
+      ridesCollection, 
+      where("userId", "==", userId),
+      where("status", "==", "completed"),
+      orderBy("endTime", "desc")
+    );
+    const snapshot = await getDocs(q);
+    
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      startTime: doc.data().startTime ? new Date(doc.data().startTime) : null,
+      endTime: doc.data().endTime ? new Date(doc.data().endTime) : null
+    }));
+  } catch (error) {
+    console.error('Error getting user completed ride history:', error);
+    throw error;
+  }
+};
+
+// Get filtered ride history for admin dashboard
+export const getFilteredRideHistory = async (filters = {}) => {
+  try {
+    const {
+      status = 'all',
+      dateRange = 'all',
+      limit = 50,
+      userId = null
+    } = filters;
+
+    const ridesCollection = collection(db, "rides");
+    let constraints = [];
+
+    // Add user filter if specified
+    if (userId) {
+      constraints.push(where("userId", "==", userId));
+    }
+
+    // Add status filter
+    if (status !== 'all') {
+      constraints.push(where("status", "==", status));
+    }
+
+    // Add date range filter
+    if (dateRange !== 'all') {
+      const now = new Date();
+      let startDate;
+
+      switch (dateRange) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          startDate = new Date(now.getFullYear(), 0, 1);
+          break;
+      }
+
+      if (startDate) {
+        constraints.push(where("startTime", ">=", startDate.getTime()));
+      }
+    }
+
+    // Add ordering and limit
+    constraints.push(orderBy("startTime", "desc"));
+    constraints.push(query_limit(limit));
+
+    const q = query(ridesCollection, ...constraints);
+    const snapshot = await getDocs(q);
+
+    // Fetch user data for each ride
+    const rides = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const rideData = doc.data();
+        let userData = null;
+
+        // Fetch user information
+        if (rideData.userId) {
+          try {
+                         const userDoc = await getDoc(doc(db, "users", rideData.userId));
+            if (userDoc.exists()) {
+              userData = userDoc.data();
+            }
+          } catch (userError) {
+            console.error(`Error fetching user data for ${rideData.userId}:`, userError);
+          }
+        }
+
+        // Calculate ride statistics
+        let duration = 0;
+        let maxSpeed = 0;
+        let averageSpeed = 0;
+
+        if (rideData.startTime && rideData.endTime) {
+          duration = rideData.endTime - rideData.startTime;
+        } else if (rideData.startTime && rideData.status === 'active') {
+          duration = Date.now() - rideData.startTime;
+        }
+
+        // Calculate speeds from path data
+        if (rideData.path && rideData.path.length > 0) {
+          const speeds = rideData.path
+            .map(point => point.speed || 0)
+            .filter(speed => speed > 0);
+
+          if (speeds.length > 0) {
+            maxSpeed = Math.max(...speeds);
+            averageSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+          }
+        }
+
+        return {
+          id: doc.id,
+          ...rideData,
+          user: userData,
+          startTime: rideData.startTime ? new Date(rideData.startTime) : null,
+          endTime: rideData.endTime ? new Date(rideData.endTime) : null,
+          duration,
+          maxSpeed,
+          averageSpeed,
+          distanceTraveled: rideData.distanceTraveled || 0
+        };
+      })
+    );
+
+    return rides;
+  } catch (error) {
+    console.error('Error getting filtered ride history:', error);
     throw error;
   }
 };

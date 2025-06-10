@@ -396,7 +396,7 @@ const RideHistorySection = () => {
   const [routeData, setRouteData] = useState(null);
   const [showRouteModal, setShowRouteModal] = useState(false);
   const [filters, setFilters] = useState({
-    status: 'all',
+    status: 'completed',
     dateRange: 'week',
     limit: 20,
     sortBy: 'startTime',
@@ -478,9 +478,9 @@ const RideHistorySection = () => {
             value={filters.status}
             onChange={(e) => handleFilterChange({ status: e.target.value })}
           >
-            <option value="all">All Status</option>
-            <option value="completed">Completed</option>
-            <option value="active">Active</option>
+            <option value="completed">Completed Rides</option>
+            <option value="active">Active Rides</option>
+            <option value="all">All Rides</option>
             <option value="cancelled">Cancelled</option>
           </FilterSelect>
           

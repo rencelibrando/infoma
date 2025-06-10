@@ -38,7 +38,15 @@ exports.deleteUser = onCall({cors: true}, async (request) => {
   const userDoc = await db.collection('users').doc(auth.uid).get();
   const userData = userDoc.data();
   
-  if (!userData || (userData.role !== 'Admin' && !userData.isAdmin)) {
+  // More flexible admin check - case insensitive and multiple fields
+  const isAdmin = userData && (
+    userData.role?.toLowerCase() === 'admin' ||
+    userData.isAdmin === true ||
+    userData.isAdmin === 'true' ||
+    userData.role?.toLowerCase() === 'administrator'
+  );
+  
+  if (!isAdmin) {
     throw new Error("Only admins can delete users");
   }
 
@@ -80,7 +88,15 @@ exports.updateUserBlockStatus = onCall({cors: true}, async (request) => {
   const userDoc = await db.collection('users').doc(auth.uid).get();
   const userData = userDoc.data();
   
-  if (!userData || (userData.role !== 'Admin' && !userData.isAdmin)) {
+  // More flexible admin check - case insensitive and multiple fields
+  const isAdmin = userData && (
+    userData.role?.toLowerCase() === 'admin' ||
+    userData.isAdmin === true ||
+    userData.isAdmin === 'true' ||
+    userData.role?.toLowerCase() === 'administrator'
+  );
+  
+  if (!isAdmin) {
     throw new Error("Only admins can block/unblock users");
   }
 
