@@ -1,5 +1,5 @@
 import { db, auth } from '../firebase';
-import { collection, getDocs, doc, updateDoc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, onSnapshot, query, deleteDoc, getDoc } from 'firebase/firestore';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 
 // Helper function to check authentication with better error handling
@@ -99,17 +99,46 @@ export const subscribeToUsers = (callback) => {
 export const updateUserBlockStatus = async (userId, isBlocked) => {
   try {
     // Require authentication for this operation
-    requireAuth();
+    const currentUser = requireAuth();
     
+    // Get current user's role to verify admin permissions
+    const currentUserRef = doc(db, 'users', currentUser.uid);
+    const currentUserDoc = await getDoc(currentUserRef);
+    const currentUserData = currentUserDoc.data();
+    
+    if (!currentUserDoc.exists()) {
+      throw new Error('User document not found. Please ensure your account is properly set up.');
+    }
+    
+    // More flexible admin check - case insensitive and multiple fields
+    const isAdmin = currentUserData && (
+      currentUserData.role?.toLowerCase() === 'admin' ||
+      currentUserData.isAdmin === true ||
+      currentUserData.isAdmin === 'true' ||
+      currentUserData.role?.toLowerCase() === 'administrator'
+    );
+    
+    if (!isAdmin) {
+      throw new Error(`Only administrators can block/unblock users. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+    }
+    
+    // Update the user's block status in Firestore
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { 
       isBlocked: isBlocked,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
+      blockedBy: isBlocked ? currentUser.uid : null,
+      blockedAt: isBlocked ? new Date() : null
     });
+    
+    console.log(`User ${userId} ${isBlocked ? 'blocked' : 'unblocked'} successfully`);
     return true;
   } catch (error) {
     console.error('Error updating user block status:', error);
-    throw error;
+    if (error.message.includes('administrators')) {
+      throw error; // Re-throw permission errors as-is
+    }
+    throw new Error(`Failed to ${isBlocked ? 'block' : 'unblock'} user: ${error.message}`);
   }
 };
 
@@ -117,25 +146,70 @@ export const updateUserBlockStatus = async (userId, isBlocked) => {
 export const deleteUser = async (userId) => {
   try {
     // Require authentication for this operation
-    requireAuth();
+    const currentUser = requireAuth();
+    
+    // Get current user's role to verify admin permissions
+    const currentUserRef = doc(db, 'users', currentUser.uid);
+    const currentUserDoc = await getDoc(currentUserRef);
+    const currentUserData = currentUserDoc.data();
+    
+    if (!currentUserDoc.exists()) {
+      throw new Error('User document not found. Please ensure your account is properly set up.');
+    }
+    
+    // More flexible admin check - case insensitive and multiple fields
+    const isAdmin = currentUserData && (
+      currentUserData.role?.toLowerCase() === 'admin' ||
+      currentUserData.isAdmin === true ||
+      currentUserData.isAdmin === 'true' ||
+      currentUserData.role?.toLowerCase() === 'administrator'
+    );
+    
+    if (!isAdmin) {
+      throw new Error(`Only administrators can delete users. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+    }
+    
+    // Prevent self-deletion
+    if (userId === currentUser.uid) {
+      throw new Error('You cannot delete your own account');
+    }
     
     // 1. Delete the user document from Firestore
     const userRef = doc(db, 'users', userId);
+    const userDoc = await getDoc(userRef);
+    
+    if (!userDoc.exists()) {
+      throw new Error('User not found');
+    }
+    
+    // Store user data for logging
+    const userData = userDoc.data();
+    
+    // Delete from Firestore
     await deleteDoc(userRef);
+    console.log(`User ${userId} deleted from Firestore by admin ${currentUser.uid}`);
     
     try {
       // 2. Call Cloud Function to delete the user from Firebase Authentication
       const functions = getFunctions();
       const deleteFirebaseUser = httpsCallable(functions, 'deleteUser');
-      await deleteFirebaseUser({ userId });
+      const result = await deleteFirebaseUser({ userId });
+      console.log('User deleted from Authentication:', result.data);
     } catch (authError) {
       console.error('Error deleting user from Authentication:', authError);
-      // Continue execution - at least the Firestore document was deleted
+      // This is not fatal - the Firestore document is already deleted
+      console.warn('User was deleted from Firestore but may still exist in Firebase Authentication');
     }
     
-    return true;
+    return {
+      success: true,
+      message: `User ${userData.email || userData.displayName || userId} deleted successfully`
+    };
   } catch (error) {
     console.error('Error deleting user:', error);
-    throw error;
+    if (error.message.includes('administrators') || error.message.includes('cannot delete')) {
+      throw error; // Re-throw permission errors as-is
+    }
+    throw new Error(`Failed to delete user: ${error.message}`);
   }
 }; 

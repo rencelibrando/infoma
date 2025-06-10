@@ -223,6 +223,7 @@ const UserDetailsDialog = ({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
 
   if (!user) return null;
 
@@ -235,12 +236,16 @@ const UserDetailsDialog = ({
     try {
       setProcessing(true);
       setError(null);
+      setSuccess(null);
       await updateUserBlockStatus(user.id, !user.isBlocked);
       setConfirmingBlock(false);
-      // Feedback could be shown here
+      setSuccess(`User ${!user.isBlocked ? 'blocked' : 'unblocked'} successfully`);
+      
+      // Update local user object to reflect the change
+      user.isBlocked = !user.isBlocked;
     } catch (err) {
       console.error("Error blocking/unblocking user:", err);
-      setError("Failed to update user block status. Please try again.");
+      setError(err.message || "Failed to update user block status. Please try again.");
     } finally {
       setProcessing(false);
     }
@@ -250,12 +255,18 @@ const UserDetailsDialog = ({
     try {
       setProcessing(true);
       setError(null);
-      await deleteUser(user.id);
+      setSuccess(null);
+      const result = await deleteUser(user.id);
       setConfirmingDelete(false);
-      onClose(); // Close the dialog after deletion
+      setSuccess(result.message || 'User deleted successfully');
+      
+      // Wait a moment to show success message, then close
+      setTimeout(() => {
+        onClose();
+      }, 1500);
     } catch (err) {
       console.error("Error deleting user:", err);
-      setError("Failed to delete user. Please try again.");
+      setError(err.message || "Failed to delete user. Please try again.");
       setProcessing(false);
     }
   };
@@ -535,6 +546,18 @@ const UserDetailsDialog = ({
                 borderRadius: '4px'
               }}>
                 {error}
+              </div>
+            )}
+            
+            {success && (
+              <div style={{
+                padding: '10px', 
+                marginBottom: '16px', 
+                backgroundColor: 'rgba(76, 175, 80, 0.1)', 
+                color: colors.success,
+                borderRadius: '4px'
+              }}>
+                {success}
               </div>
             )}
             

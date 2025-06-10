@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db } from '../firebase';
 import styled from 'styled-components';
 import UserDetailsDialog from './UserDetailsDialog';
 import { 
   getUsers, 
   updateUserRole, 
-  subscribeToUsers,
-  updateUserBlockStatus,
-  deleteUser
+  subscribeToUsers
 } from '../services/userService';
 import { getUserRoles } from '../services/dashboardService';
 
@@ -151,90 +148,24 @@ const Select = styled.select`
   }
 `;
 
-const Button = styled.button`
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  background-color: ${props => props.secondary ? colors.lightGray : props.danger ? '#d32f2f' : colors.pineGreen};
-  color: ${props => props.secondary ? colors.darkGray : colors.white};
-  cursor: pointer;
-  font-weight: ${props => props.bold ? 'bold' : 'normal'};
-  
-  &:hover {
-    opacity: 0.9;
-  }
-  
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-`;
-
-const RoleSelect = styled.select`
-  padding: 5px 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background-color: ${colors.white};
-  
-  &:focus {
-    outline: none;
-    border-color: ${colors.pineGreen};
-  }
-`;
-
-const StatusBadge = styled.span`
-  display: inline-block;
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  text-transform: uppercase;
-  background-color: rgba(0, 0, 0, 0.05);
-  color: ${colors.mediumGray};
-`;
-
-const Modal = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-`;
-
 const RefreshIndicator = styled.div`
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  background-color: ${colors.pineGreen};
-  color: white;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  z-index: 1000;
-  animation: fadeOut 2s forwards;
-  animation-delay: 1s;
-  
-  @keyframes fadeOut {
-    to {
-      opacity: 0;
-      visibility: hidden;
-    }
-  }
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: ${colors.success};
+  color: white;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 500;
 `;
 
 const LastUpdateTime = styled.div`
   font-size: 12px;
   color: ${colors.mediumGray};
-  text-align: right;
-  margin-bottom: 5px;
+  margin-bottom: 15px;
+  font-style: italic;
 `;
 
 // Helper function to get user initials
@@ -250,8 +181,6 @@ const UsersList = () => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [editingUser, setEditingUser] = useState(null);
-  const [selectedUser, setSelectedUser] = useState(null);
   const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const [detailsUser, setDetailsUser] = useState(null);
   const [lastUpdateTime, setLastUpdateTime] = useState(new Date());
@@ -352,8 +281,6 @@ const UsersList = () => {
       setUsers(users.map(user => 
         user.id === userId ? { ...user, role: newRole } : user
       ));
-      
-      setEditingUser(null);
     } catch (err) {
       console.error('Error updating user role:', err);
       alert('Failed to update user role');

@@ -1,5 +1,5 @@
 import { db, auth } from '../firebase';
-import { collection, getDocs, query, onSnapshot, limit, orderBy, where, getDoc, doc } from 'firebase/firestore';
+import { collection, getDocs, query, onSnapshot, limit, orderBy, where, getDoc, doc, deleteDoc } from 'firebase/firestore';
 import { ref, onValue, get } from 'firebase/database';
 import { realtimeDb } from '../firebase';
 
@@ -1168,5 +1168,80 @@ export const subscribeToAnalytics = (callback) => {
   } catch (error) {
     console.error('Error in subscribeToAnalytics:', error);
     throw error;
+  }
+};
+
+// Delete a ride from the database (Admin only)
+export const deleteRide = async (rideId) => {
+  try {
+    // Require authentication for this operation
+    const currentUser = requireAuth();
+    
+    // Get current user's role to verify admin permissions
+    const currentUserRef = doc(db, 'users', currentUser.uid);
+    const currentUserDoc = await getDoc(currentUserRef);
+    const currentUserData = currentUserDoc.data();
+    
+    console.log('Admin check - Current user data:', {
+      uid: currentUser.uid,
+      email: currentUser.email,
+      userData: currentUserData,
+      role: currentUserData?.role,
+      isAdmin: currentUserData?.isAdmin
+    });
+    
+    if (!currentUserDoc.exists()) {
+      throw new Error('User document not found. Please ensure your account is properly set up.');
+    }
+    
+    // More flexible admin check - case insensitive and multiple fields
+    const isAdmin = currentUserData && (
+      currentUserData.role?.toLowerCase() === 'admin' ||
+      currentUserData.isAdmin === true ||
+      currentUserData.isAdmin === 'true' ||
+      currentUserData.role?.toLowerCase() === 'administrator'
+    );
+    
+    if (!isAdmin) {
+      throw new Error(`Only administrators can delete ride history. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+    }
+    
+    // Check if the ride exists
+    const rideRef = doc(db, 'rides', rideId);
+    const rideDoc = await getDoc(rideRef);
+    
+    if (!rideDoc.exists()) {
+      throw new Error('Ride not found');
+    }
+    
+    // Store ride data for logging
+    const rideData = rideDoc.data();
+    
+    // Delete the ride document from Firestore
+    await deleteDoc(rideRef);
+    
+    // Clear cache to ensure fresh data on next fetch
+    dataCache.rides = null;
+    dataCache.lastUpdated.rides = null;
+    
+    console.log(`Ride ${rideId} deleted from database by admin ${currentUser.uid}`);
+    
+    return {
+      success: true,
+      message: `Ride ${rideId} deleted successfully`,
+      deletedRide: {
+        id: rideId,
+        userId: rideData.userId,
+        bikeId: rideData.bikeId,
+        startTime: rideData.startTime,
+        status: rideData.status
+      }
+    };
+  } catch (error) {
+    console.error('Error deleting ride:', error);
+    if (error.message.includes('administrators') || error.message.includes('not found')) {
+      throw error; // Re-throw permission and not found errors as-is
+    }
+    throw new Error(`Failed to delete ride: ${error.message}`);
   }
 }; 

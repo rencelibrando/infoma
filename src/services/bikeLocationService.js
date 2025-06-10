@@ -369,6 +369,7 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
     }
     
     const bikeId = rideData.bikeId;
+    const userId = rideData.userId;
     const bikeRef = doc(db, "bikes", bikeId);
     const currentTimestamp = Date.now();
     
@@ -426,6 +427,9 @@ export const endBikeRide = async (rideId, latitude, longitude) => {
       longitude: longitude,
       lastUpdated: serverTimestamp()
     });
+    
+    // Clean up real-time tracking data
+    await cleanupRideTracking(rideId, userId);
     
     return {
       rideId,
@@ -572,6 +576,58 @@ export const getBikeLocationHistory = async (bikeId) => {
     }));
   } catch (error) {
     console.error('Error getting bike location history:', error);
+    throw error;
+  }
+};
+
+/**
+ * Clean up all real-time tracking data when a ride ends
+ * @param {string} rideId - Ride ID
+ * @param {string} userId - User ID
+ */
+export const cleanupRideTracking = async (rideId, userId) => {
+  try {
+    // Remove from active rides in Realtime Database
+    const activeRideRef = ref(realtimeDb, `activeRides/${userId}`);
+    await remove(activeRideRef);
+    
+    // Remove from live location tracking
+    const liveLocationRef = ref(realtimeDb, `liveLocation/${userId}`);
+    await remove(liveLocationRef);
+    
+    // Remove any emergency alerts for this ride
+    const emergencyRef = ref(realtimeDb, `emergencyAlerts/${rideId}`);
+    await remove(emergencyRef);
+    
+    // Stop any location listeners for this user
+    stopLocationTracking(userId);
+    
+    console.log(`Real-time tracking data cleaned up for ride: ${rideId}, user: ${userId}`);
+  } catch (error) {
+    console.error('Error cleaning up ride tracking data:', error);
+    // Don't throw error to avoid failing ride completion
+  }
+};
+
+/**
+ * Force cleanup of tracking data for emergency situations
+ * @param {string} userId - User ID to force cleanup
+ */
+export const forceCleanupUserTracking = async (userId) => {
+  try {
+    // Remove all tracking data for this user
+    const userActiveRideRef = ref(realtimeDb, `activeRides/${userId}`);
+    await remove(userActiveRideRef);
+    
+    const userLocationRef = ref(realtimeDb, `liveLocation/${userId}`);
+    await remove(userLocationRef);
+    
+    // Stop location listeners
+    stopLocationTracking(userId);
+    
+    console.log(`Force cleanup completed for user: ${userId}`);
+  } catch (error) {
+    console.error('Error during force cleanup:', error);
     throw error;
   }
 }; 

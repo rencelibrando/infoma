@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, getDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { ref, onValue, off, child, get } from 'firebase/database';
+import { forceCleanupUserTracking } from '../../services/bikeLocationService';
+import { deleteRide } from '../../services/dashboardService';
 import { db, realtimeDb } from '../../firebase';
 import styled from 'styled-components';
 import { Marker, InfoWindow, Polyline, Circle, GoogleMap, useJsApiLoader } from '@react-google-maps/api';
@@ -415,6 +417,11 @@ const RealTimeTrackingDashboard = () => {
   const [routeData, setRouteData] = useState(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
 
+  // Deletion state
+  const [deletingRides, setDeletingRides] = useState(new Set());
+  const [deleteError, setDeleteError] = useState(null);
+  const [deleteSuccess, setDeleteSuccess] = useState(null);
+
   // Helper function to determine if a ride is truly active
   const isRideTrulyActive = (ride) => {
     const hasStarted = !!ride.startTime;
@@ -546,8 +553,19 @@ const RealTimeTrackingDashboard = () => {
     }
   ];
 
-  // Combine real bikes data with predefined bikes for demonstration
-  const allBikes = [...(bikes || []), ...predefinedBikes];
+  // Use only real bikes data for stats - combine with predefined only for map display
+  const allBikesForMap = [...(bikes || []), ...predefinedBikes];
+  
+  // Use only real bikes for accurate stats calculation to match Manage Bikes section
+  const realBikes = bikes || [];
+
+  // Debug log to verify stats synchronization
+  console.log('🚴 Bike Stats Debug:', {
+    realBikesCount: realBikes.length,
+    predefinedBikesCount: predefinedBikes.length,
+    allBikesForMapCount: allBikesForMap.length,
+    availableCount: realBikes.filter(bike => bike?.isAvailable && bike?.maintenanceStatus === 'operational' && !bike?.isInUse).length
+  });
 
   // Add debugging for data availability (moved after state declarations)
   useEffect(() => {
@@ -985,6 +1003,27 @@ const RealTimeTrackingDashboard = () => {
       setAlerts(prev => prev.filter(alert => alert.id !== `emergency-${rideId}`));
     } catch (error) {
       console.error('Error responding to emergency:', error);
+    }
+  };
+
+  const handleForceCleanupTracking = async (userId, rideName) => {
+    if (window.confirm(`Force cleanup tracking data for ${rideName}? This will remove all real-time tracking data for this user.`)) {
+      try {
+        await forceCleanupUserTracking(userId);
+        alert('Tracking data cleanup completed successfully.');
+        
+        // Refresh the component data
+        setActiveRides(prev => prev.filter(ride => ride.userId !== userId));
+        setLiveLocations(prev => {
+          const updated = { ...prev };
+          delete updated[userId];
+          return updated;
+        });
+        clearRideTrail(userId);
+      } catch (error) {
+        console.error('Error during force cleanup:', error);
+        alert('Error during cleanup. Please check console for details.');
+      }
     }
   };
 
@@ -1484,6 +1523,49 @@ const RealTimeTrackingDashboard = () => {
     setSelectedHistoryRide(null);
     setRouteData(null);
     setIsLoadingRoute(false);
+  };
+
+  // Handle ride deletion
+  const handleDeleteRide = async (rideId) => {
+    // Confirm deletion
+    const confirmed = window.confirm(
+      'Are you sure you want to delete this ride from the database? This action cannot be undone.'
+    );
+    
+    if (!confirmed) return;
+
+    try {
+      // Add to deleting set
+      setDeletingRides(prev => new Set([...prev, rideId]));
+      setDeleteError(null);
+
+      // Call the delete function
+      const result = await deleteRide(rideId);
+
+      if (result.success) {
+        // Remove from history list
+        setRideHistory(prev => prev.filter(ride => ride.id !== rideId));
+        
+        // Show success message
+        setDeleteSuccess(`Ride deleted successfully: ${result.deletedRide.bikeId} - ${new Date(result.deletedRide.startTime).toLocaleString()}`);
+        
+        // Clear success message after 5 seconds
+        setTimeout(() => setDeleteSuccess(null), 5000);
+      }
+    } catch (error) {
+      console.error('Error deleting ride:', error);
+      setDeleteError(error.message || 'Failed to delete ride');
+      
+      // Clear error message after 5 seconds
+      setTimeout(() => setDeleteError(null), 5000);
+    } finally {
+      // Remove from deleting set
+      setDeletingRides(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(rideId);
+        return newSet;
+      });
+    }
   };
 
   // Get user initials for avatar
@@ -2166,6 +2248,41 @@ const RealTimeTrackingDashboard = () => {
         </div>
       </div>
 
+      {/* Success and Error Messages */}
+      {deleteSuccess && (
+        <div style={{
+          background: 'linear-gradient(135deg, #4CAF50, #66BB6A)',
+          color: 'white',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          boxShadow: '0 2px 8px rgba(76, 175, 80, 0.3)'
+        }}>
+          <span style={{ fontSize: '16px' }}>✅</span>
+          <span style={{ fontWeight: '600' }}>{deleteSuccess}</span>
+        </div>
+      )}
+
+      {deleteError && (
+        <div style={{
+          background: 'linear-gradient(135deg, #f44336, #ef5350)',
+          color: 'white',
+          padding: '12px 20px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          boxShadow: '0 2px 8px rgba(244, 67, 54, 0.3)'
+        }}>
+          <span style={{ fontSize: '16px' }}>❌</span>
+          <span style={{ fontWeight: '600' }}>{deleteError}</span>
+        </div>
+      )}
+
       {/* Enhanced Rides List */}
       <div style={{
         background: 'white',
@@ -2409,7 +2526,7 @@ const RealTimeTrackingDashboard = () => {
                   </div>
                 </div>
 
-                {/* Route Availability Indicator */}
+                {/* Route Availability Indicator and Actions */}
                 <div style={{ 
                   display: 'flex', 
                   justifyContent: 'space-between',
@@ -2450,14 +2567,65 @@ const RealTimeTrackingDashboard = () => {
                   </div>
                   
                   <div style={{
-                    background: 'linear-gradient(135deg, #1D3C34, #2D5A4C)',
-                    color: 'white',
-                    padding: '4px 8px',
-                    borderRadius: '4px',
-                    fontSize: '10px',
-                    fontWeight: 'bold'
+                    display: 'flex',
+                    gap: '8px',
+                    alignItems: 'center'
                   }}>
-                    👁️ View Details
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRideHistoryClick(ride);
+                      }}
+                      style={{
+                        background: 'linear-gradient(135deg, #1D3C34, #2D5A4C)',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        border: 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.target.style.opacity = '0.8'}
+                      onMouseLeave={(e) => e.target.style.opacity = '1'}
+                    >
+                      👁️ View Details
+                    </button>
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteRide(ride.id);
+                      }}
+                      disabled={deletingRides.has(ride.id)}
+                      style={{
+                        background: deletingRides.has(ride.id) ? 
+                          colors.mediumGray : 
+                          'linear-gradient(135deg, #d32f2f, #f44336)',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '10px',
+                        fontWeight: 'bold',
+                        border: 'none',
+                        cursor: deletingRides.has(ride.id) ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s ease',
+                        opacity: deletingRides.has(ride.id) ? 0.7 : 1
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!deletingRides.has(ride.id)) {
+                          e.target.style.opacity = '0.8';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!deletingRides.has(ride.id)) {
+                          e.target.style.opacity = '1';
+                        }
+                      }}
+                    >
+                      {deletingRides.has(ride.id) ? '⏳ Deleting...' : '🗑️ Delete'}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2657,20 +2825,29 @@ const RealTimeTrackingDashboard = () => {
               {/* Stats Grid */}
               <StatsGrid>
                 <StatCard>
-                  <StatValue color={colors.pineGreen}>{allBikes?.length || 0}</StatValue>
+                  <StatValue color={colors.pineGreen}>{realBikes?.length || 0}</StatValue>
                   <StatLabel>Total Bikes</StatLabel>
                 </StatCard>
                 <StatCard>
                   <StatValue color={colors.success}>
-                    {allBikes ? allBikes.filter(bike => bike?.isAvailable && !bike?.isInUse).length : 0}
+                    {realBikes ? realBikes.filter(bike => bike?.isAvailable && bike?.maintenanceStatus === 'operational' && !bike?.isInUse).length : 0}
                   </StatValue>
                   <StatLabel>Available</StatLabel>
                 </StatCard>
                 <StatCard>
                   <StatValue color={colors.warning}>
-                    {bikes ? bikes.filter(bike => bike?.isInUse).length : 0}
+                    {realBikes ? realBikes.filter(bike => bike?.isInUse).length : 0}
                   </StatValue>
                   <StatLabel>In Use</StatLabel>
+                </StatCard>
+                <StatCard>
+                  <StatValue color={colors.danger}>
+                    {realBikes ? realBikes.filter(bike => 
+                      bike?.maintenanceStatus && 
+                      ['maintenance', 'repair', 'out-of-service'].includes(bike.maintenanceStatus)
+                    ).length : 0}
+                  </StatValue>
+                  <StatLabel>Maintenance</StatLabel>
                 </StatCard>
                 <StatCard>
                   <StatValue color={colors.success}>{stats.totalActiveRides}</StatValue>
@@ -2900,7 +3077,7 @@ const RealTimeTrackingDashboard = () => {
                   onLoad={() => console.log('Map loaded')}
                 >
                   {/* Enhanced bike markers with persistent display and visual indicators */}
-                  {allBikes && Array.isArray(allBikes) && allBikes.length > 0 && allBikes.map(bike => {
+                  {allBikesForMap && Array.isArray(allBikesForMap) && allBikesForMap.length > 0 && allBikesForMap.map(bike => {
                     if (!bike || !bike.id) {
                       console.warn('Invalid bike data:', bike);
                       return null;
