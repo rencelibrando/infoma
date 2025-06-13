@@ -29,8 +29,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && request.auth.uid == userId;
-      allow delete: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
 
       // Bookings subcollection under users
       match /bookings/{bookingId} {
@@ -85,10 +85,25 @@ service cloud.firestore {
     }
     // Support messages collection
     match /supportMessages/{messageId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      // A user can get their own message; an admin can get any.
+      allow get: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      // A user can query for their own messages.
+      allow list: if isAuthenticated() && isOwner(request.query.resource.userId);
+      // A user can create a message for themself.
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      // A user can update their own message; an admin can update any.
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      // Only admins can delete messages.
       allow delete: if isAdmin();
+    }
+
+    // Admin messages collection
+    match /adminMessages/{messageId} {
+      // User can read a message if it's theirs.
+      allow get: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      // Admins can write, users can only read their own.
+      allow list: if isAuthenticated() && isOwner(request.query.resource.userId);
+      allow write: if isAdmin();
     }
 
     // FAQs collection
@@ -270,27 +285,13 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
     
-    // Notifications collection
+    // Notifications collection - secure access
     match /notifications/{notificationId} {
-      // Users can read their own notifications
-      allow read: if request.auth != null && 
-                  request.auth.uid == resource.data.userId;
-      
-      // Users can update their own notifications (mark as read, etc.)
-      allow update: if request.auth != null && 
-                    request.auth.uid == resource.data.userId &&
-                    // Only allow updating certain fields
-                    request.resource.data.diff(resource.data).affectedKeys()
-                      .hasOnly(['isRead']);
-      
-      // Users can delete their own notifications
-      allow delete: if request.auth != null && 
-                    request.auth.uid == resource.data.userId;
-      
-      // Allow authenticated users to create notifications for themselves
-      // This is for demo/development purposes - in production, restrict to admin/system only
-      allow create: if request.auth != null && 
-                    request.auth.uid == request.resource.data.userId;
+        allow get: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+        allow list: if isAuthenticated() && isOwner(request.query.resource.userId);
+        allow create: if isAdmin(); // Only admins/backend can create notifications
+        allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+        allow delete: if isAdmin();
     }
   }
 } 

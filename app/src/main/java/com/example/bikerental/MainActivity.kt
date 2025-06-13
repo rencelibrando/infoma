@@ -86,6 +86,8 @@ import com.example.bikerental.screens.help.HelpSupportScreen
 import com.example.bikerental.utils.PerformanceMonitor
 import com.example.bikerental.services.NotificationService
 import javax.inject.Inject
+import android.content.Intent
+import android.widget.Toast
 
 @OptIn(ExperimentalMaterial3Api::class)
 @AndroidEntryPoint
@@ -121,6 +123,9 @@ class MainActivity : ComponentActivity() {
         
         // Initialize location services immediately
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        // Handle deep link for email verification
+        handleDeepLink(intent)
         
         // Create location callback
         locationCallback = object : LocationCallback() {
@@ -230,6 +235,40 @@ class MainActivity : ComponentActivity() {
                             authViewModel = authViewModel,
                             fusedLocationClient = fusedLocationClient
                         )
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent) // Important: Make sure the new intent is set for future use
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent?) {
+        val action: String? = intent?.action
+        val data = intent?.data
+        Log.d(TAG, "handleDeepLink: action=$action, data=$data")
+
+        if (action == Intent.ACTION_VIEW && data != null) {
+            val oobCode = data.getQueryParameter("oobCode")
+            val mode = data.getQueryParameter("mode")
+            Log.d(TAG, "handleDeepLink: mode=$mode, oobCode=$oobCode")
+
+            if (mode == "verifyEmail" && !oobCode.isNullOrBlank()) {
+                Log.i(TAG, "Received email verification link with action code.")
+                Toast.makeText(this, "Verifying email...", Toast.LENGTH_SHORT).show()
+                authViewModel.verifyEmailWithCode(oobCode) { success, message ->
+                    // This will be executed on the main thread
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                    if (success) {
+                        // The user's auth state will be updated by the ViewModel,
+                        // and the LaunchedEffect in onCreate will handle navigation.
+                        Log.i(TAG, "Email verification successful, navigating to home.")
+                    } else {
+                        Log.e(TAG, "Email verification failed: $message")
                     }
                 }
             }

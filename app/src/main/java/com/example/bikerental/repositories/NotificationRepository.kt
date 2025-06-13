@@ -203,8 +203,8 @@ class NotificationRepository @Inject constructor(
                 actionText = request.actionText,
                 actionData = request.actionData,
                 timestamp = Timestamp.now(),
-                isRead = false,
-                isActionable = request.actionText.isNotBlank()
+                read = false,
+                actionable = request.actionText.isNotBlank()
             )
 
             val documentRef = firestore

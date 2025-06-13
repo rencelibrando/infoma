@@ -107,19 +107,12 @@ class BikeRentalApplication : Application() {
         }
     }
     
-    private suspend fun initializeAppCheck() {
+    private fun initializeAppCheck() {
         try {
             val appCheckManager = FirebaseAppCheckManager(applicationContext)
-            appCheckInitialized = appCheckManager.initializeAppCheck()
-            
-            if (!appCheckInitialized) {
-                // If app check initialization failed completely, we'll still let the app continue
-                LogManager.w(TAG, "App Check initialization failed, proceeding without App Check")
-                appCheckInitialized = true
-            }
+            appCheckManager.initializeAppCheck()
         } catch (e: Exception) {
             LogManager.e(TAG, "Failed to initialize App Check", e)
-            appCheckInitialized = true
         }
     }
     

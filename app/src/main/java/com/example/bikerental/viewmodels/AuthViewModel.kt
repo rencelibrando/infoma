@@ -29,6 +29,10 @@ import javax.inject.Inject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.example.bikerental.utils.PerformanceMonitor
 import com.example.bikerental.utils.NetworkUtils
+import kotlinx.coroutines.NonCancellable
+import com.google.firebase.auth.ktx.actionCodeSettings
+import com.google.firebase.ktx.Firebase
+import com.google.firebase.auth.ActionCodeSettings
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
@@ -209,11 +213,13 @@ class AuthViewModel @Inject constructor(
 
                 logD("initializeExistingUser: Created new user object: ${newUser.id}")
 
-                // Save to Firestore in background (non-blocking)
+                // Save to Firestore in background (non-blocking but must complete)
                 viewModelScope.launch(Dispatchers.IO) {
                     try {
-                        NetworkUtils.withRetry {
-                            db.collection("users").document(firebaseUser.uid).set(newUser).await()
+                        withContext(NonCancellable) {
+                            NetworkUtils.withRetry {
+                                db.collection("users").document(firebaseUser.uid).set(newUser).await()
+                            }
                         }
                         logD("Created new user document in Firestore: ${newUser.id}")
                     } catch (e: Exception) {
@@ -268,6 +274,47 @@ class AuthViewModel @Inject constructor(
         } catch (e: Exception) {
             logE("Failed to load user from cache: ${e.message}")
             null
+        }
+    }
+
+    /**
+     * Reloads the current user from Firebase and checks their email verification status.
+     * This updates the internal state and returns the current verification status.
+     *
+     * @return `true` if the user's email is verified, `false` otherwise.
+     */
+    suspend fun checkEmailVerificationStatus(): Boolean {
+        val firebaseUser = auth.currentUser
+        if (firebaseUser == null) {
+            logD("checkEmailVerificationStatus: No user logged in.")
+            withContext(Dispatchers.Main) {
+                _authState.value = AuthState.Initial
+                _emailVerified.value = null
+            }
+            return false
+        }
+
+        return try {
+            withContext(Dispatchers.IO) {
+                firebaseUser.reload().await()
+                val isVerified = firebaseUser.isEmailVerified
+                logD("checkEmailVerificationStatus: User reloaded. Verified: $isVerified")
+                
+                withContext(Dispatchers.Main) {
+                    _emailVerified.value = isVerified
+                    if (isVerified && _authState.value !is AuthState.Authenticated) {
+                        // If verified, ensure the state is Authenticated
+                        checkEmailVerification()
+                    }
+                }
+                isVerified
+            }
+        } catch (e: Exception) {
+            logE("checkEmailVerificationStatus: Failed to reload user", e)
+            withContext(Dispatchers.Main) {
+                _authState.value = AuthState.Error("Failed to check status: ${e.message}")
+            }
+            false
         }
     }
 
@@ -332,6 +379,34 @@ class AuthViewModel @Inject constructor(
             } catch (e: Exception) {
                  logE("Token verification failed", e)
                 _authState.value = AuthState.Error("Verification failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Verify email with the oobCode from a deep link.
+     */
+    fun verifyEmailWithCode(code: String, onComplete: (Boolean, String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                logD("Attempting to verify email with action code.")
+                auth.applyActionCode(code).await()
+                logD("Email verification successful with action code.")
+
+                // Re-initialize user state to reflect verified email
+                auth.currentUser?.let {
+                    initializeExistingUser(it)
+                }
+                onComplete(true, "Email verified successfully! You can now log in.")
+            } catch (e: Exception) {
+                logE("Email verification failed", e)
+                val message = when (e) {
+                    is com.google.firebase.auth.FirebaseAuthInvalidUserException,
+                    is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException -> "The request is invalid. Please try signing up again."
+                    is com.google.firebase.auth.FirebaseAuthActionCodeException -> "Your request to verify your email has expired or the link has already been used. Please try again."
+                    else -> "An unknown error occurred: ${e.localizedMessage}"
+                }
+                onComplete(false, message)
             }
         }
     }
@@ -547,34 +622,36 @@ class AuthViewModel @Inject constructor(
 
             try {
                 // Ensure we have an email address
-                 val email = ensureUserEmail()
-                 if (email.isNullOrEmpty()) {
-                     _authState.value = AuthState.Error("Cannot send verification: Email address missing.")
-                     return@launch
-                 }
-
-                 logD("Attempting to resend verification email to: $email")
-                 // Reload user first to check current status
-                firebaseUser.reload().await()
-                if (firebaseUser.isEmailVerified) {
-                     logD("User email is already verified.")
-                     _emailVerified.value = true
-                     // Ensure Firestore and local state reflect this
-                     checkEmailVerification() // Run full check/update
-                     // Might already be Authenticated, but ensure it
-                     _currentUser.value?.let {
-                         _authState.value = AuthState.Authenticated(it.copy(isEmailVerified = true, hasCompletedAppVerification = true))
-                     } ?: run {
-                          _authState.value = AuthState.Error("User verified but profile data missing.")
-                     }
+                val email = ensureUserEmail()
+                if (email.isNullOrEmpty()) {
+                    _authState.value = AuthState.Error("Cannot send verification: Email address missing.")
                     return@launch
                 }
 
-                 // Send the verification email
-                firebaseUser.sendEmailVerification().await()
-                 logD("Verification email resent successfully to $email.")
+                logD("Attempting to resend verification email to: $email")
+                // Reload user first to check current status
+                firebaseUser.reload().await()
+                if (firebaseUser.isEmailVerified) {
+                    logD("User email is already verified.")
+                    _emailVerified.value = true
+                    // Ensure Firestore and local state reflect this
+                    checkEmailVerification() // Run full check/update
+                    // Might already be Authenticated, but ensure it
+                    _currentUser.value?.let {
+                        _authState.value = AuthState.Authenticated(it.copy(isEmailVerified = true, hasCompletedAppVerification = true))
+                    } ?: run {
+                        _authState.value = AuthState.Error("User verified but profile data missing.")
+                    }
+                    return@launch
+                }
 
-                 // Update Firestore timestamp (optional but good practice)
+                val actionCodeSettings = getActionCodeSettings(email)
+
+                // Send the verification email
+                firebaseUser.sendEmailVerification(actionCodeSettings).await()
+                logD("Verification email resent successfully to $email.")
+
+                // Update Firestore timestamp (optional but good practice)
                 try {
                     db.collection("users").document(firebaseUser.uid).update(mapOf(
                         "verificationSentAt" to System.currentTimeMillis(),
@@ -600,6 +677,24 @@ class AuthViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Creates and configures the ActionCodeSettings for email verification links.
+     */
+    private fun getActionCodeSettings(email: String): ActionCodeSettings {
+        return actionCodeSettings {
+            // URL you want to redirect back to. The domain must be authorized in the Firebase Console.
+            url = "https://bike-rental-bc5bd.firebaseapp.com/verify?email=$email"
+            // This must be true to be handled by the app.
+            handleCodeInApp = true
+            setAndroidPackageName(
+                "com.example.bikerental",
+                true, /* installIfNotAvailable */
+                "1"   /* minimumVersion */
+            )
+            // Optional: iOS bundle ID
+            // setIOSBundleId("com.example.bikerental.ios")
+        }
+    }
 
     /**
      * Sign in with email and password.
@@ -720,11 +815,12 @@ class AuthViewModel @Inject constructor(
 
                      // 2. Send verification email (best effort)
                     try {
-                        firebaseUser.sendEmailVerification().await()
-                         logD("Verification email sent to $email.")
+                        val actionCodeSettings = getActionCodeSettings(email)
+                        firebaseUser.sendEmailVerification(actionCodeSettings).await()
+                        logD("Verification email sent to $email.")
                     } catch (e: Exception) {
-                         logE("Failed to send verification email during signup", e)
-                         // Continue anyway, user can resend later
+                        logE("Failed to send verification email during signup", e)
+                        // Continue anyway, user can resend later
                     }
 
                      // 3. Update Firebase Auth Profile (Display Name)
@@ -1148,7 +1244,8 @@ class AuthViewModel @Inject constructor(
                         .await()
                     
                     // Send email verification
-                    firebaseUser.sendEmailVerification().await()
+                    val actionCodeSettings = getActionCodeSettings(email)
+                    firebaseUser.sendEmailVerification(actionCodeSettings).await()
                     
                     // Update state
                     _currentUser.value = newUser

@@ -15,9 +15,9 @@ import com.google.firebase.firestore.PropertyName
 data class User(
     @get:DocumentId
     var id: String = "",
-    var email: String = "",
-    var fullName: String = "",
-    var phoneNumber: String = "",
+    var email: String? = null,
+    var fullName: String? = null,
+    var phoneNumber: String? = null,
     var createdAt: Long = 0,
     
     // Make this a constructor parameter so data class can generate correct copy method
@@ -47,6 +47,8 @@ data class User(
     @get:PropertyName("isPhoneVerified")
     @set:PropertyName("isPhoneVerified")
     var isPhoneVerified: Boolean = false,
+    
+    var verificationAttempts: Long? = null,
     
     var authProvider: String? = null
 ) {
@@ -82,6 +84,7 @@ data class User(
             "verificationMethod" to verificationMethod,
             "isPhoneVerified" to isPhoneVerified,
             "phoneVerified" to isPhoneVerified,  // Write to both fields for compatibility
+            "verificationAttempts" to verificationAttempts,
             "authProvider" to authProvider
         )
     }

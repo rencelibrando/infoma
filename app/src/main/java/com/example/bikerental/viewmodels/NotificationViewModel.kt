@@ -86,7 +86,7 @@ class NotificationViewModel @Inject constructor(
     private fun filterNotifications(notifications: List<Notification>, filter: NotificationFilter): List<Notification> {
         return when (filter) {
             NotificationFilter.ALL -> notifications
-            NotificationFilter.UNREAD -> notifications.filter { !it.isRead }
+            NotificationFilter.UNREAD -> notifications.filter { !it.read }
             NotificationFilter.PAYMENTS -> notifications.filter { 
                 it.type in listOf(
                     NotificationType.UNPAID_BOOKING,

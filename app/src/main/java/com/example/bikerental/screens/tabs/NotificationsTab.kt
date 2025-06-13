@@ -137,7 +137,7 @@ fun NotificationsTab(
                 NotificationsList(
                     notifications = uiState.notifications,
                     onNotificationClick = { notification ->
-                        if (!notification.isRead) {
+                        if (!notification.read) {
                             viewModel.markAsRead(notification.id)
                         }
                         viewModel.handleNotificationAction(notification)
@@ -251,7 +251,7 @@ private fun NotificationFilters(
         items(NotificationFilter.values()) { filter ->
             val count = when (filter) {
                 NotificationFilter.ALL -> allNotifications.size
-                NotificationFilter.UNREAD -> allNotifications.count { !it.isRead }
+                NotificationFilter.UNREAD -> allNotifications.count { !it.read }
                 NotificationFilter.PAYMENTS -> allNotifications.count { 
                     it.type in listOf(
                         NotificationType.UNPAID_BOOKING,
@@ -533,7 +533,8 @@ private fun NotificationCard(
                                 Text(
                                     text = notification.getFormattedTime(),
                                     style = MaterialTheme.typography.bodySmall.copy(
-                                        color = Color(0xFF6B7280)
+                                        color = if (notification.read) Color(0xFF6B7280) else Color(0xFF1F2937),
+                                        fontWeight = if (notification.read) FontWeight.Normal else FontWeight.Medium
                                     )
                                 )
                             }
@@ -572,7 +573,7 @@ private fun NotificationCard(
                 }
 
                 // Action buttons
-                if (notification.isActionable && notification.actionText.isNotBlank()) {
+                if (notification.actionable && notification.actionText.isNotBlank()) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Row(
@@ -626,7 +627,7 @@ private fun NotificationCard(
                 }
 
                 // Unread indicator
-                if (!notification.isRead) {
+                if (!notification.read) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Box(
                         modifier = Modifier

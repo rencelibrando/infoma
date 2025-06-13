@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.Exclude
+import com.google.firebase.firestore.PropertyName
 import java.util.Date
 
 /**
@@ -29,21 +31,14 @@ data class Notification(
     val actionText: String = "",
     val actionData: Map<String, Any> = emptyMap(),
     val timestamp: Timestamp = Timestamp.now(),
-    val isRead: Boolean = false,
-    val isActionable: Boolean = true,
+    @get:PropertyName("read") @set:PropertyName("read") var read: Boolean = false,
+    @get:PropertyName("actionable") @set:PropertyName("actionable") var actionable: Boolean = true,
     val priority: NotificationPriority = NotificationPriority.NORMAL
 ) {
-    constructor() : this(
-
-        type = NotificationType.GENERAL,
-        actionData = emptyMap(),
-        timestamp = Timestamp.now(),
-        priority = NotificationPriority.NORMAL
-    )
-    
     /**
      * Get formatted timestamp for display
      */
+    @Exclude
     fun getFormattedTime(): String {
         val now = Date()
         val notificationTime = timestamp.toDate()

@@ -29,8 +29,8 @@ class NotificationService @Inject constructor(
         private const val TAG = "NotificationService"
         private const val BOOKINGS_COLLECTION = "bookings"
         private const val PAYMENTS_COLLECTION = "payments"
-        private const val ADMIN_MESSAGES_COLLECTION = "admin_messages"
-        private const val SUPPORT_MESSAGES_COLLECTION = "support_messages"
+        private const val ADMIN_MESSAGES_COLLECTION = "adminMessages"
+        private const val SUPPORT_MESSAGES_COLLECTION = "supportMessages"
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
