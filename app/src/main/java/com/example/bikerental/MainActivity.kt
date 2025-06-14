@@ -241,10 +241,51 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Start monitoring only if a user is logged in
+        if (authViewModel.isUserLoggedIn()) {
+            Log.d(TAG, "User is logged in, starting notification monitoring.")
+            notificationService.startMonitoring()
+        } else {
+            Log.d(TAG, "No user logged in, not starting monitoring.")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Always stop monitoring when the app is not in the foreground
+        Log.d(TAG, "App paused, stopping notification monitoring.")
+        notificationService.stopMonitoring()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up coroutine scope
+        mainActivityScope.cancel()
+        Log.d(TAG, "MainActivity destroyed, stopping notification monitoring.")
+        notificationService.stopMonitoring()
+    }
+
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent) // Important: Make sure the new intent is set for future use
         handleDeepLink(intent)
+        if (intent?.action == Intent.ACTION_VIEW) {
+            val link = intent.data
+            if (link != null) {
+                Log.d(TAG, "Received deep link: $link")
+                mainActivityScope.launch {
+                    val result = authViewModel.handleDeepLink(link)
+                    if (result.isSuccess) {
+                        Toast.makeText(applicationContext, "Email successfully verified!", Toast.LENGTH_LONG).show()
+                        // Optionally navigate to the home screen
+                    } else {
+                        Toast.makeText(applicationContext, "Verification failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
     }
 
     private fun handleDeepLink(intent: Intent?) {
@@ -303,28 +344,6 @@ class MainActivity : ComponentActivity() {
         // Remove location updates to save battery
         if (::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        
-        // Clean up resources
-        try {
-            if (::locationCallback.isInitialized) {
-                fusedLocationClient.removeLocationUpdates(locationCallback)
-            }
-            
-            authStateListener?.let { FirebaseAuth.getInstance().removeAuthStateListener(it) }
-            
-            // Stop notification monitoring
-            notificationService.stopMonitoring()
-            
-            Log.d(TAG, "Resources successfully cleaned up")
-        } catch (e: Exception) {
-            Log.w(TAG, "Error during cleanup: ${e.message}")
-        } finally {
-            mainActivityScope.cancel()
         }
     }
 }

@@ -184,7 +184,7 @@ fun EmailVerificationScreen(
                 
                 ResponsiveButton(
                     text = "I've Verified My Email",
-                    onClick = {
+                    onClick =  {
                         coroutineScope.launch {
                             Log.d("EmailVerificationScreen", "Checking verification status...")
                             val isVerified = viewModel.checkEmailVerificationStatus()

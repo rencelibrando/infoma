@@ -7,44 +7,59 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Message
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.example.bikerental.models.FAQ
 import com.example.bikerental.models.SupportMessage
+import com.example.bikerental.models.SupportReply
 import com.example.bikerental.viewmodels.SupportViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import android.util.Log
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -52,7 +67,6 @@ fun HelpSupportScreen(
     navController: NavController? = null,
     viewModel: SupportViewModel = hiltViewModel()
 ) {
-    val scrollState = rememberScrollState()
     val accentColor = Color(0xFF4CAF50)
     val uiState by viewModel.uiState.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -68,7 +82,7 @@ fun HelpSupportScreen(
         onRefresh = {
             coroutineScope.launch {
                 if (selectedTab == 0) {
-                    viewModel.loadFaqs()
+                    viewModel.refreshContactUsTab()
                 } else {
                     viewModel.loadUserMessages()
                 }
@@ -171,7 +185,11 @@ fun HelpSupportScreen(
                                 Spacer(modifier = Modifier.height(24.dp))
                                 
                                 // Find Us Section
-                                FindUsSection(accentColor = accentColor)
+                                FindUsSection(
+                                    accentColor = accentColor,
+                                    operatingHours = uiState.operatingHours,
+                                    locationDetails = uiState.locationDetails
+                                )
                                 
                                 Spacer(modifier = Modifier.height(24.dp))
                                 
@@ -262,10 +280,9 @@ fun HelpSupportScreen(
                                 items(uiState.userMessages) { message ->
                                     MessageItem(
                                         message = message,
+                                        replies = uiState.replies[message.id] ?: emptyList(),
                                         accentColor = accentColor,
-                                        onDeleteClick = { messageId ->
-                                            viewModel.deleteUserMessage(messageId)
-                                        }
+                                        viewModel = viewModel
                                     )
                                 }
                                 
@@ -516,44 +533,38 @@ private fun ContactSection(
 @Composable
 fun MessageItem(
     message: SupportMessage,
+    replies: List<SupportReply>,
     accentColor: Color,
-    onDeleteClick: (String) -> Unit = {}
+    viewModel: SupportViewModel
 ) {
     val dateFormatted = message.dateCreated?.toDate()?.let {
         java.text.SimpleDateFormat("MMM d, yyyy HH:mm", java.util.Locale.getDefault()).format(it)
     } ?: "Unknown date"
     
     var expanded by remember { mutableStateOf(false) }
-    var showDeleteDialog by remember { mutableStateOf(false) }
+    var replyText by remember { mutableStateOf("") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
     
-    // Delete confirmation dialog
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Message") },
-            text = { Text("Are you sure you want to delete this support message?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        message.id?.let { onDeleteClick(it) }
-                        showDeleteDialog = false
-                    }
-                ) {
-                    Text("Delete", color = Color.Red)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+    // File picker launcher
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
     }
     
+    // Trigger loading replies when the item is expanded for the first time
+    LaunchedEffect(expanded) {
+        if (expanded && replies.isEmpty()) {
+            viewModel.loadRepliesForMessage(message.id)
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp)
+            .padding(vertical = 6.dp) // Reduced padding for more compact UI
             .clickable { expanded = !expanded },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -563,9 +574,9 @@ fun MessageItem(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(12.dp) // Reduced padding for more compact UI
         ) {
-            // Message header with delete option
+            // Header with subject and status
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -575,78 +586,304 @@ fun MessageItem(
                     text = message.subject,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier.padding(start = 8.dp)
                 ) {
-                    // Status badge
                     StatusBadge(status = message.status, accentColor = accentColor)
-                    
-                    // Delete icon
-                    IconButton(
-                        onClick = { showDeleteDialog = true }
-                    ) {
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Default.Delete,
-                            contentDescription = "Delete message",
-                            tint = Color.Gray
-                        )
-                    }
+                }
+            }
+            
+            // Date and preview in a more compact format
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = dateFormatted,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                if (!expanded) {
+                    Text(
+                        text = "${replies.size} ${if (replies.size == 1) "reply" else "replies"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = accentColor
+                    )
                 }
             }
             
             Spacer(modifier = Modifier.height(4.dp))
-            
-            Text(
-                text = dateFormatted,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            // Preview of message
+
+            // Always show the user's initial message
             Text(
                 text = message.message,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = if (expanded) androidx.compose.ui.text.style.TextOverflow.Visible else androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = if (expanded) TextOverflow.Visible else TextOverflow.Ellipsis
             )
             
-            // Show response if available and expanded
-            if (expanded && message.response != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Divider()
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Text(
-                    text = "Response from support:",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = accentColor
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Text(
-                    text = message.response,
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            // Show conversation thread when expanded
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Conversation",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        Text(
+                            text = "${replies.size} ${if (replies.size == 1) "message" else "messages"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Conversation thread
+                    if (replies.isNotEmpty()) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp)
+                                .padding(vertical = 8.dp)
+                        ) {
+                            items(replies) { reply ->
+                                ReplyItem(reply = reply)
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "No replies yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
+
+                    // Selected image preview
+                    selectedImageUri?.let { uri ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = "Selected image",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = uri.lastPathSegment ?: "image",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    
+                                    IconButton(
+                                        onClick = { selectedImageUri = null }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove image",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Reply input with attachment options
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Attachment button
+                        IconButton(
+                            onClick = { imagePickerLauncher.launch("image/*") }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = "Attach image",
+                                tint = accentColor
+                            )
+                        }
+                        
+                        // Text input
+                        OutlinedTextField(
+                            value = replyText,
+                            onValueChange = { replyText = it },
+                            placeholder = { Text("Type your reply...") },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                unfocusedBorderColor = Color.LightGray,
+                                focusedBorderColor = accentColor
+                            ),
+                            maxLines = 3
+                        )
+                        
+                        // Send button
+                        IconButton(
+                            onClick = {
+                                if (replyText.isNotBlank() || selectedImageUri != null) {
+                                    viewModel.sendReplyWithImage(message.id, replyText, selectedImageUri)
+                                    replyText = "" // Clear input after sending
+                                    selectedImageUri = null // Clear selected image
+                                }
+                            },
+                            enabled = (replyText.isNotBlank() || selectedImageUri != null) && !uiState.isSendingReply
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send reply",
+                                tint = if ((replyText.isNotBlank() || selectedImageUri != null) && !uiState.isSendingReply) accentColor else Color.Gray
+                            )
+                        }
+                    }
+                    
+                    // Show loading indicator when sending
+                    if (uiState.isSendingReply) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = accentColor
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (uiState.isUploadingImage) "Uploading image..." else "Sending...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
             }
             
-            // Show "View more/less" text
-            Text(
-                text = if (expanded) "Show less" else "View more",
-                style = MaterialTheme.typography.bodySmall,
-                color = accentColor,
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .clickable { expanded = !expanded }
-            )
+            // Show "View conversation" text when not expanded
+            if (!expanded) {
+                 Text(
+                    text = "View conversation",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = accentColor,
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .clickable { expanded = !expanded }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ReplyItem(reply: SupportReply) {
+    val isAdmin = reply.sender == "admin"
+    val backgroundColor = if (isAdmin) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.primaryContainer
+    }
+    val dateFormatted = reply.createdAt?.toDate()?.let {
+        java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(it)
+    } ?: ""
+
+    // Align user messages to the left, admin messages to the right
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        // More compact reply bubble
+        Card(
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .widthIn(max = 220.dp) // Narrower for more compact display
+                .align(if (isAdmin) Alignment.CenterEnd else Alignment.CenterStart),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = backgroundColor)
+        ) {
+            Column(modifier = Modifier.padding(8.dp)) { // Reduced padding
+                // Show message text if present
+                if (reply.text.isNotBlank()) {
+                    Text(
+                        text = reply.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 13.sp // Slightly smaller text
+                    )
+                }
+                
+                // Show image if present
+                reply.imageUrl?.let { imageUrl ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(imageUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = "Attached image",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 150.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        onError = {
+                            // Log error for debugging
+                            Log.e("ReplyItem", "Failed to load image: $imageUrl")
+                        }
+                    )
+                }
+                
+                Text(
+                    text = dateFormatted,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 10.sp, // Smaller timestamp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(top = 2.dp) // Reduced padding
+                )
+            }
         }
     }
 }
@@ -682,7 +919,11 @@ fun StatusBadge(status: String, accentColor: Color) {
 }
 
 @Composable
-private fun FindUsSection(accentColor: Color) {
+private fun FindUsSection(
+    accentColor: Color,
+    operatingHours: List<com.example.bikerental.models.OperatingHour>,
+    locationDetails: com.example.bikerental.models.LocationDetails
+) {
     Text(
         text = "Find Us",
         style = MaterialTheme.typography.titleLarge,
@@ -723,11 +964,26 @@ private fun FindUsSection(accentColor: Color) {
                     fontWeight = FontWeight.SemiBold
                 )
                 
-                Text(
-                    text = "7 DAYS A WEEK: 9AM – 6PM",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (operatingHours.isNotEmpty()) {
+                    operatingHours.forEach { hour ->
+                        val text = if (hour.closed) {
+                            "${hour.day}: Closed"
+                        } else {
+                            "${hour.day}: ${hour.open} – ${hour.close}"
+                        }
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Loading hours...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -768,16 +1024,13 @@ private fun FindUsSection(accentColor: Color) {
             
             Column {
                 Text(
-                    text = "Our Location",
+                    text = locationDetails.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
                 
                 Text(
-                    text = "Bambike Ecotours Intramuros\n" +
-                           "Real St. corner General Luna St.\n" +
-                           "Intramuros, Manila 1002\n" +
-                           "Philippines",
+                    text = locationDetails.address.replace("\\n", "\n"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

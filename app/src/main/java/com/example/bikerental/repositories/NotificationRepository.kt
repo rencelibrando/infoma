@@ -10,6 +10,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.toObject
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -53,7 +54,12 @@ class NotificationRepository @Inject constructor(
 
                 val notifications = snapshot?.documents?.mapNotNull { document ->
                     try {
-                        document.toObject(Notification::class.java)?.copy(id = document.id)
+                        // Manually map the document to the Notification object
+                        val notification = document.toObject(Notification::class.java)
+                        notification?.copy(
+                            id = document.id,
+                            read = document.getBoolean("read") ?: false
+                        )
                     } catch (e: Exception) {
                         Log.e(TAG, "Error converting document to Notification", e)
                         null
@@ -81,7 +87,7 @@ class NotificationRepository @Inject constructor(
         val listener: ListenerRegistration = firestore
             .collection(NOTIFICATIONS_COLLECTION)
             .whereEqualTo("userId", currentUser.uid)
-            .whereEqualTo("isRead", false)
+            .whereEqualTo("read", false)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e(TAG, "Error fetching unread count", error)
@@ -105,7 +111,7 @@ class NotificationRepository @Inject constructor(
             firestore
                 .collection(NOTIFICATIONS_COLLECTION)
                 .document(notificationId)
-                .update("isRead", true)
+                .update("read", true)
                 .await()
 
             Log.d(TAG, "Marked notification $notificationId as read")
@@ -127,12 +133,12 @@ class NotificationRepository @Inject constructor(
             val unreadNotifications = firestore
                 .collection(NOTIFICATIONS_COLLECTION)
                 .whereEqualTo("userId", currentUser.uid)
-                .whereEqualTo("isRead", false)
+                .whereEqualTo("read", false)
                 .get()
                 .await()
 
             unreadNotifications.documents.forEach { document ->
-                batch.update(document.reference, "isRead", true)
+                batch.update(document.reference, "read", true)
             }
 
             batch.commit().await()
@@ -195,21 +201,22 @@ class NotificationRepository @Inject constructor(
      */
     suspend fun createNotification(request: NotificationRequest): Result<String> {
         return try {
-            val notification = Notification(
-                userId = request.userId,
-                type = request.type,
-                title = request.title,
-                message = request.message,
-                actionText = request.actionText,
-                actionData = request.actionData,
-                timestamp = Timestamp.now(),
-                read = false,
-                actionable = request.actionText.isNotBlank()
+            val notificationData = mapOf(
+                "userId" to request.userId,
+                "type" to request.type,
+                "title" to request.title,
+                "message" to request.message,
+                "actionText" to request.actionText,
+                "actionData" to request.actionData,
+                "priority" to request.priority,
+                "timestamp" to Timestamp.now(),
+                "read" to false,
+                "actionable" to request.actionText.isNotBlank()
             )
 
             val documentRef = firestore
                 .collection(NOTIFICATIONS_COLLECTION)
-                .add(notification)
+                .add(notificationData)
                 .await()
 
             Log.d(TAG, "Created notification with ID: ${documentRef.id}")

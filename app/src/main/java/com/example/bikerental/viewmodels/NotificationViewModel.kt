@@ -145,6 +145,15 @@ class NotificationViewModel @Inject constructor(
     fun deleteNotification(notificationId: String) {
         viewModelScope.launch {
             notificationRepository.deleteNotification(notificationId)
+                .onSuccess {
+                    // On successful deletion from the database, update the local UI state
+                    val currentState = _uiState.value
+                    val updatedList = currentState.allNotifications.filterNot { it.id == notificationId }
+                    _uiState.value = currentState.copy(
+                        allNotifications = updatedList,
+                        notifications = filterNotifications(updatedList, _selectedFilter.value)
+                    )
+                }
                 .onFailure { exception ->
                     _uiState.value = _uiState.value.copy(
                         error = "Failed to delete notification: ${exception.message}"

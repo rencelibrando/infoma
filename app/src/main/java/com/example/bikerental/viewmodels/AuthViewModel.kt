@@ -33,6 +33,7 @@ import kotlinx.coroutines.NonCancellable
 import com.google.firebase.auth.ktx.actionCodeSettings
 import com.google.firebase.ktx.Firebase
 import com.google.firebase.auth.ActionCodeSettings
+import android.net.Uri
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
@@ -1271,6 +1272,54 @@ class AuthViewModel @Inject constructor(
                 
                 _authState.value = AuthState.Error(errorMessage)
                 logE("Create user with email/password failed", e)
+            }
+        }
+    }
+
+    /**
+     * Checks if a user is currently logged in.
+     */
+    fun isUserLoggedIn(): Boolean {
+        return auth.currentUser != null
+    }
+
+    /**
+     * Handles deep links for email verification.
+     */
+    suspend fun handleDeepLink(uri: Uri): Result<Unit> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val link = uri.toString()
+                if (auth.isSignInWithEmailLink(link)) {
+                    // The link is a sign-in link, but we need the user's email.
+                    // This part of the flow is complex and typically requires asking the user for their email again.
+                    // For this app, we assume verification is for the currently logged-in user.
+                    val user = auth.currentUser
+                    if (user != null && user.email != null) {
+                        // This is not the standard flow, as sign-in links are for passwordless sign-in.
+                        // We will try to complete sign-in, which should verify the email.
+                        auth.signInWithEmailLink(user.email!!, link).await()
+                        
+                        // After sign-in, reload the user to get the updated isEmailVerified status.
+                        user.reload().await()
+                        if (user.isEmailVerified) {
+                            // Update Firestore document
+                            db.collection("users").document(user.uid).update("isEmailVerified", true).await()
+                            // Update local state
+                            initializeExistingUser(user)
+                            Result.success(Unit)
+                        } else {
+                            Result.failure(Exception("Email could not be verified."))
+                        }
+                    } else {
+                        Result.failure(Exception("No logged-in user or email found to verify."))
+                    }
+                } else {
+                     Result.failure(Exception("Invalid verification link."))
+                }
+            } catch (e: Exception) {
+                logE("Error handling deep link", e)
+                Result.failure(e)
             }
         }
     }

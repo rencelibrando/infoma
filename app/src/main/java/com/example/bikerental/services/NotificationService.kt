@@ -14,6 +14,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.example.bikerental.repositories.NotificationRepository
+import com.example.bikerental.models.NotificationRequest
 
 /**
  * Service that monitors Firebase collections for real-time events
@@ -23,10 +25,11 @@ import javax.inject.Singleton
 class NotificationService @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
-    private val notificationUtils: NotificationUtils
+    private val notificationRepository: NotificationRepository
 ) {
     companion object {
         private const val TAG = "NotificationService"
+        private const val USERS_COLLECTION = "users"
         private const val BOOKINGS_COLLECTION = "bookings"
         private const val PAYMENTS_COLLECTION = "payments"
         private const val ADMIN_MESSAGES_COLLECTION = "adminMessages"
@@ -35,6 +38,7 @@ class NotificationService @Inject constructor(
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val listeners = mutableListOf<ListenerRegistration>()
+    private val processedEvents = mutableSetOf<String>()
 
     /**
      * Start monitoring all relevant collections for the current user
@@ -46,8 +50,13 @@ class NotificationService @Inject constructor(
             return
         }
 
+        // Clear the cache of processed events for a fresh session
+        processedEvents.clear()
         Log.d(TAG, "Starting real-time monitoring for user: ${currentUser.uid}")
         
+        // Monitor user document for changes (e.g., email verification)
+        monitorUserDocument(currentUser.uid)
+
         // Monitor bookings for status changes
         monitorBookings(currentUser.uid)
         
@@ -68,6 +77,28 @@ class NotificationService @Inject constructor(
         Log.d(TAG, "Stopping all notification listeners")
         listeners.forEach { it.remove() }
         listeners.clear()
+        processedEvents.clear()
+    }
+
+    /**
+     * Monitor user document for changes like email verification
+     */
+    private fun monitorUserDocument(userId: String) {
+        val listener = firestore
+            .collection(USERS_COLLECTION)
+            .document(userId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error monitoring user document", error)
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null && snapshot.exists()) {
+                    handleUserDocumentChange(snapshot.data, snapshot.metadata.hasPendingWrites())
+                }
+            }
+        listeners.add(listener)
+        Log.d(TAG, "Started monitoring user document for user: $userId")
     }
 
     /**
@@ -195,45 +226,110 @@ class NotificationService @Inject constructor(
             try {
                 val status = data["status"] as? String ?: return@launch
                 val userId = data["userId"] as? String ?: return@launch
-                val bikeModel = data["bikeModel"] as? String ?: "bike"
-                val bookingDate = data["bookingDate"] as? String ?: ""
-                val bookingTime = data["bookingTime"] as? String ?: ""
-                val location = data["location"] as? String ?: ""
-
+                
+                val eventId = "$bookingId-$status"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate booking event: $eventId")
+                    return@launch
+                }
+                
                 when (status.lowercase()) {
                     "approved" -> {
-                        notificationUtils.sendBookingApprovalNotification(
+                        val bikeModel = data["bikeModel"] as? String ?: "bike"
+                        val bookingDate = data["bookingDate"] as? String ?: ""
+                        val bookingTime = data["bookingTime"] as? String ?: ""
+                        val location = data["location"] as? String ?: ""
+                        
+                        val request = NotificationRequest(
                             userId = userId,
-                            bookingId = bookingId,
-                            bikeModel = bikeModel,
-                            bookingDate = bookingDate,
-                            bookingTime = bookingTime,
-                            location = location
+                            type = NotificationType.BOOKING_APPROVAL,
+                            title = "Booking Approved!",
+                            message = "Your $bikeModel booking for $bookingDate at $bookingTime has been approved${if (location.isNotEmpty()) " at $location" else ""}. Get ready for your ride!",
+                            actionText = "View Details",
+                            actionData = mapOf(
+                                "type" to "booking_approval",
+                                "bookingId" to bookingId,
+                                "bikeModel" to bikeModel,
+                                "bookingDate" to bookingDate,
+                                "bookingTime" to bookingTime,
+                                "location" to location
+                            ),
+                            priority = NotificationPriority.NORMAL
                         )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
                         Log.d(TAG, "Sent booking approval notification for booking: $bookingId")
                     }
                     "confirmed" -> {
-                        notificationUtils.sendBookingConfirmationNotification(
+                        val bikeModel = data["bikeModel"] as? String ?: "bike"
+                        val bookingDate = data["bookingDate"] as? String ?: ""
+                        val bookingTime = data["bookingTime"] as? String ?: ""
+
+                        val request = NotificationRequest(
                             userId = userId,
-                            bookingDate = bookingDate,
-                            bookingTime = bookingTime,
-                            bikeModel = bikeModel,
-                            bookingId = bookingId
+                            type = NotificationType.BOOKING_CONFIRMATION,
+                            title = "Booking Confirmed",
+                            message = "Your $bikeModel reservation for $bookingDate at $bookingTime has been confirmed. Remember to arrive 5 minutes early.",
+                            actionText = "View Details",
+                            actionData = mapOf(
+                                "type" to "booking_details",
+                                "bookingId" to bookingId,
+                                "bikeModel" to bikeModel,
+                                "date" to bookingDate,
+                                "time" to bookingTime
+                            ),
+                            priority = NotificationPriority.NORMAL
                         )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
                         Log.d(TAG, "Sent booking confirmation notification for booking: $bookingId")
                     }
                     "payment_required" -> {
                         val amount = data["amount"] as? String ?: "0"
                         val dueDate = data["dueDate"] as? String ?: ""
+                        val bikeModel = data["bikeModel"] as? String ?: "bike"
                         
-                        notificationUtils.sendUnpaidBookingNotification(
+                        val request = NotificationRequest(
                             userId = userId,
-                            bookingId = bookingId,
-                            amount = amount,
-                            dueDate = dueDate,
-                            bikeModel = bikeModel
+                            type = NotificationType.UNPAID_BOOKING,
+                            title = "Payment Required",
+                            message = "Your booking${if (bikeModel.isNotEmpty()) " for $bikeModel" else ""} requires payment of $amount. Due: $dueDate.",
+                            actionText = "Pay Now",
+                            actionData = mapOf(
+                                "type" to "unpaid_booking",
+                                "bookingId" to bookingId,
+                                "amount" to amount,
+                                "dueDate" to dueDate,
+                                "bikeModel" to bikeModel
+                            ),
+                            priority = NotificationPriority.HIGH
                         )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
                         Log.d(TAG, "Sent unpaid booking notification for booking: $bookingId")
+                    }
+                    "completed" -> {
+                        val duration = data["duration"] as? String ?: "your"
+                        val distance = data["distance"] as? String ?: ""
+                        val amount = data["amount"] as? String ?: "0"
+                        
+                        val request = NotificationRequest(
+                            userId = userId,
+                            type = NotificationType.RIDE_COMPLETE,
+                            title = "Ride Completed Successfully!",
+                            message = "Your $duration ride has ended.${if(distance.isNotEmpty()) " Distance: $distance." else ""} Amount: $amount. Thank you for choosing Bambike!",
+                            actionText = "View Receipt",
+                            actionData = mapOf(
+                                "type" to "ride_receipt",
+                                "duration" to duration,
+                                "distance" to distance,
+                                "amount" to amount
+                            ),
+                            priority = NotificationPriority.NORMAL
+                        )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
+                        Log.d(TAG, "Sent ride completion notification for booking: $bookingId")
                     }
                 }
             } catch (e: Exception) {
@@ -253,14 +349,30 @@ class NotificationService @Inject constructor(
                 val bookingDate = data["bookingDate"] as? String ?: ""
                 val bookingTime = data["bookingTime"] as? String ?: ""
 
+                val eventId = "$bookingId-new"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate new booking event: $eventId")
+                    return@launch
+                }
+
                 // Send confirmation for new bookings
-                notificationUtils.sendBookingConfirmationNotification(
+                val request = NotificationRequest(
                     userId = userId,
-                    bookingDate = bookingDate,
-                    bookingTime = bookingTime,
-                    bikeModel = bikeModel,
-                    bookingId = bookingId
+                    type = NotificationType.BOOKING_CONFIRMATION,
+                    title = "Booking Confirmed",
+                    message = "Your $bikeModel reservation for $bookingDate at $bookingTime has been confirmed. Remember to arrive 5 minutes early.",
+                    actionText = "View Details",
+                    actionData = mapOf(
+                        "type" to "booking_details",
+                        "bookingId" to bookingId,
+                        "bikeModel" to bikeModel,
+                        "date" to bookingDate,
+                        "time" to bookingTime
+                    ),
+                    priority = NotificationPriority.NORMAL
                 )
+                notificationRepository.createNotification(request)
+                processedEvents.add(eventId)
                 Log.d(TAG, "Sent booking confirmation for new booking: $bookingId")
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling new booking", e)
@@ -281,26 +393,52 @@ class NotificationService @Inject constructor(
                 val paymentMethod = data["paymentMethod"] as? String ?: ""
                 val bookingId = data["bookingId"] as? String
 
+                val eventId = "$paymentId-$status"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate payment event: $eventId")
+                    return@launch
+                }
+
                 when (status.lowercase()) {
                     "successful", "completed" -> {
-                        notificationUtils.sendPaymentSuccessNotification(
+                        val request = NotificationRequest(
                             userId = userId,
-                            transactionId = transactionId,
-                            amount = amount,
-                            bookingId = bookingId,
-                            paymentMethod = paymentMethod
+                            type = NotificationType.PAYMENT_SUCCESS,
+                            title = "Payment Successful!",
+                            message = "Your payment of $amount has been processed successfully${if (paymentMethod.isNotEmpty()) " via $paymentMethod" else ""}. Transaction ID: $transactionId",
+                            actionText = "View Receipt",
+                            actionData = mapOf(
+                                "type" to "payment_success",
+                                "transactionId" to transactionId,
+                                "amount" to amount,
+                                "bookingId" to (bookingId ?: ""),
+                                "paymentMethod" to paymentMethod
+                            ),
+                            priority = NotificationPriority.NORMAL
                         )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
                         Log.d(TAG, "Sent payment success notification for payment: $paymentId")
                     }
                     "approved" -> {
                         val approvedBy = data["approvedBy"] as? String ?: "Admin"
                         
-                        notificationUtils.sendPaymentApprovalNotification(
+                        val request = NotificationRequest(
                             userId = userId,
-                            transactionId = transactionId,
-                            amount = amount,
-                            approvedBy = approvedBy
+                            type = NotificationType.PAYMENT_APPROVAL,
+                            title = "Payment Approved",
+                            message = "Your payment of $amount has been reviewed and approved by $approvedBy. You can now proceed with your booking.",
+                            actionText = "Continue",
+                            actionData = mapOf(
+                                "type" to "payment_approval",
+                                "transactionId" to transactionId,
+                                "amount" to amount,
+                                "approvedBy" to approvedBy
+                            ),
+                            priority = NotificationPriority.NORMAL
                         )
+                        notificationRepository.createNotification(request)
+                        processedEvents.add(eventId)
                         Log.d(TAG, "Sent payment approval notification for payment: $paymentId")
                     }
                 }
@@ -314,9 +452,42 @@ class NotificationService @Inject constructor(
      * Handle new payments
      */
     private fun handleNewPayment(data: Map<String, Any>, paymentId: String) {
-        // For new payments, we might want to send a confirmation
-        // This is optional based on your business logic
-        Log.d(TAG, "New payment created: $paymentId")
+        scope.launch {
+            try {
+                val status = data["status"] as? String ?: return@launch
+                val userId = data["userId"] as? String ?: return@launch
+
+                val eventId = "$paymentId-$status-new"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate new payment event: $eventId")
+                    return@launch
+                }
+
+                if (status.lowercase() == "pending" || status.lowercase() == "unpaid") {
+                    val amount = data["amount"] as? String ?: "0"
+                    val dueDate = data["dueDate"] as? String ?: "ASAP"
+                    
+                    val request = NotificationRequest(
+                        userId = userId,
+                        type = NotificationType.UNPAID_PAYMENT,
+                        title = "Payment Reminder",
+                        message = "You have an outstanding payment of $amount due on $dueDate. Please settle to continue using Bambike.",
+                        actionText = "Pay Now",
+                        actionData = mapOf(
+                            "type" to "payment",
+                            "amount" to amount,
+                            "dueDate" to dueDate
+                        ),
+                        priority = NotificationPriority.HIGH
+                    )
+                    notificationRepository.createNotification(request)
+                    processedEvents.add(eventId)
+                    Log.d(TAG, "Sent payment reminder for new payment: $paymentId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling new payment", e)
+            }
+        }
     }
 
     /**
@@ -330,11 +501,25 @@ class NotificationService @Inject constructor(
                 val message = data["message"] as? String ?: ""
                 val isUrgent = data["isUrgent"] as? Boolean ?: false
 
-                notificationUtils.sendAdminMessageNotification(
+                val eventId = "$messageId-new-admin-message"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate new admin message event: $eventId")
+                    return@launch
+                }
+
+                val request = NotificationRequest(
                     userId = userId,
+                    type = NotificationType.ADMIN_MESSAGE,
                     title = title,
-                    message = message
+                    message = message,
+                    actionText = "Learn More",
+                    actionData = mapOf(
+                        "type" to "admin_message"
+                    ),
+                    priority = if (isUrgent) NotificationPriority.HIGH else NotificationPriority.NORMAL
                 )
+                notificationRepository.createNotification(request)
+                processedEvents.add(eventId)
                 Log.d(TAG, "Sent admin message notification: $messageId")
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling new admin message", e)
@@ -353,13 +538,28 @@ class NotificationService @Inject constructor(
                 val adminName = data["repliedBy"] as? String ?: "Support Team"
                 val replyMessage = data["replyMessage"] as? String ?: "You have a new reply from our support team."
 
+                val eventId = "$messageId-admin-reply"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate admin reply event: $eventId")
+                    return@launch
+                }
+                
                 if (hasReply) {
-                    notificationUtils.sendAdminReplyNotification(
+                    val request = NotificationRequest(
                         userId = userId,
-                        messageId = messageId,
-                        adminName = adminName,
-                        replyPreview = replyMessage
+                        type = NotificationType.ADMIN_REPLY,
+                        title = "New Reply from $adminName",
+                        message = replyMessage.take(100) + if (replyMessage.length > 100) "..." else "",
+                        actionText = "View Message",
+                        actionData = mapOf(
+                            "type" to "admin_reply",
+                            "messageId" to messageId,
+                            "adminName" to adminName
+                        ),
+                        priority = NotificationPriority.HIGH
                     )
+                    notificationRepository.createNotification(request)
+                    processedEvents.add(eventId)
                     Log.d(TAG, "Sent admin reply notification for message: $messageId")
                 }
             } catch (e: Exception) {
@@ -379,17 +579,75 @@ class NotificationService @Inject constructor(
                 val adminName = data["adminName"] as? String ?: "Support Team"
                 val lastReply = data["lastReply"] as? String ?: "You have a new reply from our support team."
 
+                val eventId = "$messageId-support-reply"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate support reply event: $eventId")
+                    return@launch
+                }
+
                 if (hasAdminReply) {
-                    notificationUtils.sendAdminReplyNotification(
+                    val request = NotificationRequest(
                         userId = userId,
-                        messageId = messageId,
-                        adminName = adminName,
-                        replyPreview = lastReply
+                        type = NotificationType.ADMIN_REPLY,
+                        title = "New Reply from $adminName",
+                        message = lastReply.take(100) + if (lastReply.length > 100) "..." else "",
+                        actionText = "View Message",
+                        actionData = mapOf(
+                            "type" to "admin_reply",
+                            "messageId" to messageId,
+                            "adminName" to adminName
+                        ),
+                        priority = NotificationPriority.HIGH
                     )
+                    notificationRepository.createNotification(request)
+                    processedEvents.add(eventId)
                     Log.d(TAG, "Sent support reply notification for message: $messageId")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling support message reply", e)
+            }
+        }
+    }
+
+    /**
+     * Handle user document changes (e.g., email verification)
+     */
+    private fun handleUserDocumentChange(data: Map<String, Any>?, fromCache: Boolean) {
+        // Only trigger on server changes, not local writes
+        if (fromCache || data == null) return
+
+        scope.launch {
+            try {
+                val userId = data["userId"] as? String ?: return@launch
+                val emailVerified = data["emailVerified"] as? Boolean ?: false
+                
+                val eventId = "$userId-email-verified"
+                if (processedEvents.contains(eventId)) {
+                    Log.d(TAG, "Skipping duplicate email verification event: $eventId")
+                    return@launch
+                }
+
+                // This logic is simple; could be expanded to check previous state
+                // to avoid sending notifications multiple times.
+                // For now, we assume this is a one-time event.
+                if (emailVerified) {
+                    val request = NotificationRequest(
+                        userId = userId,
+                        type = NotificationType.EMAIL_VERIFICATION,
+                        title = "Email Verified Successfully",
+                        message = "Your email address has been verified. You now have full access to all Bambike features.",
+                        actionText = "Continue",
+                        actionData = mapOf(
+                            "type" to "email_verified"
+                        ),
+                        priority = NotificationPriority.NORMAL
+                    )
+                    notificationRepository.createNotification(request)
+                    processedEvents.add(eventId)
+                    Log.d(TAG, "Sent email verification notification for user: $userId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling user document change", e)
             }
         }
     }

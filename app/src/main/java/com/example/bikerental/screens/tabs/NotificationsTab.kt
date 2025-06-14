@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -101,20 +103,26 @@ fun NotificationsTab(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
-                .padding(24.dp)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFF9FAFB),
+                            Color(0xFFFFFFFF)
+                        )
+                    )
+                )
+                .padding(16.dp)
         ) {
             // Header Section
             NotificationHeader(
                 notificationCount = uiState.notifications.size,
                 totalCount = uiState.allNotifications.size,
-                onCreateSample = { viewModel.createSampleNotifications() },
                 onClearAll = { viewModel.clearAllNotifications() },
                 onMarkAllRead = { viewModel.markAllAsRead() },
                 isLoading = uiState.isLoading
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Filter Chips
             NotificationFilters(
@@ -123,7 +131,7 @@ fun NotificationsTab(
                 allNotifications = uiState.allNotifications
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Content Section
             if (uiState.isLoading && uiState.allNotifications.isEmpty()) {
@@ -131,7 +139,6 @@ fun NotificationsTab(
             } else if (uiState.notifications.isEmpty()) {
                 EmptyState(
                     filter = selectedFilter,
-                    onCreateSample = { viewModel.createSampleNotifications() }
                 )
             } else {
                 NotificationsList(
@@ -160,7 +167,8 @@ fun NotificationsTab(
             Snackbar(
                 snackbarData = snackbarData,
                 containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.padding(16.dp)
             )
         }
     }
@@ -170,7 +178,6 @@ fun NotificationsTab(
 private fun NotificationHeader(
     notificationCount: Int,
     totalCount: Int,
-    onCreateSample: () -> Unit,
     onClearAll: () -> Unit,
     onMarkAllRead: () -> Unit,
     isLoading: Boolean
@@ -186,7 +193,7 @@ private fun NotificationHeader(
                 Text(
                     text = "Notifications",
                     style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = Color(0xFF1F2937)
                     )
                 )
@@ -211,11 +218,14 @@ private fun NotificationHeader(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Color(0xFF059669)
                             ),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, Color(0xFF059669)),
                             modifier = Modifier.height(36.dp)
                         ) {
                             Text(
                                 text = "Mark Read",
-                                fontSize = 12.sp
+                                fontSize = 12.sp,
+                                maxLines = 1
                             )
                         }
                     }
@@ -226,11 +236,14 @@ private fun NotificationHeader(
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = Color(0xFF6B7280)
                         ),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
                         modifier = Modifier.height(36.dp)
                     ) {
                         Text(
                             text = "Clear All",
-                            fontSize = 12.sp
+                            fontSize = 12.sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -278,42 +291,53 @@ private fun NotificationFilters(
                 }
             }
             
-            FilterChip(
-                onClick = { onFilterSelected(filter) },
-                label = { 
-                    Text(
-                        text = "${filter.displayName} ($count)",
-                        fontSize = 12.sp
-                    ) 
-                },
-                selected = selectedFilter == filter,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = Color(0xFF059669),
-                    selectedLabelColor = Color.White,
-                    containerColor = Color(0xFFF3F4F6),
-                    labelColor = Color(0xFF6B7280)
+            // Custom chip implementation instead of FilterChip
+            val isSelected = selectedFilter == filter
+            Box(
+                modifier = Modifier
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        color = if (isSelected) Color(0xFF059669) else Color.White
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isSelected) Color(0xFF059669) else Color(0xFFD1D5DB),
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .clickable { onFilterSelected(filter) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "${filter.displayName} ($count)",
+                    fontSize = 12.sp,
+                    color = if (isSelected) Color.White else Color(0xFF6B7280)
                 )
-            )
+            }
         }
     }
 }
 
 @Composable
 private fun EmptyState(
-    filter: NotificationFilter,
-    onCreateSample: () -> Unit
+    filter: NotificationFilter
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(48.dp))
-
         Box(
             modifier = Modifier
                 .size(64.dp)
                 .background(
-                    color = Color(0xFFECFDF5),
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFECFDF5),
+                            Color(0xFFD1FAE5)
+                        )
+                    ),
                     shape = CircleShape
                 )
                 .border(
@@ -334,7 +358,7 @@ private fun EmptyState(
         Spacer(modifier = Modifier.height(16.dp))
 
         val emptyMessage = when (filter) {
-            NotificationFilter.ALL -> "No notifications yet"
+            NotificationFilter.ALL -> "You're all caught up!"
             NotificationFilter.UNREAD -> "No unread notifications"
             NotificationFilter.PAYMENTS -> "No payment notifications"
             NotificationFilter.BOOKINGS -> "No booking notifications"
@@ -344,23 +368,22 @@ private fun EmptyState(
 
         Text(
             text = emptyMessage,
-            style = MaterialTheme.typography.bodyLarge.copy(
-                color = Color(0xFF6B7280)
-            )
+            style = MaterialTheme.typography.titleMedium.copy(
+                color = Color(0xFF4B5563),
+                fontWeight = FontWeight.Medium
+            ),
+            textAlign = TextAlign.Center
         )
-
-        if (filter == NotificationFilter.ALL) {
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            OutlinedButton(
-                onClick = onCreateSample,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = Color(0xFF059669)
-                )
-            ) {
-                Text("Create Sample Notifications")
-            }
-        }
+        
+        Spacer(modifier = Modifier.height(4.dp))
+        
+        Text(
+            text = "New notifications will appear here.",
+            style = MaterialTheme.typography.bodyMedium.copy(
+                color = Color(0xFF6B7280)
+            ),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -371,7 +394,8 @@ private fun LoadingState() {
         contentAlignment = Alignment.Center
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(top = 32.dp)
         ) {
             CircularProgressIndicator(
                 color = Color(0xFF059669),
@@ -396,7 +420,8 @@ private fun NotificationsList(
     onActionClick: (Notification) -> Unit
 ) {
     LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         items(
             items = notifications,
@@ -421,222 +446,228 @@ private fun NotificationCard(
 ) {
     var isVisible by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
-    val scale by animateFloatAsState(
-        targetValue = if (isVisible) 1f else 0.8f,
-        animationSpec = tween(300, easing = LinearEasing), label = ""
-    )
 
     AnimatedVisibility(
         visible = isVisible,
-        enter = slideInHorizontally(
-            initialOffsetX = { it },
-            animationSpec = tween(700)
-        ) + fadeIn(animationSpec = tween(700)),
-        exit = slideOutHorizontally(
-            targetOffsetX = { it },
-            animationSpec = tween(300)
-        ) + fadeOut(animationSpec = tween(300))
+        enter = expandVertically(animationSpec = tween(400)) + fadeIn(animationSpec = tween(400)),
+        exit = shrinkVertically(animationSpec = tween(300)) + fadeOut(animationSpec = tween(300))
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .scale(scale)
-                .animateContentSize()
+                .clip(RoundedCornerShape(16.dp))
                 .clickable { onClick() },
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = notification.type.bgColor
+                containerColor = if (notification.read) Color.White else Color(0xFFF0FDF4)
             ),
-            border = androidx.compose.foundation.BorderStroke(
+            border = BorderStroke(
                 width = 1.dp,
-                color = notification.type.borderColor
+                color = if (notification.read) Color(0xFFE5E7EB) else Color(0xFF86EFAC)
             ),
             elevation = CardDefaults.cardElevation(
-                defaultElevation = 8.dp,
-                hoveredElevation = 12.dp
+                defaultElevation = if (notification.read) 1.dp else 4.dp
             )
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = if (notification.read) {
+                                listOf(Color.White, Color.White)
+                            } else {
+                                listOf(Color(0xFFF0FDF4), Color(0xFFDCFCE7))
+                            }
+                        )
+                    )
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                    // Icon with priority indicator
+                    Box(
+                        modifier = Modifier.padding(top = 2.dp)
                     ) {
-                        // Icon with priority indicator
-                        Box {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            notification.type.iconBg.copy(alpha = 0.9f),
+                                            notification.type.iconBg.copy(alpha = 0.7f)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = notification.type.iconBg.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = notification.type.icon,
+                                contentDescription = null,
+                                tint = notification.type.iconColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        
+                        if (notification.priority in listOf(NotificationPriority.HIGH, NotificationPriority.URGENT)) {
                             Box(
                                 modifier = Modifier
-                                    .size(48.dp)
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 1.dp, end = 1.dp)
+                                    .size(12.dp)
                                     .background(
-                                        color = notification.type.iconBg,
-                                        shape = RoundedCornerShape(12.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = notification.type.icon,
-                                    contentDescription = null,
-                                    tint = notification.type.iconColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            
-                            // Priority indicator
-                            if (notification.priority == NotificationPriority.HIGH || 
-                                notification.priority == NotificationPriority.URGENT) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .background(
-                                            color = if (notification.priority == NotificationPriority.URGENT) 
-                                                Color(0xFFDC2626) else Color(0xFFF59E0B),
-                                            shape = CircleShape
-                                        )
-                                        .align(Alignment.TopEnd),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = "Priority",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(10.dp)
+                                        color = if (notification.priority == NotificationPriority.URGENT)
+                                            Color(0xFFDC2626) else Color(0xFFF59E0B),
+                                        shape = CircleShape
                                     )
-                                }
-                            }
+                                    .border(width = 1.5.dp, color = Color.White, shape = CircleShape)
+                            )
                         }
+                    }
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                        // Content
-                        Column(modifier = Modifier.weight(1f)) {
+                    // Content Column
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                if (!notification.read) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(
+                                                color = Color(0xFF22C55E),
+                                                shape = CircleShape
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
                                 Text(
                                     text = notification.title,
                                     style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = FontWeight.SemiBold,
+                                        fontWeight = FontWeight.Bold,
                                         color = Color(0xFF1F2937)
                                     ),
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                Text(
-                                    text = notification.getFormattedTime(),
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        color = if (notification.read) Color(0xFF6B7280) else Color(0xFF1F2937),
-                                        fontWeight = if (notification.read) FontWeight.Normal else FontWeight.Medium
-                                    )
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
+                            
                             Text(
-                                text = notification.message,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    color = Color(0xFF6B7280),
-                                    lineHeight = 20.sp
+                                text = notification.getFormattedTime(),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color(0xFF6B7280)
                                 )
                             )
                         }
-                    }
 
-                    // Dismiss button
-                    IconButton(
-                        onClick = {
-                            isVisible = false
-                            // Delay the actual dismiss to allow animation
-                            scope.launch {
-                                kotlinx.coroutines.delay(300)
-                                onDismiss()
-                            }
-                        },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Dismiss",
-                            tint = Color(0xFF9CA3AF),
-                            modifier = Modifier.size(16.dp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        val messageText = if (notification.message.contains(" for at ")) {
+                            "Your booking has been confirmed. Please check the details for more information."
+                        } else {
+                            notification.message
+                        }
+
+                        Text(
+                            text = messageText,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = Color(0xFF4B5563),
+                                lineHeight = 20.sp
+                            )
                         )
-                    }
-                }
 
-                // Action buttons
-                if (notification.actionable && notification.actionText.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Button(
-                            onClick = onActionClick,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = when (notification.type) {
-                                    NotificationType.UNPAID_BOOKING -> Color(0xFFDC2626)
-                                    NotificationType.PAYMENT_SUCCESS -> Color(0xFF059669)
-                                    NotificationType.ADMIN_REPLY -> Color(0xFF2563EB)
-                                    NotificationType.PAYMENT_APPROVAL -> Color(0xFF059669)
-                                    NotificationType.BOOKING_APPROVAL -> Color(0xFF059669)
-                                    NotificationType.RIDE_COMPLETE -> Color(0xFF059669)
-                                    NotificationType.UNPAID_PAYMENT -> Color(0xFFDC2626)
-                                    NotificationType.ADMIN_MESSAGE -> Color(0xFF2563EB)
-                                    else -> Color(0xFF059669)
+                        if (notification.actionable && notification.actionText.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = onActionClick,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF059669),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = ButtonDefaults.buttonElevation(
+                                        defaultElevation = 2.dp,
+                                        pressedElevation = 0.dp
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(40.dp)
+                                ) {
+                                    Text(
+                                        text = notification.actionText, 
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                 }
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text(
-                                text = notification.actionText,
-                                fontSize = 14.sp,
-                                color = Color.White
-                            )
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                isVisible = false
-                                scope.launch {
-                                    kotlinx.coroutines.delay(300)
-                                    onDismiss()
+                                
+                                IconButton(
+                                    onClick = {
+                                        // Directly call onDismiss without optimistic UI updates
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(
+                                            color = Color(0xFFF3F4F6),
+                                            shape = CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss",
+                                        tint = Color(0xFF6B7280),
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
-                            },
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Color(0xFF6B7280)
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text(
-                                text = "Dismiss",
-                                fontSize = 14.sp
-                            )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        // Directly call onDismiss without optimistic UI updates
+                                        onDismiss()
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(
+                                            color = Color(0xFFF3F4F6),
+                                            shape = CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Dismiss",
+                                        tint = Color(0xFF6B7280),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-
-                // Unread indicator
-                if (!notification.read) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .background(
-                                color = Color(0xFF059669),
-                                shape = CircleShape
-                            )
-                    )
                 }
             }
         }

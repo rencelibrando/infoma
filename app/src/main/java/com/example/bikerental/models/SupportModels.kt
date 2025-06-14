@@ -23,6 +23,18 @@ data class SupportMessage(
 )
 
 /**
+ * Model for a reply within a support message thread
+ */
+data class SupportReply(
+    @DocumentId val id: String = "",
+    val text: String = "",
+    val sender: String = "", // Can be 'user' or 'admin'
+    val userId: String = "",
+    val imageUrl: String? = null, // URL to attached image (if any)
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+/**
  * Model for FAQ items
  */
 data class FAQ(
@@ -32,6 +44,24 @@ data class FAQ(
     val order: Int = 0,
     val createdAt: Timestamp? = null,
     val updatedAt: Timestamp? = null
+)
+
+/**
+ * Model for Operating Hours
+ */
+data class OperatingHour(
+    val day: String = "",
+    val open: String = "09:00",
+    val close: String = "18:00",
+    val closed: Boolean = false
+)
+
+/**
+ * Model for Location Details
+ */
+data class LocationDetails(
+    val name: String = "Bambike Ecotours Intramuros",
+    val address: String = "Real St. corner General Luna St.\\nIntramuros, Manila 1002\\nPhilippines"
 )
 
 /**
