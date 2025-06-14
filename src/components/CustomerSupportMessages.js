@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { format } from 'date-fns';
-import { getMessages, updateMessageStatus, sendResponse, getFaqs, addFaq, updateFaq, deleteFaq } from '../services/supportService';
+import { getMessages, updateMessageStatus, sendResponse, getFaqs, addFaq, updateFaq, deleteFaq, addReply, getReplies, addReplyWithImage, deleteMessage, getOperatingHours, saveOperatingHours, getLocation, saveLocation } from '../services/supportService';
 
 // Enhanced modern color palette
 const colors = {
@@ -92,6 +92,32 @@ const IconFilter = ({ size = 18 }) => (
     <path d="M3 4C3 3.44772 3.44772 3 4 3H20C20.5523 3 21 3.44772 21 4C21 4.55228 20.5523 5 20 5H4C3.44772 5 3 4.55228 3 4Z" fill="currentColor"/>
     <path d="M3 12C3 11.4477 3.44772 11 4 11H14C14.5523 11 15 11.4477 15 12C15 12.5523 14.5523 13 14 13H4C3.44772 13 3 12.5523 3 12Z" fill="currentColor"/>
     <path d="M3 20C3 19.4477 3.44772 19 4 19H10C10.5523 19 11 19.4477 11 20C11 20.5523 10.5523 21 10 21H4C3.44772 21 3 20.5523 3 20Z" fill="currentColor"/>
+  </svg>
+);
+
+const IconAttachment = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M21.44 11.05L12.25 20.24C11.1242 21.3658 9.59723 21.9983 8.005 21.9983C6.41277 21.9983 4.88584 21.3658 3.76 20.24C2.63416 19.1142 2.00166 17.5872 2.00166 16.005C2.00166 14.4228 2.63416 12.8958 3.76 11.77L12.33 3.20001C13.0806 2.44945 14.0991 2.03095 15.165 2.03095C16.2309 2.03095 17.2494 2.44945 18 3.20001C18.7506 3.95057 19.1691 4.96907 19.1691 6.03501C19.1691 7.10094 18.7506 8.11944 18 8.87001L9.41 17.46C9.03472 17.8353 8.52573 18.0446 7.995 18.0446C7.46427 18.0446 6.95528 17.8353 6.58 17.46C6.20472 17.0847 5.99539 16.5758 5.99539 16.045C5.99539 15.5143 6.20472 15.0053 6.58 14.63L15.07 6.10001" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+const IconImagePreview = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M19 3H5C3.89543 3 3 3.89543 3 5V19C3 20.1046 3.89543 21 5 21H19C20.1046 21 21 20.1046 21 19V5C21 3.89543 20.1046 3 19 3Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M8.5 10C9.32843 10 10 9.32843 10 8.5C10 7.67157 9.32843 7 8.5 7C7.67157 7 7 7.67157 7 8.5C7 9.32843 7.67157 10 8.5 10Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M21 15L16 10L5 21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
+const IconSend = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+  </svg>
+);
+
+const IconTrash = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 );
 
@@ -659,9 +685,14 @@ const FullMessage = styled.div`
   border-radius: 16px;
   line-height: 1.6;
   color: ${colors.gray700};
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   background: ${colors.white};
   font-size: 15px;
+`;
+
+const MessageThreadContainer = styled.div`
+  display: flex;
+  flex-direction: column;
 `;
 
 // Enhanced admin response section
@@ -1101,6 +1132,304 @@ const getUserInitials = (name) => {
   return name.split(' ').map(n => n[0]).join('').toUpperCase();
 };
 
+const RepliesContainer = styled.div`
+  margin-top: 16px;
+  border: 1px solid ${colors.gray200};
+  background-color: ${colors.gray50};
+  border-radius: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  
+  h4 {
+    margin: 0;
+    padding: 12px 16px;
+    font-size: 16px;
+    color: ${colors.gray700};
+    font-weight: 600;
+    background-color: ${colors.gray50};
+    border-bottom: 1px solid ${colors.gray200};
+  }
+  
+  .empty-message {
+    color: ${colors.gray500};
+    font-style: italic;
+    text-align: center;
+    padding: 16px 0;
+  }
+`;
+
+const ConversationWrapper = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 12px 12px;
+  overflow-y: auto;
+  height: 250px;
+  
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: ${colors.gray100};
+    border-radius: 10px;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: ${colors.gray300};
+    border-radius: 10px;
+  }
+  
+  &::-webkit-scrollbar-thumb:hover {
+    background: ${colors.gray400};
+  }
+`;
+
+const MessageGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: ${props => props.sender === 'admin' ? 'flex-end' : 'flex-start'};
+  gap: 2px;
+  margin-bottom: 8px;
+`;
+
+const MessageTimestamp = styled.div`
+  font-size: 10px;
+  color: ${colors.gray500};
+  margin: ${props => props.sender === 'admin' ? '0 8px 0 0' : '0 0 0 8px'};
+`;
+
+const Reply = styled.div`
+  background-color: ${props => props.sender === 'admin' ? `${colors.primaryLight}` : `${colors.gray200}`};
+  color: ${props => props.sender === 'admin' ? colors.white : colors.gray800};
+  padding: 10px 12px;
+  border-radius: 12px;
+  margin-bottom: 0;
+  max-width: 85%;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  
+  ${props => props.sender === 'admin' ? `
+    border-bottom-right-radius: 4px;
+  ` : `
+    border-bottom-left-radius: 4px;
+  `}
+
+  p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+`;
+
+const ReplyImageContainer = styled.div`
+  margin-top: 6px;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 180px;
+  
+  img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 6px;
+  }
+`;
+
+const ReplyInputContainer = styled.div`
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid ${colors.gray200};
+  background-color: ${colors.white};
+
+  .input-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 8px;
+    background-color: ${colors.gray50};
+    border-radius: 12px;
+    padding: 4px;
+    border: 1px solid ${colors.gray200};
+  }
+
+  textarea {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: none;
+    resize: none;
+    min-height: 38px;
+    font-size: 14px;
+    background-color: transparent;
+    
+    &:focus {
+      outline: none;
+    }
+  }
+
+  button {
+    padding: 8px 12px;
+    background-color: ${colors.primary};
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 14px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 40px;
+    height: 36px;
+
+    &:hover {
+      background-color: ${colors.primaryDark};
+    }
+    
+    &:disabled {
+      background-color: ${colors.gray400};
+      cursor: not-allowed;
+    }
+  }
+`;
+
+const ImagePreview = styled.div`
+  position: relative;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 200px;
+  
+  img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  
+  .remove-button {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: rgba(0, 0, 0, 0.5);
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    cursor: pointer;
+    
+    &:hover {
+      background: rgba(0, 0, 0, 0.7);
+    }
+  }
+`;
+
+const AttachmentButton = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: ${colors.gray500};
+  
+  &:hover {
+    background: ${colors.gray100};
+    color: ${colors.primary};
+  }
+`;
+
+const FileInput = styled.input`
+  display: none;
+`;
+
+const ModalActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const DeleteButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: ${colors.error};
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background-color: ${colors.error}15;
+  }
+`;
+
+const ConfirmationModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 2000;
+  padding: 20px;
+`;
+
+const ConfirmationContent = styled.div`
+  background: ${colors.white};
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  
+  h3 {
+    margin-top: 0;
+    color: ${colors.gray900};
+    font-size: 18px;
+    margin-bottom: 16px;
+  }
+  
+  p {
+    margin-bottom: 24px;
+    color: ${colors.gray700};
+    line-height: 1.5;
+  }
+`;
+
+const ConfirmationActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+`;
+
+const LocationContainer = styled.div`
+  margin-top: 32px;
+  background: ${colors.white};
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  padding: 24px;
+  border: 1px solid ${colors.gray200};
+`;
+
 const CustomerSupportMessages = () => {
   const [messages, setMessages] = useState([]);
   const [filteredMessages, setFilteredMessages] = useState([]);
@@ -1108,7 +1437,6 @@ const CustomerSupportMessages = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedMessage, setSelectedMessage] = useState(null);
-  const [responseText, setResponseText] = useState('');
   
   // New state for tabs, FAQs, and operating hours
   const [activeTab, setActiveTab] = useState('messages');
@@ -1119,11 +1447,22 @@ const CustomerSupportMessages = () => {
   const [openFAQs, setOpenFAQs] = useState({});
   const [editingHours, setEditingHours] = useState(false);
   const [tempOperatingHours, setTempOperatingHours] = useState([]);
+  const [location, setLocation] = useState({ name: '', address: '' });
+  const [tempLocation, setTempLocation] = useState({ name: '', address: '' });
+  const [editingLocation, setEditingLocation] = useState(false);
   const [loadingOperation, setLoadingOperation] = useState({
     messages: false,
     faqs: false,
     saveResponse: false
   });
+
+  const [replies, setReplies] = useState([]);
+  const [replyText, setReplyText] = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const fileInputRef = useRef(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deletingMessage, setDeletingMessage] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Fetch messages from Firebase
   useEffect(() => {
@@ -1153,26 +1492,45 @@ const CustomerSupportMessages = () => {
         setLoadingOperation(prev => ({ ...prev, faqs: false }));
       }
     };
+
+    const fetchHours = async () => {
+      try {
+        let hoursData = await getOperatingHours();
+        if (!hoursData || hoursData.length === 0) {
+          // If no data in Firestore, use these defaults
+          hoursData = [
+            { day: 'Monday', open: '09:00', close: '18:00', closed: false },
+            { day: 'Tuesday', open: '09:00', close: '18:00', closed: false },
+            { day: 'Wednesday', open: '09:00', close: '18:00', closed: false },
+            { day: 'Thursday', open: '09:00', close: '18:00', closed: false },
+            { day: 'Friday', open: '09:00', close: '20:00', closed: false },
+            { day: 'Saturday', open: '10:00', close: '16:00', closed: false },
+            { day: 'Sunday', open: '10:00', close: '14:00', closed: true }
+          ];
+        }
+        setOperatingHours(hoursData);
+        setTempOperatingHours(JSON.parse(JSON.stringify(hoursData))); // Deep copy
+      } catch (error) {
+        console.error('Error fetching operating hours:', error);
+      }
+    };
+
+    const fetchLocation = async () => {
+      try {
+        const locationData = await getLocation();
+        if (locationData) {
+          setLocation(locationData);
+          setTempLocation(locationData);
+        }
+      } catch (error) {
+        console.error('Error fetching location:', error);
+      }
+    };
     
     fetchMessages();
     fetchFaqs();
-  }, []);
-
-  // Initialize operating hours separately
-  useEffect(() => {
-    // For now, we'll keep using mock operating hours
-    const initialOperatingHours = [
-      { day: 'Monday', open: '09:00', close: '18:00', closed: false },
-      { day: 'Tuesday', open: '09:00', close: '18:00', closed: false },
-      { day: 'Wednesday', open: '09:00', close: '18:00', closed: false },
-      { day: 'Thursday', open: '09:00', close: '18:00', closed: false },
-      { day: 'Friday', open: '09:00', close: '20:00', closed: false },
-      { day: 'Saturday', open: '10:00', close: '16:00', closed: false },
-      { day: 'Sunday', open: '10:00', close: '14:00', closed: true }
-    ];
-    
-    setOperatingHours(initialOperatingHours);
-    setTempOperatingHours(initialOperatingHours);
+    fetchHours();
+    fetchLocation();
   }, []);
 
   // Filter messages based on search term and status
@@ -1199,37 +1557,16 @@ const CustomerSupportMessages = () => {
 
   const handleMessageClick = (message) => {
     setSelectedMessage(message);
+    fetchReplies(message.id);
   };
 
   const handleCloseModal = () => {
     setSelectedMessage(null);
-    setResponseText('');
+    setReplies([]);
+    setReplyText('');
+    setSelectedFile(null);
   };
 
-  const handleSubmitResponse = async () => {
-    if (!responseText.trim()) return;
-    
-    setLoadingOperation(prev => ({ ...prev, saveResponse: true }));
-    try {
-      await sendResponse(selectedMessage.id, responseText);
-      
-      // Update messages list
-      const updatedMessages = messages.map(msg => 
-        msg.id === selectedMessage.id 
-          ? {...msg, response: responseText, status: 'resolved'} 
-          : msg
-      );
-      setMessages(updatedMessages);
-      
-      handleCloseModal();
-    } catch (error) {
-      console.error('Error sending response:', error);
-      alert('Failed to send response. Please try again.');
-    } finally {
-      setLoadingOperation(prev => ({ ...prev, saveResponse: false }));
-    }
-  };
-  
   const handleStatusChange = async (messageId, newStatus) => {
     try {
       await updateMessageStatus(messageId, newStatus);
@@ -1316,17 +1653,22 @@ const CustomerSupportMessages = () => {
   // Operating hours functions
   const handleEditHours = () => {
     setEditingHours(true);
-    setTempOperatingHours([...operatingHours]);
+    setTempOperatingHours(JSON.parse(JSON.stringify(operatingHours)));
   };
   
-  const handleSaveHours = () => {
-    // This will be implemented when backend is ready
-    setOperatingHours([...tempOperatingHours]);
-    setEditingHours(false);
+  const handleSaveHours = async () => {
+    try {
+      await saveOperatingHours(tempOperatingHours);
+      setOperatingHours([...tempOperatingHours]);
+      setEditingHours(false);
+      alert('Operating hours saved successfully!');
+    } catch (error) {
+      console.error('Failed to save operating hours:', error);
+      alert('Failed to save operating hours. Please try again.');
+    }
   };
   
   const handleCancelHours = () => {
-    setTempOperatingHours([...operatingHours]);
     setEditingHours(false);
   };
   
@@ -1340,6 +1682,112 @@ const CustomerSupportMessages = () => {
     }
     
     setTempOperatingHours(updatedHours);
+  };
+
+  // Location functions
+  const handleEditLocation = () => {
+    setEditingLocation(true);
+    setTempLocation({ ...location });
+  };
+
+  const handleSaveLocation = async () => {
+    try {
+      await saveLocation(tempLocation);
+      setLocation({ ...tempLocation });
+      setEditingLocation(false);
+      alert('Location saved successfully!');
+    } catch (error) {
+      console.error('Failed to save location:', error);
+      alert('Failed to save location. Please try again.');
+    }
+  };
+
+  const handleCancelLocation = () => {
+    setEditingLocation(false);
+  };
+
+  const handleLocationChange = (field, value) => {
+    setTempLocation(prev => ({ ...prev, [field]: value }));
+  };
+
+  const fetchReplies = async (messageId) => {
+    try {
+      const fetchedReplies = await getReplies(messageId);
+      setReplies(fetchedReplies);
+    } catch (err) {
+      console.error('Failed to fetch replies:', err);
+    }
+  };
+
+  const handleSendReply = async () => {
+    if ((!replyText.trim() && !selectedFile) || !selectedMessage) return;
+    try {
+      const replyData = {
+        text: replyText,
+        sender: 'admin', // Or get current admin user
+        userId: selectedMessage.userId,
+      };
+      
+      if (selectedFile) {
+        // Use the new function that handles image uploads
+        await addReplyWithImage(selectedMessage.id, replyData, selectedFile);
+      } else {
+        await addReply(selectedMessage.id, replyData);
+      }
+      
+      setReplyText('');
+      setSelectedFile(null);
+      fetchReplies(selectedMessage.id); // Refresh replies
+    } catch (err) {
+      console.error('Failed to send reply:', err);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+  
+  const removeSelectedFile = () => {
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    setDeletingMessage(selectedMessage);
+    setShowDeleteConfirmation(true);
+  };
+
+  const handleCancelDelete = () => {
+    setShowDeleteConfirmation(false);
+    setDeletingMessage(null);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingMessage) return;
+    
+    setIsDeleting(true);
+    try {
+      await deleteMessage(deletingMessage.id);
+      
+      // Update the messages list
+      setMessages(messages.filter(msg => msg.id !== deletingMessage.id));
+      setFilteredMessages(filteredMessages.filter(msg => msg.id !== deletingMessage.id));
+      
+      // Close the modals
+      setShowDeleteConfirmation(false);
+      setDeletingMessage(null);
+      setSelectedMessage(null);
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      alert('Failed to delete message. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -1360,10 +1808,10 @@ const CustomerSupportMessages = () => {
           <IconFaq /> FAQs
         </Tab>
         <Tab 
-          active={activeTab === 'hours'} 
-          onClick={() => setActiveTab('hours')}
+          active={activeTab === 'settings'} 
+          onClick={() => setActiveTab('settings')}
         >
-          <IconClock /> Operating Hours
+          <IconClock /> Store Settings
         </Tab>
       </TabsContainer>
       
@@ -1454,7 +1902,12 @@ const CustomerSupportMessages = () => {
               <ModalContent>
                 <ModalHeader>
                   <ModalTitle>{selectedMessage.subject}</ModalTitle>
-                  <CloseButton onClick={handleCloseModal}>&times;</CloseButton>
+                  <ModalActions>
+                    <DeleteButton onClick={handleDeleteClick} title="Delete message">
+                      <IconTrash size={20} />
+                    </DeleteButton>
+                    <CloseButton onClick={handleCloseModal}>&times;</CloseButton>
+                  </ModalActions>
                 </ModalHeader>
                 
                 <MessageDetails>
@@ -1500,38 +1953,66 @@ const CustomerSupportMessages = () => {
                     {selectedMessage.message}
                   </FullMessage>
                   
-                  {selectedMessage.response && (
-                    <AdminResponseSection>
-                      <AdminResponseHeader>
-                        <div>Admin Response</div>
-                        {selectedMessage.respondedAt && (
-                          <AdminResponseDate>
-                            {format(selectedMessage.respondedAt.toDate(), 'MMM d, yyyy HH:mm')}
-                          </AdminResponseDate>
+                  <MessageThreadContainer>
+                    <RepliesContainer>
+                      <h4>Conversation Thread</h4>
+                      <ConversationWrapper>
+                        {replies.length > 0 ? (
+                          replies.map(reply => (
+                            <MessageGroup key={reply.id} sender={reply.sender}>
+                              <Reply sender={reply.sender}>
+                                <p>{reply.text}</p>
+                                {reply.imageUrl && (
+                                  <ReplyImageContainer>
+                                    <img src={reply.imageUrl} alt="Attached" />
+                                  </ReplyImageContainer>
+                                )}
+                              </Reply>
+                              <MessageTimestamp sender={reply.sender}>
+                                {format(reply.createdAt, 'MMM d, h:mm a')}
+                              </MessageTimestamp>
+                            </MessageGroup>
+                          ))
+                        ) : (
+                          <div className="empty-message">No replies yet. Start the conversation!</div>
                         )}
-                      </AdminResponseHeader>
-                      <AdminResponseContent>
-                        {selectedMessage.response}
-                      </AdminResponseContent>
-                    </AdminResponseSection>
-                  )}
-                  
-                  {!selectedMessage.response && (
-                    <ResponseSection>
-                      <FormTitle>Reply to this message</FormTitle>
-                      <ResponseTextarea 
-                        value={responseText}
-                        onChange={(e) => setResponseText(e.target.value)}
-                        placeholder="Type your response here..."
-                      />
-                      <ButtonGroup>
-                        <Button secondary onClick={handleCloseModal}>Cancel</Button>
-                        <Button primary onClick={handleSubmitResponse}>
-                          <IconSave /> Send Response
-                        </Button>
-                      </ButtonGroup>
-                    </ResponseSection>
-                  )}
+                      </ConversationWrapper>
+                    </RepliesContainer>
+                    
+                    <ReplyInputContainer>
+                      <div className="input-row">
+                        <AttachmentButton onClick={() => fileInputRef.current.click()}>
+                          <IconAttachment />
+                        </AttachmentButton>
+                        <FileInput 
+                          type="file" 
+                          ref={fileInputRef}
+                          accept="image/*"
+                          onChange={handleFileSelect}
+                        />
+                        <textarea
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder="Type your reply..."
+                          rows="1"
+                        />
+                        <button 
+                          onClick={handleSendReply}
+                          disabled={!replyText.trim() && !selectedFile}
+                        >
+                          <IconSend />
+                        </button>
+                      </div>
+                      
+                      {selectedFile && (
+                        <ImagePreview>
+                          <img src={URL.createObjectURL(selectedFile)} alt="Selected" />
+                          <button className="remove-button" onClick={removeSelectedFile}>×</button>
+                        </ImagePreview>
+                      )}
+                    </ReplyInputContainer>
+                  </MessageThreadContainer>
+
                 </MessageDetails>
               </ModalContent>
             </Modal>
@@ -1602,94 +2083,155 @@ const CustomerSupportMessages = () => {
         </FAQContainer>
       )}
       
-      {activeTab === 'hours' && (
-        <OperatingHoursContainer>
-          <FormTitle>Operating Hours</FormTitle>
-          
-          {!editingHours ? (
-            <>
-              <OperatingHoursTable>
-                <thead>
-                  <tr>
-                    <OperatingHoursHead>Day</OperatingHoursHead>
-                    <OperatingHoursHead>Open</OperatingHoursHead>
-                    <OperatingHoursHead>Close</OperatingHoursHead>
-                    <OperatingHoursHead>Status</OperatingHoursHead>
-                  </tr>
-                </thead>
-                <tbody>
-                  {operatingHours.map((hours, index) => (
-                    <OperatingHoursRow key={hours.day} index={index}>
-                      <OperatingHoursCell>{hours.day}</OperatingHoursCell>
-                      <OperatingHoursCell>{hours.closed ? '-' : hours.open}</OperatingHoursCell>
-                      <OperatingHoursCell>{hours.closed ? '-' : hours.close}</OperatingHoursCell>
-                      <OperatingHoursCell>
-                        <StatusBadge status={hours.closed ? 'closed' : 'open'}>
-                          {hours.closed ? 'Closed' : 'Open'}
-                        </StatusBadge>
-                      </OperatingHoursCell>
-                    </OperatingHoursRow>
-                  ))}
-                </tbody>
-              </OperatingHoursTable>
-              <Button 
-                style={{ marginTop: '20px' }} 
-                onClick={handleEditHours}
-              >
-                <IconEdit /> Edit Hours
-              </Button>
-            </>
-          ) : (
-            <>
-              <OperatingHoursTable>
-                <thead>
-                  <tr>
-                    <OperatingHoursHead>Day</OperatingHoursHead>
-                    <OperatingHoursHead>Open</OperatingHoursHead>
-                    <OperatingHoursHead>Close</OperatingHoursHead>
-                    <OperatingHoursHead>Closed</OperatingHoursHead>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tempOperatingHours.map((hours, index) => (
-                    <OperatingHoursRow key={hours.day} index={index}>
-                      <OperatingHoursCell>{hours.day}</OperatingHoursCell>
-                      <OperatingHoursCell>
-                        <TimeInput 
-                          type="time" 
-                          value={hours.open}
-                          onChange={(e) => handleHoursChange(index, 'open', e.target.value)}
-                          disabled={hours.closed}
-                        />
-                      </OperatingHoursCell>
-                      <OperatingHoursCell>
-                        <TimeInput 
-                          type="time" 
-                          value={hours.close}
-                          onChange={(e) => handleHoursChange(index, 'close', e.target.value)}
-                          disabled={hours.closed}
-                        />
-                      </OperatingHoursCell>
-                      <OperatingHoursCell>
-                        <input 
-                          type="checkbox" 
-                          checked={hours.closed}
-                          onChange={() => handleHoursChange(index, 'closed')}
-                        />
-                      </OperatingHoursCell>
-                    </OperatingHoursRow>
-                  ))}
-                </tbody>
-              </OperatingHoursTable>
-              <ButtonGroup style={{ marginTop: '20px' }}>
-                <Button secondary onClick={handleCancelHours}>Cancel</Button>
-                <Button success onClick={handleSaveHours}>
-                  <IconSave /> Save Changes
+      {activeTab === 'settings' && (
+        <>
+          <OperatingHoursContainer>
+            <FormTitle>Operating Hours</FormTitle>
+            
+            {!editingHours ? (
+              <>
+                <OperatingHoursTable>
+                  <thead>
+                    <tr>
+                      <OperatingHoursHead>Day</OperatingHoursHead>
+                      <OperatingHoursHead>Open</OperatingHoursHead>
+                      <OperatingHoursHead>Close</OperatingHoursHead>
+                      <OperatingHoursHead>Status</OperatingHoursHead>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {operatingHours.map((hours, index) => (
+                      <OperatingHoursRow key={hours.day} index={index}>
+                        <OperatingHoursCell>{hours.day}</OperatingHoursCell>
+                        <OperatingHoursCell>{hours.closed ? '-' : hours.open}</OperatingHoursCell>
+                        <OperatingHoursCell>{hours.closed ? '-' : hours.close}</OperatingHoursCell>
+                        <OperatingHoursCell>
+                          <StatusBadge status={hours.closed ? 'closed' : 'open'}>
+                            {hours.closed ? 'Closed' : 'Open'}
+                          </StatusBadge>
+                        </OperatingHoursCell>
+                      </OperatingHoursRow>
+                    ))}
+                  </tbody>
+                </OperatingHoursTable>
+                <Button 
+                  primary
+                  style={{ marginTop: '20px' }} 
+                  onClick={handleEditHours}
+                >
+                  <IconEdit /> Edit Hours
                 </Button>
-              </ButtonGroup>
-            </>
-          )}
-        </OperatingHoursContainer>
+              </>
+            ) : (
+              <>
+                <OperatingHoursTable>
+                  <thead>
+                    <tr>
+                      <OperatingHoursHead>Day</OperatingHoursHead>
+                      <OperatingHoursHead>Open</OperatingHoursHead>
+                      <OperatingHoursHead>Close</OperatingHoursHead>
+                      <OperatingHoursHead>Closed</OperatingHoursHead>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tempOperatingHours.map((hours, index) => (
+                      <OperatingHoursRow key={hours.day} index={index}>
+                        <OperatingHoursCell>{hours.day}</OperatingHoursCell>
+                        <OperatingHoursCell>
+                          <TimeInput 
+                            type="time" 
+                            value={hours.open}
+                            onChange={(e) => handleHoursChange(index, 'open', e.target.value)}
+                            disabled={hours.closed}
+                          />
+                        </OperatingHoursCell>
+                        <OperatingHoursCell>
+                          <TimeInput 
+                            type="time" 
+                            value={hours.close}
+                            onChange={(e) => handleHoursChange(index, 'close', e.target.value)}
+                            disabled={hours.closed}
+                          />
+                        </OperatingHoursCell>
+                        <OperatingHoursCell>
+                          <input 
+                            type="checkbox" 
+                            checked={hours.closed}
+                            onChange={() => handleHoursChange(index, 'closed')}
+                          />
+                        </OperatingHoursCell>
+                      </OperatingHoursRow>
+                    ))}
+                  </tbody>
+                </OperatingHoursTable>
+                <ButtonGroup style={{ marginTop: '20px' }}>
+                  <Button secondary onClick={handleCancelHours}>Cancel</Button>
+                  <Button success onClick={handleSaveHours}>
+                    <IconSave /> Save Changes
+                  </Button>
+                </ButtonGroup>
+              </>
+            )}
+          </OperatingHoursContainer>
+
+          <LocationContainer>
+            <FormTitle>Location Details</FormTitle>
+
+            {!editingLocation ? (
+              <div>
+                <UserInfoItem>
+                  <strong>Name:</strong> <span>{location.name}</span>
+                </UserInfoItem>
+                <UserInfoItem style={{ alignItems: 'flex-start' }}>
+                  <strong style={{ paddingTop: '8px' }}>Address:</strong> 
+                  <span style={{ whiteSpace: 'pre-wrap' }}>{location.address}</span>
+                </UserInfoItem>
+                <Button 
+                  primary
+                  style={{ marginTop: '20px' }} 
+                  onClick={handleEditLocation}
+                >
+                  <IconEdit /> Edit Location
+                </Button>
+              </div>
+            ) : (
+              <div>
+                <Input
+                  placeholder="Location Name"
+                  value={tempLocation.name}
+                  onChange={(e) => handleLocationChange('name', e.target.value)}
+                />
+                <Textarea
+                  placeholder="Address"
+                  value={tempLocation.address}
+                  onChange={(e) => handleLocationChange('address', e.target.value)}
+                  rows={4}
+                />
+                <ButtonGroup>
+                  <Button secondary onClick={handleCancelLocation}>Cancel</Button>
+                  <Button success onClick={handleSaveLocation}>
+                    <IconSave /> Save Location
+                  </Button>
+                </ButtonGroup>
+              </div>
+            )}
+          </LocationContainer>
+        </>
+      )}
+      
+      {showDeleteConfirmation && (
+        <ConfirmationModal>
+          <ConfirmationContent>
+            <h3>Delete Message</h3>
+            <p>Are you sure you want to delete this message? This action cannot be undone and will remove all replies and attachments.</p>
+            <ConfirmationActions>
+              <Button secondary onClick={handleCancelDelete} disabled={isDeleting}>Cancel</Button>
+              <Button danger onClick={handleConfirmDelete} disabled={isDeleting}>
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </Button>
+            </ConfirmationActions>
+          </ConfirmationContent>
+        </ConfirmationModal>
       )}
     </Container>
   );

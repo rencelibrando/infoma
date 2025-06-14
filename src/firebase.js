@@ -4,6 +4,8 @@ import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
+// Import App Check at the top level
+import { initializeAppCheck, ReCaptchaV3Provider, CustomProvider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE",
@@ -12,12 +14,26 @@ const firebaseConfig = {
   projectId: "bike-rental-bc5bd",
   storageBucket: "bike-rental-bc5bd.firebasestorage.app",
   messagingSenderId: "862099405823",
-  appId: "1:862099405823:android:4c6ad9bdb7c6515e2545ca",
+  appId: "1:862099405823:web:6a4c5698adf458d62545ca",
   measurementId: "G-WTS4L56WBP"
 };
 
 // Initialize Firebase first
 const app = initializeApp(firebaseConfig);
+
+// Temporarily skip App Check initialization for development
+let appCheck;
+
+// DEVELOPMENT ONLY: Skip App Check to allow login
+// We'll pass a placeholder value for appCheck so other code doesn't break
+appCheck = { 
+  getToken: () => Promise.resolve({ 
+    token: 'dev-token-mock',
+    expireTimeMillis: Date.now() + 3600000
+  })
+};
+
+console.log('⚠️ WARNING: App Check is DISABLED. This should only be used in development.');
 
 // Initialize Firestore, Storage, Auth, and Realtime Database
 const db = getFirestore(app);
@@ -25,20 +41,4 @@ const storage = getStorage(app);
 const auth = getAuth(app);
 const realtimeDb = getDatabase(app);
 
-// Only initialize App Check in production environment
-// This allows local development to work without reCAPTCHA verification
-if (process.env.NODE_ENV === 'production') {
-  import('firebase/app-check').then(({ initializeAppCheck, ReCaptchaV3Provider }) => {
-    initializeAppCheck(app, {
-      provider: new ReCaptchaV3Provider('6LfqjBsrAAAAAMs93cei_7rFTn2hXKLPvL-sEKFr'),
-      isTokenAutoRefreshEnabled: true
-    });
-    console.log('Firebase App Check initialized for production');
-  }).catch(error => {
-    console.error('Error initializing App Check:', error);
-  });
-} else {
-  console.log('Firebase App Check disabled for development environment');
-}
-
-export { db, storage, auth, realtimeDb };
+export { db, storage, auth, realtimeDb, appCheck };

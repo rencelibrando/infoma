@@ -11,7 +11,7 @@ import MapContainer from '../MapContainer';
 import { useDataContext } from '../../context/DataContext';
 import { auth } from '../../firebase';
 
-// Add CSS for pulsing animations
+
 const pulseStyles = `
   @keyframes liveLocationPulse {
     0% {
@@ -48,7 +48,7 @@ const pulseStyles = `
   }
 `;
 
-// Inject styles into document head
+
 if (typeof document !== 'undefined') {
   const existingStyle = document.getElementById('live-location-styles');
   if (!existingStyle) {
@@ -59,7 +59,7 @@ if (typeof document !== 'undefined') {
   }
 }
 
-// Enhanced color theme
+
 const colors = {
   pineGreen: '#1D3C34',
   lightPineGreen: '#2D5A4C',
@@ -77,9 +77,9 @@ const colors = {
   indigo: '#3F51B5'
 };
 
-// Add CSS animations for InfoWindow visualizations
+
 const injectAnimationStyles = () => {
-  // Check if animations are already injected
+  
   if (document.getElementById('live-tracking-animations')) return;
   
   const style = document.createElement('style');
@@ -117,7 +117,7 @@ const injectAnimationStyles = () => {
       100% { transform: scale(1.05); opacity: 0.8; }
     }
 
-    /* Interactive circle styles */
+   
     .clickable-circle {
       cursor: pointer !important;
       transition: all 0.2s ease;
@@ -127,12 +127,12 @@ const injectAnimationStyles = () => {
       animation: circleHover 0.3s ease-in-out;
     }
 
-    /* Map container pointer styles */
+   
     .gm-style div[role="button"] {
       cursor: pointer !important;
     }
 
-    /* Enhanced pulse animation for live circles */
+   
     .live-pulse-circle {
       animation: liveLocationPulse 3s infinite ease-in-out;
     }
@@ -149,23 +149,23 @@ const injectAnimationStyles = () => {
 };
 
 const DashboardContainer = styled.div`
-  padding: 15px; // Reduced from 20px
+  padding: 15px; 
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  min-height: calc(100vh - 60px); // Reduced
+  min-height: calc(100vh - 60px); 
 `;
 
 const Title = styled.h2`
   color: ${colors.pineGreen};
-  margin-bottom: 15px; // Reduced from 20px
+  margin-bottom: 15px; 
   display: flex;
   align-items: center;
-  gap: 10px; // Reduced from 15px
-  font-size: 22px; // Reduced from 24px
+  gap: 10px; 
+  font-size: 22px; 
   font-weight: 700;
 `;
 
 const LiveIndicator = styled.div`
-  width: 8px; // Reduced from 10px
+  width: 8px; 
   height: 8px;
   background: ${colors.success};
   border-radius: 50%;
@@ -180,34 +180,34 @@ const LiveIndicator = styled.div`
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); // Reduced from 250px
-  gap: 12px; // Reduced from 15px
-  margin-bottom: 15px; // Reduced from 20px
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+  gap: 12px; 
+  margin-bottom: 15px; 
 `;
 
 const StatCard = styled.div`
   background: ${colors.white};
-  border-radius: 8px; // Reduced from 12px
-  padding: 12px; // Reduced from 15px
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); // Reduced
+  border-radius: 8px; 
+  padding: 12px; 
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); 
   transition: all 0.2s ease;
   border-left: 4px solid ${props => props.color || colors.pineGreen};
   
   &:hover {
-    transform: translateY(-1px); // Reduced from -2px
+    transform: translateY(-1px); 
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   }
 `;
 
 const StatValue = styled.div`
-  font-size: 20px; // Reduced from 24px
+  font-size: 20px; 
   font-weight: bold;
   color: ${props => props.color || colors.pineGreen};
-  margin-bottom: 3px; // Reduced from 5px
+  margin-bottom: 3px; 
 `;
 
 const StatLabel = styled.div`
-  font-size: 11px; // Reduced from 12px
+  font-size: 11px; 
   color: ${colors.mediumGray};
   text-transform: uppercase;
   font-weight: 600;
@@ -264,8 +264,8 @@ const AlertIcon = styled.div`
 `;
 
 const MapWrapper = styled.div`
-  height: 500px; // Reduced from 600px
-  border-radius: 8px; // Reduced from 12px
+  height: 500px; 
+  border-radius: 8px; 
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   position: relative;
@@ -273,9 +273,9 @@ const MapWrapper = styled.div`
 
 const ControlsContainer = styled.div`
   background: ${colors.white};
-  border-radius: 8px; // Reduced from 12px
-  padding: 12px; // Reduced from 15px
-  margin-bottom: 15px; // Reduced from 20px
+  border-radius: 8px; 
+  padding: 12px; 
+  margin-bottom: 15px; 
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 `;
 
@@ -300,19 +300,19 @@ const ToggleButton = styled.button`
 
 const RidesList = styled.div`
   background: ${colors.white};
-  border-radius: 8px; // Reduced from 12px
-  padding: 12px; // Reduced from 15px
-  margin-top: 15px; // Reduced from 20px
+  border-radius: 8px; 
+  padding: 12px; 
+  margin-top: 15px; 
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  max-height: 400px; // Reduced from 500px
+  max-height: 400px; 
   overflow-y: auto;
 `;
 
 const RideCard = styled.div`
   border: 1px solid ${colors.lightGray};
-  border-radius: 6px; // Reduced from 8px
-  padding: 10px; // Reduced from 12px
-  margin-bottom: 8px; // Reduced from 10px
+  border-radius: 6px; 
+  padding: 10px; 
+  margin-bottom: 8px; 
   transition: all 0.2s ease;
   cursor: pointer;
   
@@ -346,21 +346,21 @@ const RideStatus = styled.span`
 `;
 
 const InfoWindowContent = styled.div`
-  padding: 8px; // Reduced from 10px
-  min-width: 250px; // Reduced from 300px
-  max-width: 350px; // Reduced from 400px
+  padding: 8px; 
+  min-width: 250px; 
+  max-width: 350px; 
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   
   h3 {
-    margin: 0 0 8px 0; // Reduced from 10px
-    font-size: 14px; // Reduced from 16px
+    margin: 0 0 8px 0; 
+    font-size: 14px; 
     font-weight: 600;
   }
   
   p {
-    margin: 3px 0; // Reduced from 5px
-    font-size: 11px; // Reduced from 12px
-    line-height: 1.3; // Reduced from 1.4
+    margin: 3px 0; 
+    font-size: 11px; 
+    line-height: 1.3; 
   }
 `;
 
@@ -386,12 +386,12 @@ const RealTimeTrackingDashboard = () => {
   const [liveLocations, setLiveLocations] = useState({});
   const [authError, setAuthError] = useState(null);
   
-  // New state for tracking ride paths and trails
-  const [ridePaths, setRidePaths] = useState({}); // Store complete paths for each ride
-  const [rideTrails, setRideTrails] = useState({}); // Store trail data for display
+  
+  const [ridePaths, setRidePaths] = useState({}); 
+  const [rideTrails, setRideTrails] = useState({}); 
   const [showMarkerClusters, setShowMarkerClusters] = useState(false);
   const [trailSettings, setTrailSettings] = useState({
-    maxTrailLength: 50, // Maximum number of points in trail
+    maxTrailLength: 50, 
     trailOpacity: 0.7,
     trailWeight: 3,
     fadeTrail: true
@@ -400,7 +400,7 @@ const RealTimeTrackingDashboard = () => {
   const unsubscribeRefs = useRef([]);
   const realtimeListeners = useRef([]);
 
-  // New state for ride history
+  
   const [rideHistory, setRideHistory] = useState([]);
   const [selectedHistoryRide, setSelectedHistoryRide] = useState(null);
   const [historyFilters, setHistoryFilters] = useState({
@@ -412,30 +412,30 @@ const RealTimeTrackingDashboard = () => {
   });
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // Route modal state
+  
   const [showRouteModal, setShowRouteModal] = useState(false);
   const [routeData, setRouteData] = useState(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
 
-  // Deletion state
+  
   const [deletingRides, setDeletingRides] = useState(new Set());
   const [deleteError, setDeleteError] = useState(null);
   const [deleteSuccess, setDeleteSuccess] = useState(null);
 
-  // Helper function to determine if a ride is truly active
+  
   const isRideTrulyActive = (ride) => {
     const hasStarted = !!ride.startTime;
     const hasNotEnded = !ride.endTime;
     const endedStatuses = ["completed", "cancelled", "ended", "finished"];
     
-    // More flexible status checking - handle case variations and missing status
-    const statusIsActive = !ride.status || // No status - assume active for backward compatibility
+    
+    const statusIsActive = !ride.status || 
                           ride.status.toLowerCase() === "active" || 
                           !endedStatuses.includes(ride.status.toLowerCase());
     
     const result = hasStarted && hasNotEnded && statusIsActive;
     
-    // Debug logging for troubleshooting
+    
     console.log(`🔍 Checking ride ${ride.userId}:`, {
       hasStarted,
       hasNotEnded, 
@@ -449,7 +449,7 @@ const RealTimeTrackingDashboard = () => {
     return result;
   };
 
-  // Predefined bike locations for Metro Manila
+  
   const predefinedBikes = [
     {
       id: 'bike-001',
@@ -459,7 +459,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational',
       batteryLevel: 85,
-      lastLocationUpdate: new Date(Date.now() - 10 * 60 * 1000) // 10 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 10 * 60 * 1000) 
     },
     {
       id: 'bike-002', 
@@ -469,7 +469,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational',
       batteryLevel: 92,
-      lastLocationUpdate: new Date(Date.now() - 5 * 60 * 1000) // 5 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 5 * 60 * 1000) 
     },
     {
       id: 'bike-003',
@@ -479,7 +479,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: false,
       maintenanceStatus: 'operational',
       batteryLevel: 67,
-      lastLocationUpdate: new Date(Date.now() - 15 * 60 * 1000) // 15 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 15 * 60 * 1000) 
     },
     {
       id: 'bike-004',
@@ -489,7 +489,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational', 
       batteryLevel: 78,
-      lastLocationUpdate: new Date(Date.now() - 8 * 60 * 1000) // 8 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 8 * 60 * 1000) 
     },
     {
       id: 'bike-005',
@@ -499,7 +499,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'maintenance',
       batteryLevel: 45,
-      lastLocationUpdate: new Date(Date.now() - 120 * 60 * 1000) // 2 hours ago
+      lastLocationUpdate: new Date(Date.now() - 120 * 60 * 1000) 
     },
     {
       id: 'bike-006',
@@ -509,7 +509,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: false,
       maintenanceStatus: 'operational',
       batteryLevel: 23,
-      lastLocationUpdate: new Date(Date.now() - 30 * 60 * 1000) // 30 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 30 * 60 * 1000) 
     },
     {
       id: 'bike-007',
@@ -519,7 +519,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational',
       batteryLevel: 89,
-      lastLocationUpdate: new Date(Date.now() - 3 * 60 * 1000) // 3 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 3 * 60 * 1000) 
     },
     {
       id: 'bike-008',
@@ -529,7 +529,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational',
       batteryLevel: 76,
-      lastLocationUpdate: new Date(Date.now() - 12 * 60 * 1000) // 12 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 12 * 60 * 1000) 
     },
     {
       id: 'bike-009',
@@ -539,7 +539,7 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: false,
       maintenanceStatus: 'maintenance',
       batteryLevel: 34,
-      lastLocationUpdate: new Date(Date.now() - 240 * 60 * 1000) // 4 hours ago
+      lastLocationUpdate: new Date(Date.now() - 240 * 60 * 1000) 
     },
     {
       id: 'bike-010',
@@ -549,17 +549,17 @@ const RealTimeTrackingDashboard = () => {
       isAvailable: true,
       maintenanceStatus: 'operational',
       batteryLevel: 91,
-      lastLocationUpdate: new Date(Date.now() - 7 * 60 * 1000) // 7 minutes ago
+      lastLocationUpdate: new Date(Date.now() - 7 * 60 * 1000) 
     }
   ];
 
-  // Use only real bikes data for stats - combine with predefined only for map display
+  
   const allBikesForMap = [...(bikes || []), ...predefinedBikes];
   
-  // Use only real bikes for accurate stats calculation to match Manage Bikes section
+  
   const realBikes = bikes || [];
 
-  // Debug log to verify stats synchronization
+  
   console.log('🚴 Bike Stats Debug:', {
     realBikesCount: realBikes.length,
     predefinedBikesCount: predefinedBikes.length,
@@ -567,14 +567,14 @@ const RealTimeTrackingDashboard = () => {
     availableCount: realBikes.filter(bike => bike?.isAvailable && bike?.maintenanceStatus === 'operational' && !bike?.isInUse).length
   });
 
-  // Add debugging for data availability (moved after state declarations)
+  
   useEffect(() => {
     console.log('Dashboard - Bikes data:', bikes?.length || 0, bikes);
     console.log('Dashboard - Active rides:', activeRides?.length || 0, activeRides);
     console.log('Dashboard - Live locations:', Object.keys(liveLocations).length, liveLocations);
   }, [bikes, activeRides, liveLocations]);
 
-  // Monitor authentication status
+  
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
       if (user) {
@@ -589,7 +589,7 @@ const RealTimeTrackingDashboard = () => {
     return () => unsubscribe();
   }, []);
 
-  // Enhanced trail management
+  
   const updateRideTrail = useCallback((userId, newLocation) => {
     if (!newLocation || !newLocation.latitude || !newLocation.longitude) return;
 
@@ -603,10 +603,10 @@ const RealTimeTrackingDashboard = () => {
         bearing: newLocation.bearing || 0
       };
 
-      // Add new point and limit trail length
+      
       const updatedPath = [...currentPath, newPoint];
       if (updatedPath.length > trailSettings.maxTrailLength) {
-        updatedPath.shift(); // Remove oldest point
+        updatedPath.shift(); 
       }
 
       return {
@@ -615,7 +615,7 @@ const RealTimeTrackingDashboard = () => {
       };
     });
 
-    // Update trail display data
+    
     setRideTrails(prev => {
       const path = prev[userId] || [];
       const newTrailPoint = {
@@ -636,16 +636,16 @@ const RealTimeTrackingDashboard = () => {
     });
   }, [trailSettings.maxTrailLength]);
 
-  // Setup real-time listeners for active rides using Realtime Database
-  // This effect handles real-time ride tracking and automatically removes ended rides
+  
+  
   useEffect(() => {
-    // Inject CSS animations for InfoWindow visualizations
+    
     injectAnimationStyles();
     
     const setupRealTimeListeners = () => {
       console.log('Setting up real-time listeners...');
       
-      // Listen for active rides from Realtime Database
+      
       const activeRidesRef = ref(realtimeDb, 'activeRides');
       const activeRidesListener = onValue(activeRidesRef, (snapshot) => {
         try {
@@ -653,24 +653,24 @@ const RealTimeTrackingDashboard = () => {
           console.log('🔥 Raw activeRides data from Firebase:', activeRidesData);
           
           const rides = Object.entries(activeRidesData).map(([userId, rideData]) => {
-            // Process and validate the ride data
+            
             const processedRide = {
               ...rideData,
               userId: userId,
               id: rideData.rideId || rideData.id || userId
             };
             
-            // Ensure startTime is properly formatted
+            
             if (rideData.startTime) {
-              // Handle different timestamp formats
+              
               if (typeof rideData.startTime === 'string') {
                 processedRide.startTime = new Date(rideData.startTime);
               } else if (typeof rideData.startTime === 'number') {
-                // Handle both milliseconds and seconds timestamps
+                
                 const timestamp = rideData.startTime;
                 processedRide.startTime = new Date(timestamp < 10000000000 ? timestamp * 1000 : timestamp);
               } else if (rideData.startTime && typeof rideData.startTime === 'object') {
-                // Handle Firestore timestamp objects
+                
                 if (rideData.startTime.seconds) {
                   processedRide.startTime = new Date(rideData.startTime.seconds * 1000);
                 } else if (rideData.startTime.toDate) {
@@ -680,13 +680,13 @@ const RealTimeTrackingDashboard = () => {
                 }
               }
               
-              // Validate the parsed date
+              
               if (isNaN(processedRide.startTime.getTime())) {
                 console.warn(`Invalid startTime for user ${userId}:`, rideData.startTime);
                 processedRide.startTime = null;
               }
             } else {
-              // If no startTime, try to use other timestamp fields
+              
               const timestampFields = ['createdAt', 'timestamp', 'deviceTimestamp'];
               for (const field of timestampFields) {
                 if (rideData[field]) {
@@ -696,19 +696,19 @@ const RealTimeTrackingDashboard = () => {
                       break;
                     }
                   } catch (e) {
-                    // Continue to next field
+                    
                   }
                 }
               }
               
-              // If still no valid startTime, set to null
+              
               if (!processedRide.startTime || isNaN(processedRide.startTime.getTime())) {
                 console.warn(`No valid timestamp found for user ${userId}`, rideData);
                 processedRide.startTime = null;
               }
             }
             
-            // Process endTime if it exists
+            
             if (rideData.endTime) {
               if (typeof rideData.endTime === 'string') {
                 processedRide.endTime = new Date(rideData.endTime);
@@ -725,7 +725,7 @@ const RealTimeTrackingDashboard = () => {
                 }
               }
               
-              // Validate the parsed endTime
+              
               if (isNaN(processedRide.endTime.getTime())) {
                 console.warn(`Invalid endTime for user ${userId}:`, rideData.endTime);
                 processedRide.endTime = null;
@@ -735,42 +735,42 @@ const RealTimeTrackingDashboard = () => {
             return processedRide;
           });
           
-          // TEMPORARILY DISABLED FILTERING FOR DEBUGGING - Show all rides
-          console.log('⚠️ TEMPORARILY SHOWING ALL RIDES FOR DEBUGGING');
-          const trulyActiveRides = rides; // Show all rides for now
           
-          // Keep the filtering logic commented out for now
-          // const trulyActiveRides = rides.filter(ride => {
-          //   const isActuallyActive = isRideTrulyActive(ride);
-          //   
-          //   // Log rides that are being filtered out for debugging
-          //   if (!isActuallyActive) {
-          //     const reason = !ride.startTime ? 'no start time' :
-          //                  ride.endTime ? 'has end time' :
-          //                  ['completed', 'cancelled', 'ended', 'finished'].includes(ride.status?.toLowerCase()) ? 'ended status' :
-          //                  'unknown reason';
-          //     console.log(`🗑️ Filtering out ride ${ride.userId}: ${reason} (status: ${ride.status || 'none'}, endTime: ${!!ride.endTime})`);
-          //   }
-          //   
-          //   return isActuallyActive;
-          // });
+          console.log('⚠️ TEMPORARILY SHOWING ALL RIDES FOR DEBUGGING');
+          const trulyActiveRides = rides; 
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
+          
           
           console.log(`🚴 Raw rides from DB: ${rides.length}, Truly active rides: ${trulyActiveRides.length}`);
           
-          // Log summary of filtering if there's a difference
+          
           if (rides.length !== trulyActiveRides.length) {
             const filteredCount = rides.length - trulyActiveRides.length;
             console.log(`✅ Filtered out ${filteredCount} ended/invalid rides from map display`);
           }
           
-          // Debug timestamp processing
+          
           trulyActiveRides.forEach(ride => {
             if (!ride.startTime) {
               console.warn(`Missing startTime for active ride ${ride.id}:`, ride);
             }
           });
           
-          // Clean up trails for rides that are no longer active
+          
           const activeUserIds = new Set(trulyActiveRides.map(ride => ride.userId));
           setRidePaths(prevPaths => {
             const cleanedPaths = {};
@@ -797,9 +797,9 @@ const RealTimeTrackingDashboard = () => {
           setActiveRides(trulyActiveRides);
           calculateStats(trulyActiveRides);
           checkForAlerts(trulyActiveRides);
-          setAuthError(null); // Clear auth error on successful data fetch
+          setAuthError(null); 
           
-          // Clean up live location data for users who are no longer in active rides
+          
           setLiveLocations(prevLiveLocations => {
             const cleanedLiveLocations = {};
             const activeUserIds = new Set(trulyActiveRides.map(ride => ride.userId));
@@ -814,8 +814,6 @@ const RealTimeTrackingDashboard = () => {
             
             return cleanedLiveLocations;
           });
-          
-          // Clear selected ride if it's no longer active
           setSelectedRide(prevSelected => {
             if (prevSelected && prevSelected.userId && !prevSelected.isStaticBike) {
               const isStillActive = trulyActiveRides.some(ride => ride.userId === prevSelected.userId);
@@ -836,21 +834,21 @@ const RealTimeTrackingDashboard = () => {
         setAuthError(`Firebase error: ${error.message}`);
       });
 
-      // Listen for live locations from Realtime Database
+      
       const liveLocationRef = ref(realtimeDb, 'liveLocation');
       const liveLocationListener = onValue(liveLocationRef, (snapshot) => {
         try {
           const liveLocationData = snapshot.val() || {};
           console.log('📍 Live locations updated:', Object.keys(liveLocationData).length, liveLocationData);
           
-          // Update live locations with trail updates
+          
           setLiveLocations(prevLocations => {
             const newLocations = { ...liveLocationData };
             
-            // Update trails for each user with new location data
+            
             Object.entries(newLocations).forEach(([userId, locationData]) => {
               if (locationData && locationData.latitude && locationData.longitude) {
-                // Only update trail if location has actually changed
+               
                 const prevLocation = prevLocations[userId];
                 if (!prevLocation || 
                     prevLocation.latitude !== locationData.latitude || 
@@ -882,13 +880,13 @@ const RealTimeTrackingDashboard = () => {
     setupRealTimeListeners();
 
     return () => {
-      // Clean up Realtime Database listeners
+      
       realtimeListeners.current.forEach(({ ref: dbRef, listener }) => {
         off(dbRef, 'value', listener);
       });
       realtimeListeners.current = [];
       
-      // Clean up Firestore listeners
+      
       unsubscribeRefs.current.forEach(unsubscribe => unsubscribe());
       unsubscribeRefs.current = [];
     };
@@ -916,7 +914,7 @@ const RealTimeTrackingDashboard = () => {
 
     setStats({
       totalActiveRides,
-      totalDistance: totalDistance / 1000, // Convert to km
+      totalDistance: totalDistance / 1000, 
       averageSpeed: speedCount > 0 ? totalSpeed / speedCount : 0,
       emergencyAlerts
     });
@@ -932,8 +930,8 @@ const RealTimeTrackingDashboard = () => {
         const lastUpdate = new Date(liveLocation.timestamp || liveLocation.deviceTimestamp);
         const timeSinceUpdate = Date.now() - lastUpdate.getTime();
 
-        // Check for stale location data
-        if (timeSinceUpdate > 5 * 60 * 1000) { // 5 minutes
+        
+        if (timeSinceUpdate > 5 * 60 * 1000) { 
           newAlerts.push({
             id: `stale-${ride.userId}`,
             severity: 'medium',
@@ -943,7 +941,7 @@ const RealTimeTrackingDashboard = () => {
           });
         }
 
-        // Check for emergency status
+        
         if (ride.status === 'emergency') {
           newAlerts.push({
             id: `emergency-${ride.userId}`,
@@ -954,8 +952,8 @@ const RealTimeTrackingDashboard = () => {
           });
         }
 
-        // Check for unusual speed
-        if (liveLocation.speed > 50) { // 50 km/h
+        
+        if (liveLocation.speed > 50) { 
           newAlerts.push({
             id: `speed-${ride.userId}`,
             severity: 'medium',
@@ -973,10 +971,10 @@ const RealTimeTrackingDashboard = () => {
   const handleRideClick = (ride) => {
     console.log('🔥 handleRideClick called with:', ride);
     
-    // Use unified position calculation for consistency
+    
     const { position, locationStatus } = getUnifiedPosition(ride, 'activeRide');
     
-    // Store the ride with position for InfoWindow consistency
+    
     const rideWithPosition = {
       ...ride,
       position,
@@ -985,7 +983,7 @@ const RealTimeTrackingDashboard = () => {
     
     setSelectedRide(rideWithPosition);
     
-    // Center map on the calculated position
+    
     setMapCenter(position);
       setMapZoom(16);
     
@@ -999,7 +997,7 @@ const RealTimeTrackingDashboard = () => {
         emergencyResponseTime: new Date()
       });
       
-      // Remove emergency alert
+      
       setAlerts(prev => prev.filter(alert => alert.id !== `emergency-${rideId}`));
     } catch (error) {
       console.error('Error responding to emergency:', error);
@@ -1012,7 +1010,7 @@ const RealTimeTrackingDashboard = () => {
         await forceCleanupUserTracking(userId);
         alert('Tracking data cleanup completed successfully.');
         
-        // Refresh the component data
+        
         setActiveRides(prev => prev.filter(ride => ride.userId !== userId));
         setLiveLocations(prev => {
           const updated = { ...prev };
@@ -1027,14 +1025,14 @@ const RealTimeTrackingDashboard = () => {
     }
   };
 
-  // Consolidated marker icon function - replaces getMarkerIcon, getEnhancedMarkerIcon, and getEnhancedBikeIcon
+  
   const getUnifiedMarkerIcon = (type, data, options = {}) => {
     const { locationStatus = 'unknown', size = 24 } = options;
     
     let baseColor, strokeColor;
     
     if (type === 'bike') {
-      // Static bike icon logic - solid colors
+      
       if (!data.isAvailable) {
         baseColor = colors.danger;
         strokeColor = '#8B0000';
@@ -1049,7 +1047,7 @@ const RealTimeTrackingDashboard = () => {
         strokeColor = '#008000';
       }
     } else if (type === 'activeRide') {
-      // Active ride marker logic - solid colors
+      
       if (data.status === 'emergency') {
         baseColor = colors.danger;
         strokeColor = '#8B0000';
@@ -1064,7 +1062,7 @@ const RealTimeTrackingDashboard = () => {
     
     return {
       url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
-        <svg width="${size}" height="${size}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <svg width="${size}" height="${size}" viewBox="0 0 24 24" xmlns="http:
           <defs>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
               <feDropShadow dx="1" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.3)"/>
@@ -1087,14 +1085,14 @@ const RealTimeTrackingDashboard = () => {
     };
   };
 
-  // Unified position calculation function
+  
   const getUnifiedPosition = (data, type, fallbackOptions = {}) => {
     let position = null;
     let locationStatus = 'unknown';
     let locationAge = null;
     
     if (type === 'bike') {
-      // Strategy 1: Use current latitude/longitude
+      
       if (data.latitude && data.longitude && 
           !isNaN(parseFloat(data.latitude)) && !isNaN(parseFloat(data.longitude))) {
         position = {
@@ -1113,7 +1111,7 @@ const RealTimeTrackingDashboard = () => {
           locationStatus = 'stale';
         }
       }
-      // Strategy 2: Use last known location
+      
       else if (data.lastKnownLocation?.latitude && data.lastKnownLocation?.longitude) {
         position = {
           lat: parseFloat(data.lastKnownLocation.latitude),
@@ -1126,7 +1124,7 @@ const RealTimeTrackingDashboard = () => {
           locationAge = (Date.now() - lastUpdate.getTime()) / (1000 * 60);
         }
       }
-      // Strategy 3: Use initial deployment location
+      
       else if (data.initialLocation?.latitude && data.initialLocation?.longitude) {
         position = {
           lat: parseFloat(data.initialLocation.latitude),
@@ -1135,7 +1133,7 @@ const RealTimeTrackingDashboard = () => {
         locationStatus = 'initial';
       }
     } else if (type === 'activeRide') {
-      // For active rides, prioritize live location over stored location
+      
       const liveLocation = liveLocations[data.userId];
       const rideLocation = data.currentLocation;
       const location = liveLocation || rideLocation;
@@ -1149,7 +1147,7 @@ const RealTimeTrackingDashboard = () => {
       }
     }
     
-    // Fallback to default location if no valid position found
+    
     if (!position) {
       const { lat = 14.5995, lng = 120.9842, addRandomOffset = true } = fallbackOptions;
       const offset = addRandomOffset ? (Math.random() - 0.5) * 0.01 : 0;
@@ -1164,7 +1162,7 @@ const RealTimeTrackingDashboard = () => {
     return { position, locationStatus, locationAge };
   };
 
-  // Get trail color based on ride status and speed
+  
   const getTrailColor = (ride) => {
     const liveLocation = liveLocations[ride.userId];
     const speed = liveLocation?.speed || 0;
@@ -1176,7 +1174,7 @@ const RealTimeTrackingDashboard = () => {
     return colors.pineGreen;
   };
 
-  // Clear trails for a specific ride
+  
   const clearRideTrail = (userId) => {
     setRidePaths(prev => {
       const updated = { ...prev };
@@ -1190,14 +1188,14 @@ const RealTimeTrackingDashboard = () => {
     });
   };
 
-  // Clear all trails
+  
   const clearAllTrails = () => {
     setRidePaths({});
     setRideTrails({});
   };
 
   const formatDuration = (startTime) => {
-    // Handle null, undefined, or invalid startTime
+    
     if (!startTime) {
       return 'N/A';
     }
@@ -1205,25 +1203,25 @@ const RealTimeTrackingDashboard = () => {
     try {
       let start;
       
-      // Handle different timestamp formats
+      
       if (typeof startTime === 'object' && startTime.toDate) {
-        // Firestore Timestamp object
+        
         start = startTime.toDate();
       } else if (typeof startTime === 'object' && startTime.seconds) {
-        // Firestore Timestamp-like object
+        
         start = new Date(startTime.seconds * 1000);
       } else if (typeof startTime === 'number') {
-        // Unix timestamp (milliseconds or seconds)
+        
         start = startTime > 1000000000000 ? new Date(startTime) : new Date(startTime * 1000);
       } else if (typeof startTime === 'string') {
-        // ISO string or other date string
+        
         start = new Date(startTime);
       } else {
-        // Fallback
+        
         start = new Date(startTime);
       }
       
-      // Validate the date
+      
       if (isNaN(start.getTime())) {
         console.warn('Invalid startTime provided to formatDuration:', startTime);
         return 'Invalid time';
@@ -1231,7 +1229,7 @@ const RealTimeTrackingDashboard = () => {
       
       const duration = Date.now() - start.getTime();
       
-      // Handle negative duration (future start time)
+      
       if (duration < 0) {
         return 'Not started';
       }
@@ -1239,7 +1237,7 @@ const RealTimeTrackingDashboard = () => {
       const hours = Math.floor(duration / (1000 * 60 * 60));
       const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60));
       
-      // Handle very long durations
+      
       if (hours > 999) {
         return '999h+';
       }
@@ -1252,12 +1250,12 @@ const RealTimeTrackingDashboard = () => {
   };
 
   const formatTime = (milliseconds) => {
-    // Handle null, undefined, or invalid values
+    
     if (!milliseconds || typeof milliseconds !== 'number' || isNaN(milliseconds)) {
       return 'N/A';
     }
     
-    // Handle negative values
+    
     if (milliseconds < 0) {
       return 'N/A';
     }
@@ -1266,7 +1264,7 @@ const RealTimeTrackingDashboard = () => {
     const minutes = Math.floor((milliseconds % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((milliseconds % (1000 * 60)) / 1000);
     
-    // Handle very long durations
+    
     if (hours > 999) {
       return '999h+';
     }
@@ -1280,38 +1278,38 @@ const RealTimeTrackingDashboard = () => {
     }
   };
 
-  // Format distance in kilometers
+  
   const formatDistanceKm = (distanceInMeters) => {
     if (!distanceInMeters) return '0.0 km';
     return `${(distanceInMeters / 1000).toFixed(2)} km`;
   };
 
-  // Format date and time
+  
   const formatDateTime = (timestamp) => {
     if (!timestamp) return 'N/A';
     const date = new Date(timestamp);
     return date.toLocaleString();
   };
 
-  // Format speed
+  
   const formatSpeed = (speedInKmH) => {
     if (!speedInKmH) return '0.0 km/h';
     return `${speedInKmH.toFixed(1)} km/h`;
   };
 
-  // Fetch ride history
+  
   const fetchRideHistory = async () => {
     setIsLoadingHistory(true);
     try {
       let ridesQuery = collection(db, 'rides');
       let queryConstraints = [];
 
-      // Add status filter
+      
       if (historyFilters.status !== 'all') {
         queryConstraints.push(where('status', '==', historyFilters.status));
       }
 
-      // Add date range filter
+      
       if (historyFilters.dateRange !== 'all') {
         const now = new Date();
         let startDate;
@@ -1338,12 +1336,12 @@ const RealTimeTrackingDashboard = () => {
         }
       }
 
-      // Add user filter
+      
       if (historyFilters.userId) {
         queryConstraints.push(where('userId', '==', historyFilters.userId));
       }
 
-      // Add sorting and limit
+      
       queryConstraints.push(orderBy(historyFilters.sortBy, historyFilters.sortOrder));
       queryConstraints.push(limit(50));
 
@@ -1354,7 +1352,7 @@ const RealTimeTrackingDashboard = () => {
         snapshot.docs.map(async (rideDoc) => {
           const rideData = rideDoc.data();
           
-          // Fetch user data
+          
           let userData = {};
           if (rideData.userId) {
             try {
@@ -1367,7 +1365,7 @@ const RealTimeTrackingDashboard = () => {
             }
           }
 
-          // Calculate ride statistics with improved accuracy and fallbacks
+          
           const duration = rideData.endTime ? 
             (rideData.endTime - rideData.startTime) : 
             (Date.now() - rideData.startTime);
@@ -1376,12 +1374,12 @@ const RealTimeTrackingDashboard = () => {
           let averageSpeed = rideData.averageSpeed || 0;
           let totalDistance = rideData.totalDistance || rideData.distanceTraveled || 0;
 
-          // Enhanced path-based calculations with better validation
+          
           if (rideData.path && rideData.path.length > 1) {
-            // Calculate speeds from path data if not available in ride record
+            
             const speeds = rideData.path
               .map(point => {
-                // Handle different speed field formats
+                
                 const speed = point.speed || point.speedKmh || point.currentSpeed || 0;
                 return typeof speed === 'number' && speed > 0 && speed < 100 ? speed : 0;
               })
@@ -1391,7 +1389,7 @@ const RealTimeTrackingDashboard = () => {
               const pathMaxSpeed = Math.max(...speeds);
               const pathAvgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
               
-              // Use path-calculated values if ride record values are missing or zero
+              
               if (!maxSpeed || maxSpeed === 0) {
                 maxSpeed = pathMaxSpeed;
               }
@@ -1400,13 +1398,13 @@ const RealTimeTrackingDashboard = () => {
               }
             }
 
-            // Calculate distance from path if not available or zero
+            
             if (!totalDistance || totalDistance === 0) {
               for (let i = 1; i < rideData.path.length; i++) {
                 const prev = rideData.path[i - 1];
                 const curr = rideData.path[i];
                 
-                // Validate coordinates before calculating distance
+                
                 if (prev && curr && 
                     typeof prev.latitude === 'number' && typeof prev.longitude === 'number' &&
                     typeof curr.latitude === 'number' && typeof curr.longitude === 'number' &&
@@ -1414,19 +1412,19 @@ const RealTimeTrackingDashboard = () => {
                     Math.abs(curr.latitude) <= 90 && Math.abs(curr.longitude) <= 180) {
                   
                   const segmentDistance = getDistanceBetweenPoints(prev, curr);
-                  // Filter out unrealistic GPS jumps (> 100km between points)
+                  
                   if (segmentDistance < 100) {
-                    totalDistance += segmentDistance * 1000; // Convert to meters
+                    totalDistance += segmentDistance * 1000; 
                   }
                 }
               }
             }
           }
 
-          // Final validation and cleanup
-          maxSpeed = Math.max(0, Math.min(maxSpeed || 0, 100)); // Cap at 100 km/h
-          averageSpeed = Math.max(0, Math.min(averageSpeed || 0, 100)); // Cap at 100 km/h
-          totalDistance = Math.max(0, totalDistance || 0); // Ensure non-negative
+          
+          maxSpeed = Math.max(0, Math.min(maxSpeed || 0, 100)); 
+          averageSpeed = Math.max(0, Math.min(averageSpeed || 0, 100)); 
+          totalDistance = Math.max(0, totalDistance || 0); 
 
           return {
             id: rideDoc.id,
@@ -1436,8 +1434,8 @@ const RealTimeTrackingDashboard = () => {
             maxSpeed,
             averageSpeed,
             totalDistance,
-            // Ensure consistent field naming for compatibility
-            distanceTraveled: totalDistance, // Add alias for mobile compatibility
+            
+            distanceTraveled: totalDistance, 
             startLocation: rideData.path?.[0] || null,
             endLocation: rideData.path?.[rideData.path?.length - 1] || null
           };
@@ -1451,10 +1449,8 @@ const RealTimeTrackingDashboard = () => {
       setIsLoadingHistory(false);
     }
   };
-
-  // Helper function to calculate distance between two points
   const getDistanceBetweenPoints = (point1, point2) => {
-    const R = 6371; // Earth's radius in km
+    const R = 6371; 
     const dLat = (point2.latitude - point1.latitude) * Math.PI / 180;
     const dLon = (point2.longitude - point1.longitude) * Math.PI / 180;
     const a = 
@@ -1464,22 +1460,17 @@ const RealTimeTrackingDashboard = () => {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
   };
-
-  // Fetch ride history when tab changes or filters change
   useEffect(() => {
     if (activeTab === 'history') {
       fetchRideHistory();
     }
   }, [activeTab, historyFilters]);
-
   const handleRideHistoryClick = async (ride) => {
     try {
       setSelectedHistoryRide(ride);
       setShowRouteModal(true);
       setIsLoadingRoute(true);
       setRouteData(null);
-
-      // Generate route data from ride information
       const routeSummary = {
         rideId: ride.id,
         userId: ride.userId,
@@ -1516,50 +1507,32 @@ const RealTimeTrackingDashboard = () => {
       setIsLoadingRoute(false);
     }
   };
-
-  // Close route modal
   const closeRouteModal = () => {
     setShowRouteModal(false);
     setSelectedHistoryRide(null);
     setRouteData(null);
     setIsLoadingRoute(false);
   };
-
-  // Handle ride deletion
   const handleDeleteRide = async (rideId) => {
-    // Confirm deletion
     const confirmed = window.confirm(
       'Are you sure you want to delete this ride from the database? This action cannot be undone.'
     );
-    
     if (!confirmed) return;
-
     try {
-      // Add to deleting set
       setDeletingRides(prev => new Set([...prev, rideId]));
       setDeleteError(null);
-
-      // Call the delete function
       const result = await deleteRide(rideId);
 
       if (result.success) {
-        // Remove from history list
         setRideHistory(prev => prev.filter(ride => ride.id !== rideId));
-        
-        // Show success message
         setDeleteSuccess(`Ride deleted successfully: ${result.deletedRide.bikeId} - ${new Date(result.deletedRide.startTime).toLocaleString()}`);
-        
-        // Clear success message after 5 seconds
         setTimeout(() => setDeleteSuccess(null), 5000);
       }
     } catch (error) {
       console.error('Error deleting ride:', error);
       setDeleteError(error.message || 'Failed to delete ride');
-      
-      // Clear error message after 5 seconds
       setTimeout(() => setDeleteError(null), 5000);
     } finally {
-      // Remove from deleting set
       setDeletingRides(prev => {
         const newSet = new Set(prev);
         newSet.delete(rideId);
@@ -1567,14 +1540,10 @@ const RealTimeTrackingDashboard = () => {
       });
     }
   };
-
-  // Get user initials for avatar
   const getUserInitials = (name) => {
     if (!name) return 'U';
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
-
-  // Route Modal Component
   const RouteModal = () => {
     const { isLoaded } = useJsApiLoader({
       id: 'google-map-script',
@@ -2676,9 +2645,9 @@ const RealTimeTrackingDashboard = () => {
       {/* Tab Navigation */}
       <div style={{
         background: colors.white,
-        borderRadius: '8px', // Reduced from 12px
-        boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)', // Reduced
-        marginBottom: '15px', // Reduced from 20px
+        borderRadius: '8px', 
+        boxShadow: '0 2px 12px rgba(0, 0, 0, 0.08)', 
+        marginBottom: '15px', 
         overflow: 'hidden'
       }}>
         <div style={{
@@ -2693,9 +2662,9 @@ const RealTimeTrackingDashboard = () => {
                 'transparent',
               color: activeTab === 'live' ? colors.white : colors.darkGray,
               border: 'none',
-              padding: '10px 18px', // Reduced from 15px 25px
+              padding: '10px 18px', 
               cursor: 'pointer',
-              fontSize: '14px', // Reduced from 16px
+              fontSize: '14px', 
               fontWeight: '600',
               transition: 'all 0.2s ease',
               position: 'relative'
@@ -2711,9 +2680,9 @@ const RealTimeTrackingDashboard = () => {
                 'transparent',
               color: activeTab === 'history' ? colors.white : colors.darkGray,
               border: 'none',
-              padding: '10px 18px', // Reduced from 15px 25px
+              padding: '10px 18px', 
               cursor: 'pointer',
-              fontSize: '14px', // Reduced from 16px
+              fontSize: '14px', 
               fontWeight: '600',
               transition: 'all 0.2s ease',
               position: 'relative'
@@ -2731,9 +2700,9 @@ const RealTimeTrackingDashboard = () => {
                 <div style={{
                   backgroundColor: '#ffebee',
                   border: `2px solid ${colors.danger}`,
-                  borderRadius: '6px', // Reduced from 8px
-                  padding: '10px', // Reduced from 15px
-                  marginBottom: '15px', // Reduced from 20px
+                  borderRadius: '6px', 
+                  padding: '10px', 
+                  marginBottom: '15px', 
                   textAlign: 'center'
                 }}>
                   <div style={{ color: colors.danger, fontWeight: 'bold', marginBottom: '8px' }}> {/* Reduced from 10px */}
@@ -2752,11 +2721,11 @@ const RealTimeTrackingDashboard = () => {
                       backgroundColor: colors.danger,
                       color: 'white',
                       border: 'none',
-                      padding: '6px 12px', // Reduced from 8px 16px
+                      padding: '6px 12px', 
                       borderRadius: '4px',
                       cursor: 'pointer',
                       fontWeight: 'bold',
-                      fontSize: '12px' // Added
+                      fontSize: '12px' 
                     }}
                   >
                     🔄 Reload Dashboard
@@ -2768,10 +2737,10 @@ const RealTimeTrackingDashboard = () => {
               {alerts.length > 0 && (
                 <div style={{
                   background: colors.white,
-                  borderRadius: '6px', // Reduced from 8px
-                  padding: '10px', // Reduced from 15px
-                  marginBottom: '15px', // Reduced from 20px
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', // Reduced
+                  borderRadius: '6px', 
+                  padding: '10px', 
+                  marginBottom: '15px', 
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)', 
                   border: `2px solid ${colors.warning}`
                 }}>
                   <h3 style={{ marginBottom: '10px', color: colors.darkGray, fontSize: '14px' }}> {/* Reduced from 15px, added fontSize */}
@@ -2781,10 +2750,10 @@ const RealTimeTrackingDashboard = () => {
                     <div key={alert.id} style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px', // Reduced from 10px
-                      padding: '8px', // Reduced from 10px
-                      marginBottom: '6px', // Reduced from 8px
-                      borderRadius: '4px', // Reduced from 6px
+                      gap: '8px', 
+                      padding: '8px', 
+                      marginBottom: '6px', 
+                      borderRadius: '4px', 
                       backgroundColor: alert.severity === 'high' ? '#ffebee' : 
                                      alert.severity === 'medium' ? '#fff3e0' : '#e3f2fd',
                       border: `1px solid ${alert.severity === 'high' ? colors.danger : 
@@ -2808,10 +2777,10 @@ const RealTimeTrackingDashboard = () => {
                             backgroundColor: colors.danger,
                             color: 'white',
                             border: 'none',
-                            padding: '6px 12px', // Reduced from 8px 16px
+                            padding: '6px 12px', 
                             borderRadius: '4px',
                             cursor: 'pointer',
-                            fontSize: '11px' // Reduced from 12px
+                            fontSize: '11px' 
                           }}
                         >
                           Respond
@@ -2881,10 +2850,10 @@ const RealTimeTrackingDashboard = () => {
                     background: 'linear-gradient(135deg, #FF6B6B, #FF8E8E)',
                     color: 'white',
                     border: 'none',
-                    borderRadius: '6px', // Reduced from 8px
-                    padding: '6px 12px', // Reduced from 10px 20px
+                    borderRadius: '6px', 
+                    padding: '6px 12px', 
                     cursor: 'pointer',
-                    fontSize: '12px', // Reduced from 14px
+                    fontSize: '12px', 
                     fontWeight: '500',
                     transition: 'all 0.2s ease'
                   }}
@@ -2959,12 +2928,12 @@ const RealTimeTrackingDashboard = () => {
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '10px', // Reduced from 15px
-                  marginLeft: '15px', // Reduced from 20px
-                  padding: '6px 8px', // Reduced from 10px
+                  gap: '10px', 
+                  marginLeft: '15px', 
+                  padding: '6px 8px', 
                   backgroundColor: '#f8f9fa',
-                  borderRadius: '6px', // Reduced from 8px
-                  fontSize: '11px' // Reduced from 12px
+                  borderRadius: '6px', 
+                  fontSize: '11px' 
                 }}>
                   <strong style={{ fontSize: '11px' }}>Map Legend:</strong>
                   
@@ -3083,20 +3052,20 @@ const RealTimeTrackingDashboard = () => {
                       return null;
                     }
 
-                    // Check if this bike is currently in use by an active ride
+                    
                     const isInActiveRide = activeRides && activeRides.some(ride => 
                       ride.bikeId === bike.id || ride.bikeId === bike.name
                     );
                     
-                    // Skip rendering static marker if bike is in active ride (active ride marker will show instead)
+                    
                     if (isInActiveRide) {
                       return null;
                     }
 
-                    // Use unified position calculation
+                    
                     const { position: bikePosition, locationStatus, locationAge } = getUnifiedPosition(bike, 'bike');
 
-                    // Create tooltip text with location status information
+                    
                     const createTooltipText = (bike, locationStatus, locationAge) => {
                       const statusText = bike.isAvailable ? 'Available' : 'Unavailable';
                       const maintenanceText = bike.maintenanceStatus === 'maintenance' ? ' (Maintenance)' : '';
@@ -3137,7 +3106,7 @@ const RealTimeTrackingDashboard = () => {
                         title={createTooltipText(bike, locationStatus, locationAge)}
                         onClick={() => {
                           console.log('Enhanced bike clicked:', bike, 'Location status:', locationStatus);
-                          // Show enhanced bike info with location status
+                          
                           setSelectedRide({
                             userName: bike.isAvailable ? `Available Bike (${bike.name || bike.id})` : 
                                      `Unavailable Bike (${bike.name || bike.id})`,
@@ -3154,7 +3123,7 @@ const RealTimeTrackingDashboard = () => {
                               lastLocationUpdate: bike.lastLocationUpdate,
                               isInActiveRide: false
                             },
-                            position: bikePosition // Add consistent position for InfoWindow
+                            position: bikePosition 
                           });
                           setMapCenter(bikePosition);
                           setMapZoom(16);
@@ -3163,7 +3132,7 @@ const RealTimeTrackingDashboard = () => {
                                locationStatus === 'stale' ? 150 : 
                                locationStatus === 'old' ? 100 : 
                                locationStatus === 'lastKnown' ? 80 : 
-                               locationStatus === 'initial' ? 60 : 40} // Z-index based on location reliability
+                               locationStatus === 'initial' ? 60 : 40} 
                       />
                     );
                   })}
@@ -3199,13 +3168,13 @@ const RealTimeTrackingDashboard = () => {
 
                   {/* Render enhanced active ride markers */}
                   {activeRides && Array.isArray(activeRides) && activeRides.length > 0 && activeRides.map(ride => {
-                    // Validate ride data
+                    
                     if (!ride || !ride.userId) {
                       console.warn('Invalid ride data:', ride);
                       return null;
                     }
 
-                    // Use unified position calculation for consistency
+                    
                     const { position: markerPosition, locationStatus } = getUnifiedPosition(ride, 'activeRide');
                     
                     return (
@@ -3224,7 +3193,7 @@ const RealTimeTrackingDashboard = () => {
                           handleRideClick(ride);
                         }}
                         title={`${ride.userName || ride.userId} - ${ride.status?.toUpperCase() || 'ACTIVE'} - ${locationStatus?.toUpperCase() || 'UNKNOWN'}`}
-                        zIndex={1000} // Higher z-index for active rides
+                        zIndex={1000} 
                         animation={ride.status === 'emergency' && typeof google !== 'undefined' && google.maps ? 
                           google.maps.Animation.BOUNCE : undefined}
                       />
@@ -3233,15 +3202,15 @@ const RealTimeTrackingDashboard = () => {
 
                   {/* Add circles for ALL active rides - with different styles based on GPS availability */}
                   {activeRides.map(ride => {
-                    // Use unified position calculation for consistency
+                    
                     const { position: centerPosition, locationStatus } = getUnifiedPosition(ride, 'activeRide');
                     
-                    // Different visual styles based on GPS availability
+                    
                     const isLiveGPS = locationStatus === 'recent';
                     const isCachedGPS = locationStatus === 'stale';
                     const isNoGPS = locationStatus === 'fallback';
                     
-                    // Colors and opacity based on GPS status
+                    
                     let fillOpacity, strokeOpacity, strokeWeight;
                     if (isLiveGPS) {
                       fillOpacity = [0.3, 0.15, 0.08];
@@ -3266,7 +3235,7 @@ const RealTimeTrackingDashboard = () => {
                         <Circle
                           key={`pulse-inner-${ride.userId}`}
                           center={centerPosition}
-                          radius={25} // 25 meter radius
+                          radius={25} 
                           options={{
                             fillColor: warningColor,
                             fillOpacity: fillOpacity[0],
@@ -3276,7 +3245,7 @@ const RealTimeTrackingDashboard = () => {
                             clickable: true,
                             zIndex: 502,
                             ...(isLiveGPS && { 
-                              strokeDashArray: isNoGPS ? '5,5' : undefined // Dashed for no GPS
+                              strokeDashArray: isNoGPS ? '5,5' : undefined 
                             })
                           }}
                           onClick={() => {
@@ -3290,7 +3259,7 @@ const RealTimeTrackingDashboard = () => {
                         <Circle
                           key={`pulse-middle-${ride.userId}`}
                           center={centerPosition}
-                          radius={40} // 40 meter radius
+                          radius={40} 
                           options={{
                             fillColor: warningColor,
                             fillOpacity: fillOpacity[1],
@@ -3300,7 +3269,7 @@ const RealTimeTrackingDashboard = () => {
                             clickable: true,
                             zIndex: 501,
                             ...(isNoGPS && { 
-                              strokeDashArray: '8,8' // Dashed for no GPS
+                              strokeDashArray: '8,8' 
                             })
                           }}
                           onClick={() => {
@@ -3314,7 +3283,7 @@ const RealTimeTrackingDashboard = () => {
                         <Circle
                           key={`pulse-outer-${ride.userId}`}
                           center={centerPosition}
-                          radius={60} // 60 meter radius
+                          radius={60} 
                           options={{
                             fillColor: warningColor,
                             fillOpacity: fillOpacity[2],
@@ -3324,7 +3293,7 @@ const RealTimeTrackingDashboard = () => {
                             clickable: true,
                             zIndex: 500,
                             ...(isNoGPS && { 
-                              strokeDashArray: '10,10' // Dashed for no GPS
+                              strokeDashArray: '10,10' 
                             })
                           }}
                           onClick={() => {
@@ -3338,7 +3307,7 @@ const RealTimeTrackingDashboard = () => {
                         <Circle
                           key={`center-dot-${ride.userId}`}
                           center={centerPosition}
-                          radius={8} // 8 meter radius for center dot
+                          radius={8} 
                           options={{
                             fillColor: isLiveGPS ? '#ffffff' : isCachedGPS ? '#fff3cd' : '#ffcccc',
                             fillOpacity: 0.9,
@@ -3348,7 +3317,7 @@ const RealTimeTrackingDashboard = () => {
                             clickable: true,
                             zIndex: 505,
                             ...(isNoGPS && { 
-                              strokeDashArray: '3,3' // Dashed for no GPS
+                              strokeDashArray: '3,3' 
                             })
                           }}
                           onClick={() => {
@@ -3363,7 +3332,7 @@ const RealTimeTrackingDashboard = () => {
 
                   {/* Show info window for selected ride or bike */}
                   {selectedRide && (selectedRide.isStaticBike ? 
-                    // Enhanced Static bike info window
+                    
                     <InfoWindow
                       position={selectedRide.position || {
                         lat: selectedRide.bikeData.latitude || 14.5995,
@@ -3546,9 +3515,9 @@ const RealTimeTrackingDashboard = () => {
                       </InfoWindowContent>
                     </InfoWindow>
                     :
-                    // Active ride info window  
+                    
                     (() => {
-                      // Use unified position calculation for consistency
+                      
                       const { position: infoWindowPosition } = getUnifiedPosition(selectedRide, 'activeRide');
                       
                       return (
@@ -3914,9 +3883,9 @@ const RealTimeTrackingDashboard = () => {
                     
                     return (
                       <RideCard key={ride.userId || ride.id} onClick={() => handleRideClick(ride)} style={{
-                        padding: '10px', // Reduced from default padding
-                        marginBottom: '8px', // Reduced spacing between cards
-                        borderRadius: '6px' // Reduced from default border radius
+                        padding: '10px', 
+                        marginBottom: '8px', 
+                        borderRadius: '6px' 
                       }}>
                         <RideInfo>
                           <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}> {/* Reduced gap from 8px, added fontSize */}
@@ -3925,9 +3894,9 @@ const RealTimeTrackingDashboard = () => {
                               <span style={{
                                 backgroundColor: colors.success,
                                 color: 'white',
-                                padding: '1px 4px', // Reduced from 1px 6px
-                                borderRadius: '6px', // Reduced from 8px
-                                fontSize: '8px', // Reduced from 9px
+                                padding: '1px 4px', 
+                                borderRadius: '6px', 
+                                fontSize: '8px', 
                                 fontWeight: 'bold'
                               }}>
                                 LIVE
@@ -3944,8 +3913,8 @@ const RealTimeTrackingDashboard = () => {
                         </RideInfo>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}> {/* Reduced gap from 5px */}
                           <RideStatus status={ride.status || 'active'} style={{
-                            fontSize: '10px', // Added smaller font size
-                            padding: '2px 6px' // Added smaller padding
+                            fontSize: '10px', 
+                            padding: '2px 6px' 
                           }}>
                             {ride.status || 'active'}
                           </RideStatus>

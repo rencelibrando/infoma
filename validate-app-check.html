@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Firebase App Check Validator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .result {
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      margin-top: 20px;
+    }
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    .debug-token {
+      padding: 10px;
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      font-family: monospace;
+      margin-top: 10px;
+      word-break: break-all;
+    }
+    button {
+      padding: 8px 16px;
+      background: #4285f4;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #3b78e7;
+    }
+    .copy-button {
+      padding: 4px 8px;
+      margin-left: 5px;
+      font-size: 12px;
+      background: #28a745;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Firebase App Check Validator</h1>
+    
+    <p>This page helps validate your Firebase App Check configuration and generates debug tokens for development.</p>
+    
+    <div>
+      <button id="checkBtn">Validate App Check</button>
+      <button id="debugBtn">Generate Debug Token</button>
+    </div>
+    
+    <div id="result" class="result" style="display: none;"></div>
+
+    <div id="token-display" style="display:none;" class="debug-token">
+      <h3>Your Debug Token:</h3>
+      <div id="token-value" style="margin: 10px 0; word-break: break-all;"></div>
+      <button id="copyBtn" class="copy-button">Copy Token</button>
+    </div>
+    
+    <div id="instructions" style="margin-top: 20px;">
+      <h3>How to fix App Check issues:</h3>
+      <ol>
+        <li>Click "Generate Debug Token" to get a debug token</li>
+        <li>Copy the token displayed above</li>
+        <li>Go to Firebase Console > Project Settings > App Check</li>
+        <li>Add this debug token for your Web App</li>
+        <li>Click "Validate App Check" to verify it's working</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- Import Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-auth.js";
+    import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/10.4.0/firebase-app-check.js";
+    
+    // Your Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE",
+      authDomain: "bike-rental-bc5bd.firebaseapp.com",
+      databaseURL: "https://bike-rental-bc5bd-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "bike-rental-bc5bd",
+      storageBucket: "bike-rental-bc5bd.firebasestorage.app",
+      messagingSenderId: "862099405823",
+      appId: "1:862099405823:web:6a4c5698adf458d62545ca" // Using the web app ID
+    };
+    
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    
+    // Debug token for App Check
+    const resultDiv = document.getElementById('result');
+    const tokenDisplay = document.getElementById('token-display');
+    const tokenValue = document.getElementById('token-value');
+    
+    document.getElementById('copyBtn').addEventListener('click', () => {
+      const tokenText = tokenValue.textContent;
+      navigator.clipboard.writeText(tokenText)
+        .then(() => {
+          document.getElementById('copyBtn').textContent = "Copied!";
+          setTimeout(() => {
+            document.getElementById('copyBtn').textContent = "Copy Token";
+          }, 2000);
+        })
+        .catch(err => {
+          console.error('Failed to copy: ', err);
+        });
+    });
+    
+    document.getElementById('debugBtn').addEventListener('click', () => {
+      // Generate a UUID v4 debug token
+      const debugToken = generateUUIDv4();
+      
+      // Enable debug tokens
+      self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+      
+      // Initialize App Check to trigger the debug token generation
+      try {
+        const appCheck = initializeAppCheck(app, {
+          provider: new ReCaptchaV3Provider('6LfqjBsrAAAAAMs93cei_7rFTn2hXKLPvL-sEKFr'),
+          isTokenAutoRefreshEnabled: true
+        });
+        
+        // Display the token directly on the page
+        tokenDisplay.style.display = 'block';
+        tokenValue.textContent = debugToken;
+        
+        // Also show success message
+        resultDiv.className = "result success";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = `<h3>Debug Token Generated (UUID v4)</h3>
+          <p>The UUID v4 debug token is displayed below. Copy it and add it to Firebase Console.</p>
+          <p>Navigate to: Firebase Console > Project Settings > App Check > Debug tokens</p>`;
+      } catch (error) {
+        resultDiv.className = "result error";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = `<h3>Error</h3><p>${error.message}</p>`;
+      }
+    });
+    
+    document.getElementById('checkBtn').addEventListener('click', async () => {
+      try {
+        // Initialize App Check without debug mode
+        const appCheck = initializeAppCheck(app, {
+          provider: new ReCaptchaV3Provider('6LfqjBsrAAAAAMs93cei_7rFTn2hXKLPvL-sEKFr'),
+          isTokenAutoRefreshEnabled: true
+        });
+        
+        // Try to sign in anonymously to test App Check
+        const userCred = await signInAnonymously(auth);
+        
+        // If we get here, App Check is working
+        resultDiv.className = "result success";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = `<h3>App Check is Working!</h3>
+          <p>Successfully passed App Check verification.</p>
+          <p>Your app should now be able to connect to Firebase services.</p>`;
+      } catch (error) {
+        resultDiv.className = "result error";
+        resultDiv.style.display = "block";
+        resultDiv.innerHTML = `<h3>App Check Error</h3>
+          <p>${error.message}</p>
+          <p>If this is a 403 error related to App Check, you need to:</p>
+          <ol>
+            <li>Generate and register a debug token</li>
+            <li>Ensure the reCAPTCHA site key is correct</li>
+            <li>Check that App Check is properly configured in Firebase Console</li>
+          </ol>`;
+      }
+    });
+    
+    // Function to generate a proper UUID v4 for Firebase App Check
+    function generateUUIDv4() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+  </script>
+</body>
+</html> 

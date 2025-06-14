@@ -85,10 +85,33 @@ service cloud.firestore {
     }
     // Support messages collection
     match /supportMessages/{messageId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      // A user can read/list their own messages; an admin can read/list any.
+      // Queries from non-admins MUST filter by userId.
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      // A user can create a message for themself.
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      // A user can update their own message; an admin can update any.
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
       allow delete: if isAdmin();
+      
+      // Allow for conversation threads within a support message
+      match /replies/{replyId} {
+        // User can read replies if they own the parent message. Admin can read any.
+        allow read: if isAuthenticated() && 
+                    (get(/databases/$(database)/documents/supportMessages/$(messageId)).data.userId == request.auth.uid || isAdmin());
+        allow create: if isAuthenticated() && (isOwner(request.resource.data.userId) || isAdmin());
+        allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Admin messages collection
+    match /adminMessages/{messageId} {
+      // User can read a message if it's theirs.
+      allow get: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      // Admins can write, users can only read their own.
+      allow list: if isAdmin();
+      allow write: if isAdmin();
     }
 
     // FAQs collection
@@ -268,6 +291,31 @@ service cloud.firestore {
       // Only authenticated users can write settings (for now, can be restricted to admin only)
       // You can change this to "if isAdmin();" if you want only admins to update settings
       allow write: if isAuthenticated();
+    }
+    
+    // Notifications collection - FINAL, CORRECTED RULES
+    match /notifications/{notificationId} {
+        // A user can get and list their own notifications.
+        allow get, list: if isAuthenticated() && isOwner(resource.data.userId);
+
+        // A service or user can create a notification FOR THAT USER.
+        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+
+        // A user can update their own notification (e.g., mark as read).
+        allow update: if isAuthenticated() && isOwner(resource.data.userId);
+
+        // A user can delete their own notification.
+        allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    match /operating_hours/{day} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 } 
