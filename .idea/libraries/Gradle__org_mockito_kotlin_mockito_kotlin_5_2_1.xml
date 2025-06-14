@@ -1,0 +1,14 @@
+<component name="libraryTable">
+  <library name="Gradle: org.mockito.kotlin:mockito-kotlin:5.2.1" type="java-imported" external-system-id="GRADLE">
+    <properties groupId="org.mockito.kotlin" artifactId="mockito-kotlin" version="5.2.1" baseVersion="5.2.1" />
+    <CLASSES>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.mockito.kotlin/mockito-kotlin/5.2.1/f703a01c36ec391deb1a446987b243daee876033/mockito-kotlin-5.2.1.jar!/" />
+    </CLASSES>
+    <JAVADOC>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.mockito.kotlin/mockito-kotlin/5.2.1/793fa3c3ffe48996d75d85d5605cb419b08dbf27/mockito-kotlin-5.2.1-javadoc.jar!/" />
+    </JAVADOC>
+    <SOURCES>
+      <root url="jar://$USER_HOME$/.gradle/caches/modules-2/files-2.1/org.mockito.kotlin/mockito-kotlin/5.2.1/4f07393d4bcf2dd0e90753dd64339aa50a3f43f6/mockito-kotlin-5.2.1-sources.jar!/" />
+    </SOURCES>
+  </library>
+</component>
