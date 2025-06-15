@@ -52,14 +52,6 @@ data class BikeLocation(
     val isAvailable: Boolean = true
 )
 
-data class RouteInfo(
-    val distance: String,
-    val duration: String,
-    val polylinePoints: List<LatLng>,
-    val steps: List<String>,
-    val isAlternative: Boolean = false
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(

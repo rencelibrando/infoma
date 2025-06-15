@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 
+IMPORTANT: This is a template file. 
+1. Copy this file to app/src/main/res/values/api_keys.xml
+2. Replace the placeholder with your actual API key
+3. Add api_keys.xml to .gitignore to prevent committing your API key
+-->
+<resources>
+    <string name="google_maps_key">AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE</string>
+</resources> 

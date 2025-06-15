@@ -35,6 +35,11 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Emergency
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -116,10 +121,21 @@ import kotlin.math.atan2
 import kotlin.math.sqrt
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import com.example.bikerental.utils.FormattingUtils.formatDistance
 import com.example.bikerental.utils.FormattingUtils.formatDuration
 import com.example.bikerental.utils.FormattingUtils
 import com.example.bikerental.utils.RideMetricsUtils.formatSpeed
+import com.example.bikerental.components.MapNavigationUI
+import com.example.bikerental.components.NavigationProgressBar
+import com.example.bikerental.components.RideProgressDialog
+import com.example.bikerental.utils.RoutesApiService
+import kotlinx.coroutines.flow.update
+import androidx.compose.foundation.BorderStroke
+import com.example.bikerental.components.DestinationSearchDialog
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.mutableIntStateOf
 
 // Singleton HTTP client for better performance
 private val httpClient: OkHttpClient by lazy {
@@ -257,6 +273,91 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     var showRouteOverview by remember { mutableStateOf(false) }
     var isRideResumed by remember { mutableStateOf(false) }
     var isRestoringCamera by remember { mutableStateOf(false) }
+    
+    // New navigation states for the Directions API
+    var selectedDestination by remember { mutableStateOf<LatLng?>(null) }
+    var isRoutingMode by remember { mutableStateOf(false) }
+    var showDestinationSearch by remember { mutableStateOf(false) }
+    var currentRoutes by remember { mutableStateOf<List<RouteInfo>>(emptyList()) }
+    var selectedRouteIndex by remember { mutableIntStateOf(0) }
+    var currentNavigationStep by remember { mutableIntStateOf(0) }
+    var distanceToNextTurn by remember { mutableIntStateOf(0) }
+    var isNavigationActive by remember { mutableStateOf(false) }
+    var timeRemainingString by remember { mutableStateOf("0 min") }
+    
+    // Calculate the currently selected route
+    val selectedRoute = remember(currentRoutes, selectedRouteIndex) {
+        if (currentRoutes.isNotEmpty() && selectedRouteIndex < currentRoutes.size) {
+            currentRoutes[selectedRouteIndex]
+        } else null
+    }
+    
+    // Calculate ETA and time remaining
+    LaunchedEffect(selectedRoute, currentLocation) {
+        if (selectedRoute != null && isNavigationActive && currentLocation != null) {
+            // Update distance to next turn
+            val nextInstruction = RoutesApiService.getNextNavigationInstruction(
+                currentLocation = currentLocation!!,
+                route = selectedRoute,
+                currentStepIndex = currentNavigationStep
+            )
+            distanceToNextTurn = nextInstruction.second
+            
+            // Check if we need to advance to the next navigation step
+            if (distanceToNextTurn < 20 && currentNavigationStep < selectedRoute.steps.size - 1) {
+                currentNavigationStep++
+            }
+            
+            // Calculate remaining time based on distance and current speed
+            val currentSpeed = bikeViewModel.currentSpeed.value
+            val speed = if (currentSpeed > 0) currentSpeed else 5f // Use default speed if standing still
+            val timeRemaining = (distanceToNextTurn / speed) * 3.6f // Convert m/s to hours
+            
+            timeRemainingString = when {
+                timeRemaining < 1/60f -> "< 1 min" // Less than a minute
+                timeRemaining < 1f -> "${(timeRemaining * 60).toInt()} min" // Minutes
+                else -> "${timeRemaining.toInt()} hr ${((timeRemaining % 1) * 60).toInt()} min" // Hours and minutes
+            }
+        }
+    }
+    
+    // Initialize RoutesApiService on first composition
+    LaunchedEffect(Unit) {
+        RoutesApiService.initialize(context)
+    }
+    
+    // Function to calculate route using Routes API v2
+    val calculateRoute = remember {
+        { origin: LatLng, destination: LatLng ->
+            backgroundScope.launch {
+                try {
+                    Log.d("MapTab", "Calculating route from $origin to $destination")
+                    
+                    val result = RoutesApiService.getRoutes(
+                        origin = origin,
+                        destination = destination,
+                        mode = "BICYCLING",
+                        alternatives = true
+                    )
+                    
+                    result.onSuccess { routes ->
+                        Log.d("MapTab", "Route calculation successful, received ${routes.size} routes")
+                        if (routes.isNotEmpty()) {
+                            currentRoutes = routes
+                            selectedRouteIndex = 0
+                            currentNavigationStep = 0
+                            showRouteOverview = true
+                            isRoutingMode = true
+                        }
+                    }.onFailure {
+                        Log.e("MapTab", "Failed to get routes: ${it.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("MapTab", "Error calculating route", e)
+                }
+            }
+        }
+    }
     
     // Persistent camera state for POV restoration
     var lastKnownPOVLocation: LatLng? by remember { 
@@ -508,7 +609,16 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
             properties = mapProperties,
-            uiSettings = uiSettings
+            uiSettings = uiSettings,
+                    onMapLongClick = { latLng ->
+            // Long press to set destination when in active ride but not navigating
+            if (activeRide != null && currentLocation != null && !isUnlockingBike && !isNavigationActive) {
+                Log.d("MapTab", "Map long click - setting destination at $latLng")
+                selectedDestination = latLng
+                // Calculate route from current location to selected destination
+                calculateRoute(currentLocation!!, latLng)
+            }
+        }
         ) {
             // Render ride path as polyline
             if (ridePath.isNotEmpty()) {
@@ -534,7 +644,59 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                     )
                 }
             }
+            
+            // Show destination marker when selected
+            selectedDestination?.let { destination ->
+                Marker(
+                    state = MarkerState(position = destination),
+                    title = "Destination",
+                    snippet = "Selected destination",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                )
+            }
+            
+            // Show route when calculated
+            if (selectedRoute != null && currentLocation != null) {
+                // Show the selected route polyline
+                Polyline(
+                    points = selectedRoute.polylinePoints,
+                    color = Color(0xFF1E88E5), // Blue route color
+                    width = 8f,
+                    pattern = null,
+                    geodesic = true
+                )
+                
+                // Show start marker
+                Marker(
+                    state = MarkerState(position = selectedRoute.polylinePoints.first()),
+                    title = "Start",
+                    snippet = "Starting point",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                )
+                
+                // Show destination marker
+                Marker(
+                    state = MarkerState(position = selectedRoute.polylinePoints.last()),
+                    title = "Destination",
+                    snippet = "End point",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                )
+            }
         }
+
+        // Navigation UI components - only show during active navigation
+        // Collect the state properly using collectAsState()
+        val currentSpeed by bikeViewModel.currentSpeed.collectAsState()
+        MapNavigationUI(
+            isVisible = isNavigationActive && selectedRoute != null,
+            currentRoute = selectedRoute,
+            currentLocation = currentLocation,
+            currentSpeed = currentSpeed,
+            currentStep = currentNavigationStep,
+            distanceToNextTurn = distanceToNextTurn,
+            timeRemaining = timeRemainingString,
+            onStepChanged = { step -> currentNavigationStep = step }
+        )
 
         // POV Mode Controls (Top)
         if (activeRide != null) {
@@ -632,204 +794,218 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 )
             }
         }
-
-        // Bottom Action Buttons
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // Show different UI based on ride status
-            if (activeRide != null) {
-                // Enhanced Ride Dashboard with real-time data
-                val rideDistance by bikeViewModel.rideDistance.collectAsState()
-                val currentSpeed by bikeViewModel.currentSpeed.collectAsState()
-                val maxSpeed by bikeViewModel.maxSpeed.collectAsState()
-                val activeRideStartTime = activeRide?.startTime ?: System.currentTimeMillis()
-                
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                    shape = RoundedCornerShape(12.dp)
+        
+        // Route Selection UI - show when routes are calculated but not actively navigating
+        if (showRouteOverview && selectedRoute != null && !isNavigationActive) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 120.dp, top = 16.dp) // Position above ride progress
+                    .fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    // Route header with distance and time
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Header with live indicator and POV status
+                        Text(
+                            text = "Route to Destination",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                Text(
-                                    text = "Ride in Progress",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                if (isPOVMode) {
-                                    Text(
-                                        text = if (isRestoringCamera) "Restoring Navigation..." else "Navigation Mode",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isRestoringCamera) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
-                                        fontSize = 10.sp
-                                    )
-                                }
-                            }
-                            
-                            // Live indicator
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Red)
-                                )
-                                Text(
-                                    text = "LIVE",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Red,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-                        
-                        // Enhanced stats row with 4 columns
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly
-                        ) {
-                            // Duration
-                            RideStatCard(
-                                icon = Icons.Default.Timer,
-                                label = "Duration",
-                                value = FormattingUtils.formatDurationFromStart(activeRideStartTime),
-                                modifier = Modifier.weight(1f)
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
                             )
                             
-                            Spacer(modifier = Modifier.width(3.dp))
-                            
-                            // Distance
-                            RideStatCard(
-                                icon = Icons.Default.Route,
-                                label = "Distance",
-                                value = formatDistance(rideDistance),
-                                modifier = Modifier.weight(1f)
+                            Text(
+                                text = selectedRoute.duration,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
                             )
                             
-                            Spacer(modifier = Modifier.width(3.dp))
-                            
-                            // Current Speed
-                            RideStatCard(
-                                icon = Icons.Default.Speed,
-                                label = "Speed",
-                                value = formatSpeed(currentSpeed),
-                                modifier = Modifier.weight(1f)
+                            Text(
+                                text = " • ",
+                                style = MaterialTheme.typography.bodyMedium
                             )
                             
-                            Spacer(modifier = Modifier.width(3.dp))
-                            
-                            // Max Speed
-                            RideStatCard(
-                                icon = Icons.Default.Speed,
-                                label = "Max",
-                                value = formatSpeed(maxSpeed),
-                                modifier = Modifier.weight(1f)
+                            Text(
+                                text = selectedRoute.distance,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
                             )
                         }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Alternative routes selector
+                    if (currentRoutes.size > 1) {
+                        Text(
+                            text = "Route Options",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         
-                        // Action buttons row
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // SOS Button (smaller)
-                            Button(
-                                onClick = { showSOSDialog = true },
-                                modifier = Modifier
-                                    .weight(0.35f)
-                                    .height(48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Red
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                            currentRoutes.forEachIndexed { index, route ->
+                                val isSelected = selectedRouteIndex == index
+                                OutlinedButton(
+                                    onClick = { selectedRouteIndex = index },
+                                    modifier = Modifier.weight(1f),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
+                                    ),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (isSelected) 
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) 
+                                        else 
+                                            MaterialTheme.colorScheme.surface
+                                    )
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "SOS",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                            
-                            // End Ride Button (larger)
-                            Button(
-                                onClick = {
-                                    if (hasLocationPermission) {
-                                        endCurrentRide(fusedLocationProviderClient, bikeViewModel)
-                                    }
-                                },
-                                modifier = Modifier
-                                    .weight(0.65f)
-                                    .height(48.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.error
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Stop,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = Color.White
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "End Ride",
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
+                                        text = "Route ${index + 1}",
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray
                                     )
                                 }
                             }
                         }
                     }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Start Navigation Button
+                    Button(
+                        onClick = {
+                            // Start active navigation with selected route
+                            isNavigationActive = true
+                            showRouteOverview = false
+                            
+                            // Enter POV mode automatically
+                            isPOVMode = true
+                            prefs.edit().putBoolean("isPOVMode", true).apply()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2E7D32)
+                        )
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Navigation,
+                                contentDescription = null
+                            )
+                            Text(
+                                text = "Start Navigation",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Cancel button
+                    TextButton(
+                        onClick = {
+                            // Clear route data
+                            selectedDestination = null
+                            currentRoutes = emptyList()
+                            showRouteOverview = false
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(
+                            text = "Cancel",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
-            } else {
+            }
+        }
+
+        // Bottom Action Buttons
+        if (activeRide != null) {
+            // Get ride data from the view model
+            val rideDistance by bikeViewModel.rideDistance.collectAsState()
+            val currentSpeed by bikeViewModel.currentSpeed.collectAsState()
+            val maxSpeed by bikeViewModel.maxSpeed.collectAsState()
+            
+            // Position the ride progress UI at the bottom
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                // Use the enhanced RideProgressDialog with integrated route information
+                RideProgressDialog(
+                    isVisible = true,
+                    activeRide = activeRide,
+                    rideDistance = rideDistance,
+                    currentSpeed = currentSpeed,
+                    maxSpeed = maxSpeed,
+                    onDismiss = { /* Dialog stays visible while ride is active */ },
+                    onEndRide = {
+                        if (hasLocationPermission) {
+                            // End active navigation if it's running
+                            isNavigationActive = false
+                            selectedDestination = null
+                            currentRoutes = emptyList()
+                            
+                            endCurrentRide(fusedLocationProviderClient, bikeViewModel)
+                        }
+                    },
+                    onShowSOS = { showSOSDialog = true },
+                    onSetDestination = {
+                        if (currentLocation != null) {
+                            showDestinationSearch = true
+                        }
+                    },
+                    // Pass route information to the dialog
+                    selectedRoute = selectedRoute,
+                    timeRemainingString = timeRemainingString,
+                    isNavigationActive = isNavigationActive,
+                    onShowRouteOptions = {
+                        showRouteOverview = true
+                        isNavigationActive = false
+                    }
+                )
+            }
+        } else {
+            // Bottom Action Buttons
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 // START RIDE Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1019,6 +1195,19 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 }
             }
         }
+        
+        // Show destination search dialog
+        DestinationSearchDialog(
+            isVisible = showDestinationSearch,
+            onDismiss = { showDestinationSearch = false },
+            onDestinationSelected = { destination ->
+                selectedDestination = destination
+                // Calculate route from current location to selected destination
+                currentLocation?.let { origin ->
+                    calculateRoute(origin, destination)
+                }
+            }
+        )
     }
     
     // Permission Dialog
@@ -1167,99 +1356,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     )
 }
 
-@Composable
-private fun RideStatCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(14.dp)
-            )
-            
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                fontSize = 11.sp
-            )
-            
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                fontSize = 9.sp
-            )
-        }
-    }
-}
-
-@Composable
-private fun formatDuration(startTime: Long): String {
-    var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentTime = System.currentTimeMillis()
-            delay(1000)
-        }
-    }
-    
-    // Validate startTime to prevent invalid duration calculations
-    if (startTime <= 0 || startTime > currentTime) {
-        return "00:00"
-    }
-    
-    val duration = currentTime - startTime
-    
-    // Handle negative or excessively large durations
-    if (duration < 0 || duration > TimeUnit.DAYS.toMillis(1)) {
-        return "00:00"
-    }
-    
-    val hours = TimeUnit.MILLISECONDS.toHours(duration)
-    val minutes = TimeUnit.MILLISECONDS.toMinutes(duration) % 60
-    val seconds = TimeUnit.MILLISECONDS.toSeconds(duration) % 60
-    
-    return if (hours > 0) {
-        String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
-    } else {
-        String.format(Locale.US, "%02d:%02d", minutes, seconds)
-    }
-}
-
-private fun formatDistance(distanceInMeters: Float): String {
-    return if (distanceInMeters < 1000) {
-        "${distanceInMeters.roundToInt()} m"
-    } else {
-        String.format(Locale.US, "%.2f km", distanceInMeters / 1000)
-    }
-}
-
-private fun formatSpeed(speedInMps: Float): String {
-    val speedKmh = speedInMps * 3.6f
-    return "${speedKmh.roundToInt()} km/h"
-}
+// These functions are now part of the RideProgressDialog component
 
 // Enhanced location retrieval with better error handling
 @SuppressLint("MissingPermission")

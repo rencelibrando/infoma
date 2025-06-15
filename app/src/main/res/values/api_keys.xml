@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 
+    IMPORTANT: Replace the placeholder below with your actual Google Maps API key
+    For security, consider using a separate file that is added to .gitignore
+    or use BuildConfig fields with gradle properties
+    -->
+    <string name="google_maps_key">AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE</string>
+</resources> 

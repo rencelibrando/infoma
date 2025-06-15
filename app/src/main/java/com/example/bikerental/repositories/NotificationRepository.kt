@@ -58,7 +58,8 @@ class NotificationRepository @Inject constructor(
                         val notification = document.toObject(Notification::class.java)
                         notification?.copy(
                             id = document.id,
-                            read = document.getBoolean("read") ?: false
+                            read = document.getBoolean("read") ?: false,
+                            actionable = document.getBoolean("actionable") ?: true
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Error converting document to Notification", e)
@@ -211,7 +212,7 @@ class NotificationRepository @Inject constructor(
                 "priority" to request.priority,
                 "timestamp" to Timestamp.now(),
                 "read" to false,
-                "actionable" to request.actionText.isNotBlank()
+                "actionable" to request.actionable
             )
 
             val documentRef = firestore

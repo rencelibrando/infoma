@@ -186,5 +186,6 @@ data class NotificationRequest(
     val message: String,
     val actionText: String = "",
     val actionData: Map<String, Any> = emptyMap(),
-    val priority: NotificationPriority = NotificationPriority.NORMAL
+    val priority: NotificationPriority = NotificationPriority.NORMAL,
+    val actionable: Boolean = true
 ) 
