@@ -664,9 +664,9 @@ const RideHistorySection = () => {
                           lng: point.longitude
                         }))}
                         options={{
-                          strokeColor: colors.pineGreen,
+                          strokeColor: colors.accent,
                           strokeOpacity: 0.8,
-                          strokeWeight: 4,
+                          strokeWeight: 10,
                           geodesic: true
                         }}
                       />

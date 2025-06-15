@@ -1712,9 +1712,9 @@ const RealTimeTrackingDashboard = () => {
                           lng: point.longitude || point.lng
                         }))}
                         options={{
-                          strokeColor: colors.pineGreen,
+                          strokeColor: colors.accent,
                           strokeOpacity: 0.8,
-                          strokeWeight: 4,
+                          strokeWeight: 9,
                           geodesic: true
                         }}
                       />

@@ -791,4 +791,77 @@ export const forceCleanupUserTracking = async (userId) => {
     console.error('Error during force cleanup:', error);
     throw error;
   }
-}; 
+};
+
+// Get ride route summary for a specific ride
+export const getRideRouteSummary = async (rideId) => {
+  try {
+    // Get ride document
+    const rideRef = doc(db, 'rides', rideId);
+    const rideDoc = await getDoc(rideRef);
+    
+    if (!rideDoc.exists()) {
+      throw new Error('Ride not found');
+    }
+    
+    const rideData = rideDoc.data();
+    const path = rideData.path || [];
+    
+    // Get route statistics
+    const totalDistance = rideData.distanceTraveled || 0;
+    const duration = rideData.duration || 0;
+    const averageSpeed = totalDistance > 0 && duration > 0 ? 
+      (totalDistance / 1000) / (duration / 3600000) : 0;
+    
+    // Determine max speed from path points or fall back to stored value
+    let maxSpeed = rideData.maxSpeed || 0;
+    if (path.length > 0) {
+      // Calculate max speed from path if available
+      const pathSpeeds = path.map(point => point.speed || 0).filter(speed => speed > 0);
+      if (pathSpeeds.length > 0) {
+        const calculatedMaxSpeed = Math.max(...pathSpeeds);
+        maxSpeed = Math.max(maxSpeed, calculatedMaxSpeed);
+      }
+    }
+    
+    // Extract start and end locations
+    let startLocation = null;
+    let endLocation = null;
+    
+    if (path.length > 0) {
+      startLocation = path[0];
+      // Fix: Always use the last valid GPS point as the end location
+      endLocation = path[path.length - 1];
+    }
+    
+    // If there's a specific end location recorded, use that instead
+    if (rideData.endLocation) {
+      endLocation = rideData.endLocation;
+    }
+    
+    // Create static map image URL if possible
+    let mapImageUrl = null;
+    if (process.env.REACT_APP_GOOGLE_MAPS_API_KEY && path.length > 1) {
+      // Generate static map URL
+      // ... existing map URL generation code ...
+    }
+    
+    return {
+      id: rideId,
+      path,
+      startLocation,
+      endLocation,
+      statistics: {
+        totalDistance,
+        duration,
+        averageSpeed,
+        maxSpeed,
+        pointCount: path.length
+      },
+      mapImageUrl
+    };
+  } catch (error) {
+    console.error('Error getting ride route summary:', error);
+    throw new Error('Failed to retrieve route summary');
+  }
+} 

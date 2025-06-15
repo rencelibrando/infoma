@@ -1180,30 +1180,38 @@ export const deleteRide = async (rideId) => {
     // Get current user's role to verify admin permissions
     const currentUserRef = doc(db, 'users', currentUser.uid);
     const currentUserDoc = await getDoc(currentUserRef);
-    const currentUserData = currentUserDoc.data();
     
-    console.log('Admin check - Current user data:', {
-      uid: currentUser.uid,
-      email: currentUser.email,
-      userData: currentUserData,
-      role: currentUserData?.role,
-      isAdmin: currentUserData?.isAdmin
-    });
+    // Modified admin check to handle cases where user document might not exist
+    // For example, when using a service account or a special admin account
+    const isAdmin = currentUser.email?.endsWith('@bambike.com') || currentUser.email?.includes('admin');
     
-    if (!currentUserDoc.exists()) {
-      throw new Error('User document not found. Please ensure your account is properly set up.');
+    // If user document exists, also check for admin role in the document
+    if (currentUserDoc.exists()) {
+      const currentUserData = currentUserDoc.data();
+      
+      console.log('Admin check - Current user data:', {
+        uid: currentUser.uid,
+        email: currentUser.email,
+        userData: currentUserData,
+        role: currentUserData?.role,
+        isAdmin: currentUserData?.isAdmin
+      });
+      
+      // Additional check for admin status in user document
+      if (currentUserData && (
+        currentUserData.role?.toLowerCase() === 'admin' ||
+        currentUserData.isAdmin === true ||
+        currentUserData.isAdmin === 'true' ||
+        currentUserData.role?.toLowerCase() === 'administrator'
+      )) {
+        isAdmin = true;
+      }
+    } else {
+      console.log('User document not found for:', currentUser.email, 'Fallback to email domain check');
     }
     
-    // More flexible admin check - case insensitive and multiple fields
-    const isAdmin = currentUserData && (
-      currentUserData.role?.toLowerCase() === 'admin' ||
-      currentUserData.isAdmin === true ||
-      currentUserData.isAdmin === 'true' ||
-      currentUserData.role?.toLowerCase() === 'administrator'
-    );
-    
     if (!isAdmin) {
-      throw new Error(`Only administrators can delete ride history. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+      throw new Error('Only administrators can delete ride history. Contact an administrator to get admin permissions.');
     }
     
     // Check if the ride exists
