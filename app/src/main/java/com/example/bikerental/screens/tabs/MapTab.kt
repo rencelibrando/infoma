@@ -82,6 +82,8 @@ import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.Dash
+import com.google.android.gms.maps.model.PatternItem
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -136,6 +138,7 @@ import com.example.bikerental.components.DestinationSearchDialog
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableIntStateOf
+import com.example.bikerental.utils.FormattingUtils.calculateEtaString
 
 // Singleton HTTP client for better performance
 private val httpClient: OkHttpClient by lazy {
@@ -148,42 +151,6 @@ private val httpClient: OkHttpClient by lazy {
 
 // Cache for route calculations to avoid repeated API calls
 private val routeCache = ConcurrentHashMap<String, List<RouteInfo>>()
-
-// Optimized polyline decoder that runs asynchronously
-suspend fun decodePoly(encoded: String): List<LatLng> = withContext(Dispatchers.Default) {
-    val poly = ArrayList<LatLng>()
-    var index = 0
-    val len = encoded.length
-    var lat = 0
-    var lng = 0
-
-    while (index < len) {
-        var b: Int
-        var shift = 0
-        var result = 0
-        do {
-            b = encoded[index++].code - 63
-            result = result or (b and 0x1f shl shift)
-            shift += 5
-        } while (b >= 0x20)
-        val dlat = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-        lat += dlat
-
-        shift = 0
-        result = 0
-        do {
-            b = encoded[index++].code - 63
-            result = result or (b and 0x1f shl shift)
-            shift += 5
-        } while (b >= 0x20)
-        val dlng = if (result and 1 != 0) (result shr 1).inv() else result shr 1
-        lng += dlng
-
-        val p = LatLng(lat.toDouble() / 1E5, lng.toDouble() / 1E5)
-        poly.add(p)
-    }
-    poly
-}
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -297,7 +264,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         if (selectedRoute != null && isNavigationActive && currentLocation != null) {
             // Update distance to next turn
             val nextInstruction = RoutesApiService.getNextNavigationInstruction(
-                currentLocation = currentLocation!!,
+                currentLocation = currentLocation,
                 route = selectedRoute,
                 currentStepIndex = currentNavigationStep
             )
@@ -308,22 +275,42 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 currentNavigationStep++
             }
             
-            // Calculate remaining time based on distance and current speed
-            val currentSpeed = bikeViewModel.currentSpeed.value
-            val speed = if (currentSpeed > 0) currentSpeed else 5f // Use default speed if standing still
-            val timeRemaining = (distanceToNextTurn / speed) * 3.6f // Convert m/s to hours
-            
-            timeRemainingString = when {
-                timeRemaining < 1/60f -> "< 1 min" // Less than a minute
-                timeRemaining < 1f -> "${(timeRemaining * 60).toInt()} min" // Minutes
-                else -> "${timeRemaining.toInt()} hr ${((timeRemaining % 1) * 60).toInt()} min" // Hours and minutes
-            }
+            // Calculate remaining time for the entire route
+            timeRemainingString = calculateEtaString(
+                route = selectedRoute,
+                currentStepIndex = currentNavigationStep,
+                currentLocation = currentLocation
+            )
         }
     }
     
     // Initialize RoutesApiService on first composition
     LaunchedEffect(Unit) {
-        RoutesApiService.initialize(context)
+        try {
+            Log.d("MapTab", "Initializing RoutesApiService")
+            RoutesApiService.initialize(context)
+            Log.d("MapTab", "RoutesApiService initialized successfully")
+        } catch (e: Exception) {
+            Log.e("MapTab", "Failed to initialize RoutesApiService", e)
+            
+            // Show a toast message to inform the user
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    context, 
+                    "Navigation features may be limited. Please check your internet connection.", 
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            
+            // Try initialization again after delay
+            delay(3000)
+            try {
+                RoutesApiService.initialize(context)
+                Log.d("MapTab", "RoutesApiService initialization retry successful")
+            } catch (e: Exception) {
+                Log.e("MapTab", "Failed to initialize RoutesApiService on retry", e)
+            }
+        }
     }
     
     // Function to calculate route using Routes API v2
@@ -333,27 +320,126 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 try {
                     Log.d("MapTab", "Calculating route from $origin to $destination")
                     
+                    // Show loading toast
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Calculating route...", Toast.LENGTH_SHORT).show()
+                    }
+                    
                     val result = RoutesApiService.getRoutes(
                         origin = origin,
                         destination = destination,
-                        mode = "BICYCLING",
-                        alternatives = true
+                        mode = "BICYCLE", // Explicitly use BICYCLE mode for proper road-based routes
+                        alternatives = true,
+                        useMockData = false // Use mock data only if API fails
                     )
                     
                     result.onSuccess { routes ->
                         Log.d("MapTab", "Route calculation successful, received ${routes.size} routes")
                         if (routes.isNotEmpty()) {
-                            currentRoutes = routes
+                            withContext(Dispatchers.Main) {
+                                currentRoutes = routes
+                                selectedRouteIndex = 0
+                                currentNavigationStep = 0
+                                showRouteOverview = true
+                                isRoutingMode = true
+                                
+                                // Show success toast
+                                Toast.makeText(context, "Route found", Toast.LENGTH_SHORT).show()
+                                
+                                // Center camera on route overview
+                                if (routes[0].polylinePoints.isNotEmpty()) {
+                                    Log.d("MapTab", "Centering camera on route overview")
+                                    // Calculate bounds to include origin, destination and route
+                                    val bounds = com.google.android.gms.maps.model.LatLngBounds.Builder()
+                                        .include(origin)
+                                        .include(destination)
+                                    
+                                    // Add some points from the route (not all to avoid performance issues)
+                                    val routePoints = routes[0].polylinePoints
+                                    val stride = maxOf(1, routePoints.size / 10)
+                                    for (i in routePoints.indices step stride) {
+                                        bounds.include(routePoints[i])
+                                    }
+                                    
+                                    try {
+                                        val padding = 100 // pixels
+                                        cameraPositionState.animate(
+                                            CameraUpdateFactory.newLatLngBounds(bounds.build(), padding),
+                                            durationMs = 1000
+                                        )
+                                    } catch (e: Exception) {
+                                        Log.e("MapTab", "Failed to animate camera to route bounds", e)
+                                    }
+                                }
+                            }
+                        } else {
+                            // No routes returned
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "No routes found - using fallback route", Toast.LENGTH_SHORT).show()
+                                
+                                // Create a fallback route even if no routes were returned
+                                val fallbackRoutes = RoutesApiService.getRoutes(
+                                    origin = origin,
+                                    destination = destination,
+                                    mode = "BICYCLE",
+                                    alternatives = false,
+                                    useMockData = true // Explicitly use mock data
+                                ).getOrNull() ?: emptyList()
+                                
+                                if (fallbackRoutes.isNotEmpty()) {
+                                    currentRoutes = fallbackRoutes
+                                    selectedRouteIndex = 0
+                                    currentNavigationStep = 0
+                                    showRouteOverview = true
+                                    isRoutingMode = true
+                                }
+                            }
+                        }
+                    }.onFailure { error ->
+                        Log.e("MapTab", "Failed to get routes: ${error.message}")
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Using fallback route: ${error.message}", Toast.LENGTH_SHORT).show()
+                            
+                            // Always generate fallback route on failure
+                            val fallbackRoutes = RoutesApiService.getRoutes(
+                                origin = origin,
+                                destination = destination,
+                                mode = "BICYCLE",
+                                alternatives = false,
+                                useMockData = true // Explicitly use mock data
+                            ).getOrNull() ?: emptyList()
+                            
+                            if (fallbackRoutes.isNotEmpty()) {
+                                currentRoutes = fallbackRoutes
+                                selectedRouteIndex = 0
+                                currentNavigationStep = 0
+                                showRouteOverview = true
+                                isRoutingMode = true
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MapTab", "Error calculating route", e)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Using fallback route due to error", Toast.LENGTH_SHORT).show()
+                        
+                        // Generate fallback route on any exception
+                        val fallbackRoutes = RoutesApiService.getRoutes(
+                            origin = origin,
+                            destination = destination,
+                            mode = "BICYCLE",
+                            alternatives = false,
+                            useMockData = true // Explicitly use mock data
+                        ).getOrNull() ?: emptyList()
+                        
+                        if (fallbackRoutes.isNotEmpty()) {
+                            currentRoutes = fallbackRoutes
                             selectedRouteIndex = 0
                             currentNavigationStep = 0
                             showRouteOverview = true
                             isRoutingMode = true
                         }
-                    }.onFailure {
-                        Log.e("MapTab", "Failed to get routes: ${it.message}")
                     }
-                } catch (e: Exception) {
-                    Log.e("MapTab", "Error calculating route", e)
                 }
             }
         }
@@ -655,32 +741,138 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 )
             }
             
-            // Show route when calculated
+            // Enhanced route visualization with improved colors and effects
             if (selectedRoute != null && currentLocation != null) {
-                // Show the selected route polyline
-                Polyline(
-                    points = selectedRoute.polylinePoints,
-                    color = Color(0xFF1E88E5), // Blue route color
-                    width = 8f,
-                    pattern = null,
-                    geodesic = true
-                )
+                // First, render the full route as an underlayer if we have the full polyline
+                if (selectedRoute.polylinePoints.isNotEmpty()) {
+                    // Draw route background/outline for better visibility
+                    Polyline(
+                        points = selectedRoute.polylinePoints,
+                        color = Color(0xFFFFFFFF), // White outline
+                        width = 12f,
+                        geodesic = true,
+                        zIndex = 0f
+                    )
+                    
+                    // Draw main route line with optimized styling
+                    Polyline(
+                        points = selectedRoute.polylinePoints,
+                        color = Color(0xFF1A73E8).copy(alpha = 0.8f), // Google Maps blue
+                        width = 8f,
+                        geodesic = true,
+                        zIndex = 1f
+                    )
+                }
                 
-                // Show start marker
-                Marker(
-                    state = MarkerState(position = selectedRoute.polylinePoints.first()),
-                    title = "Start",
-                    snippet = "Starting point",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
-                )
-                
-                // Show destination marker
-                Marker(
-                    state = MarkerState(position = selectedRoute.polylinePoints.last()),
-                    title = "Destination",
-                    snippet = "End point",
-                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                )
+                // Then, render each step with appropriate colors to show progress
+                if (selectedRoute.steps.isNotEmpty()) {
+                    selectedRoute.steps.forEachIndexed { index, step ->
+                        if (step.polylinePoints.isNotEmpty()) {
+                            val (color, width, zIndex) = when {
+                                index < currentNavigationStep -> Triple(
+                                    Color(0xFF9E9E9E).copy(alpha = 0.7f), // Gray for traveled
+                                    6f,
+                                    2f
+                                )
+                                index == currentNavigationStep -> Triple(
+                                    Color(0xFF1A73E8), // Bright blue for current
+                                    10f,
+                                    3f
+                                )
+                                else -> Triple(
+                                    Color(0xFF757575).copy(alpha = 0.5f), // Darker gray with transparency for upcoming
+                                    5f,
+                                    1f
+                                )
+                            }
+                            
+                            // Draw the outer stroke first for emphasis on current segment
+                            if (index == currentNavigationStep) {
+                                Polyline(
+                                    points = step.polylinePoints,
+                                    color = Color.White,
+                                    width = width + 4f,
+                                    geodesic = true,
+                                    zIndex = zIndex - 0.1f
+                                )
+                            }
+                            
+                            // Draw the actual step polyline
+                            Polyline(
+                                points = step.polylinePoints,
+                                color = color,
+                                width = width,
+                                geodesic = true,
+                                zIndex = zIndex
+                            )
+                        }
+                    }
+                    
+                    // Add decision points and maneuver indicators
+                    selectedRoute.steps.forEachIndexed { index, step ->
+                        if (step.maneuver.isNotEmpty() && step.maneuver != "straight") {
+                            // More prominent visualization for turn points
+                            Circle(
+                                center = step.startLocation,
+                                radius = if (index == currentNavigationStep) 8.0 else 5.0,
+                                fillColor = if (index == currentNavigationStep) 
+                                    Color(0xFF1A73E8) else Color(0xFF757575),
+                                strokeColor = Color.White,
+                                strokeWidth = 2f,
+                                zIndex = 4f
+                            )
+                        }
+                    }
+                }
+
+                // Show start and destination markers
+                if (selectedRoute.polylinePoints.isNotEmpty()) {
+                    // Start marker
+                    Marker(
+                        state = MarkerState(position = selectedRoute.polylinePoints.first()),
+                        title = "Start",
+                        snippet = "Starting point",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                    )
+                    
+                    // Destination marker
+                    Marker(
+                        state = MarkerState(position = selectedRoute.polylinePoints.last()),
+                        title = "Destination",
+                        snippet = "End point",
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                    )
+                } else {
+                    // Fallback markers if no polyline points
+                    selectedDestination?.let { destination ->
+                        Marker(
+                            state = MarkerState(position = destination),
+                            title = "Destination",
+                            snippet = "Selected destination",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                        )
+                    }
+                    
+                    currentLocation?.let { location ->
+                        Marker(
+                            state = MarkerState(position = location),
+                            title = "Start",
+                            snippet = "Current location",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                        )
+                        
+                        // Draw simple straight line as absolute fallback
+                        selectedDestination?.let { destination ->
+                            Polyline(
+                                points = listOf(location, destination),
+                                color = Color(0xFF1E88E5), // Blue
+                                width = 8f,
+                                geodesic = true,
+                                pattern = listOf(Dash(20f))
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -688,7 +880,7 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         // Collect the state properly using collectAsState()
         val currentSpeed by bikeViewModel.currentSpeed.collectAsState()
         MapNavigationUI(
-            isVisible = isNavigationActive && selectedRoute != null,
+            isVisible = isNavigationActive && selectedRoute != null && currentLocation != null,
             currentRoute = selectedRoute,
             currentLocation = currentLocation,
             currentSpeed = currentSpeed,
@@ -1204,7 +1396,14 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 selectedDestination = destination
                 // Calculate route from current location to selected destination
                 currentLocation?.let { origin ->
+                    Log.d("MapTab", "Destination selected: $destination, calculating route from $origin")
                     calculateRoute(origin, destination)
+                    
+                    // Show a toast indicating route calculation is starting
+                    Toast.makeText(context, "Calculating route to destination...", Toast.LENGTH_SHORT).show()
+                } ?: run {
+                    Log.w("MapTab", "Current location is null, cannot calculate route")
+                    Toast.makeText(context, "Unable to get your location. Try again.", Toast.LENGTH_SHORT).show()
                 }
             }
         )

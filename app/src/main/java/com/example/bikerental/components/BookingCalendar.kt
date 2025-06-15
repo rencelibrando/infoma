@@ -35,17 +35,6 @@ import java.util.*
 import coil.compose.SubcomposeAsyncImage
 import androidx.compose.ui.layout.ContentScale
 
-/**
- * A customizable calendar component for handling booking date and time selection.
- * Displays available and booked dates for a specific bike.
- *
- * @param isVisible Whether the calendar dialog is visible
- * @param onDismiss Callback when the dialog is dismissed
- * @param bike The bike for which the calendar is showing availability
- * @param bookedDates List of dates that are already booked
- * @param onDateSelected Callback when a date is selected
- * @param onBookingConfirmed Callback when booking is confirmed with selected date range and times
- */
 @Composable
 fun BookingCalendar(
     isVisible: Boolean,

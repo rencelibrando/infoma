@@ -20,7 +20,36 @@ object ApiConfig {
      * @return The API key or null if not found
      */
     fun getMapsApiKey(context: Context): String? {
-        return getApiKey(context, "maps_api_key", "google_maps_key")
+        // Try to get from resource first
+        val apiKey = getApiKey(context, "maps_api_key", "google_maps_key")
+        
+        if (apiKey != null) {
+            return apiKey
+        }
+        
+        // If not found in resources, try to get from AndroidManifest.xml
+        return try {
+            val applicationInfo = context.packageManager.getApplicationInfo(
+                context.packageName,
+                android.content.pm.PackageManager.GET_META_DATA
+            )
+            val manifestApiKey = applicationInfo.metaData.getString("com.google.android.geo.API_KEY")
+            
+            // Cache the key
+            if (manifestApiKey != null) {
+                apiKeyCache["maps_api_key"] = manifestApiKey
+                
+                // Log masked key in debug mode
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "Retrieved API key from manifest: ${maskApiKey(manifestApiKey)}")
+                }
+            }
+            
+            manifestApiKey
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get API key from manifest", e)
+            null
+        }
     }
     
     /**

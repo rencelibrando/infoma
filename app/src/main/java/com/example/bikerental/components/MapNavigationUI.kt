@@ -91,7 +91,7 @@ fun MapNavigationUI(
     onStepChanged: (Int) -> Unit = {}
 ) {
     AnimatedVisibility(
-        visible = isVisible && currentRoute != null,
+        visible = isVisible && currentRoute != null && currentLocation != null,
         enter = fadeIn() + slideInVertically(initialOffsetY = { -200 }),
         exit = fadeOut() + slideOutVertically(targetOffsetY = { -200 })
     ) {

@@ -6,21 +6,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -46,6 +51,20 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.delay
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import android.util.Log
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import com.example.bikerental.utils.PlaceSuggestion
+import com.example.bikerental.utils.PlacesApiService
+import kotlinx.coroutines.launch
+import androidx.compose.ui.text.style.TextOverflow
+import com.example.bikerental.BuildConfig
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 /**
  * Dialog for searching and selecting destinations
@@ -57,60 +76,94 @@ fun DestinationSearchDialog(
     onDismiss: () -> Unit,
     onDestinationSelected: (LatLng) -> Unit
 ) {
-    // If dialog is not visible, don't render anything
     if (!isVisible) return
     
-    // State for search query
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<PlaceSuggestion>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var isError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+    val TAG = "DestinationSearchDialog"
     
-    // Sample destinations - in a real app, these would come from an API or database
-    // For demonstration purposes, these are hardcoded locations in Manila
-    val destinations = remember {
-        listOf(
-            Destination(
-                name = "Intramuros",
-                address = "Manila, 1002 Metro Manila",
-                latLng = LatLng(14.5890, 120.9726),
-                isRecent = true
-            ),
-            Destination(
-                name = "Rizal Park",
-                address = "Roxas Blvd, Malate, Manila",
-                latLng = LatLng(14.5832, 120.9822),
-                isFavorite = true
-            ),
-            Destination(
-                name = "Mall of Asia",
-                address = "Pasay, Metro Manila",
-                latLng = LatLng(14.5353, 120.9845)
-            ),
-            Destination(
-                name = "Makati Central Business District",
-                address = "Makati, Metro Manila",
-                latLng = LatLng(14.5548, 121.0244)
-            ),
-            Destination(
-                name = "BGC",
-                address = "Taguig, Metro Manila",
-                latLng = LatLng(14.5508, 121.0505)
-            )
-        )
+    // Use LazyListState to optimize list performance
+    val lazyListState = rememberLazyListState()
+    
+    // Keep track of the current search job to cancel previous ones
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    // Keep updated reference to callbacks
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
+    val currentOnDestinationSelected by rememberUpdatedState(onDestinationSelected)
+
+    // Initialize Places API when dialog is shown
+    LaunchedEffect(Unit) {
+        Log.d(TAG, "Initializing Places API from dialog")
+        try {
+            // Use IO dispatcher for API initialization
+            withContext(Dispatchers.IO) {
+                PlacesApiService.initialize(context)
+            }
+            
+            Log.d(TAG, "Places API initialized from dialog")
+            
+            // Show a mock entry immediately to provide feedback
+            if (BuildConfig.DEBUG) {
+                searchResults = withContext(Dispatchers.IO) {
+                    PlacesApiService.searchPlaces("Default").take(5) // Limit initial results
+                }
+                Log.d(TAG, "Loaded ${searchResults.size} default suggestions")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing Places API", e)
+            isError = true
+            errorMessage = "Failed to initialize location search: ${e.message}"
+        }
     }
-    
-    // Filtered destinations based on search query
-    var filteredDestinations by remember { mutableStateOf(destinations) }
-    
-    // Filter destinations when search query changes
+
+    // Clean up resources when dialog closes
+    DisposableEffect(isVisible) {
+        onDispose {
+            searchJob?.cancel()
+            searchJob = null
+        }
+    }
+
+    // Search when query changes
     LaunchedEffect(searchQuery) {
-        // Add a small delay to avoid filtering on every keystroke
-        delay(300)
+        // Cancel previous search if any
+        searchJob?.cancel()
         
-        filteredDestinations = if (searchQuery.isBlank()) {
-            destinations
-        } else {
-            destinations.filter {
-                it.name.contains(searchQuery, ignoreCase = true) ||
-                it.address.contains(searchQuery, ignoreCase = true)
+        if (searchQuery.length < 3) {
+            searchResults = emptyList()
+            isLoading = false
+            return@LaunchedEffect
+        }
+        
+        delay(300) // Debounce search
+        isLoading = true
+        isError = false
+        
+        searchJob = coroutineScope.launch {
+            try {
+                Log.d(TAG, "Searching places for: $searchQuery")
+                
+                // Use IO dispatcher for network calls
+                val results = withContext(Dispatchers.IO) {
+                    PlacesApiService.searchPlaces(searchQuery)
+                }
+                
+                // Limit results to prevent performance issues with large lists
+                searchResults = results.take(10)
+                Log.d(TAG, "Search completed, found ${searchResults.size} results")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error searching places", e)
+                isError = true
+                errorMessage = "Search failed: ${e.message}"
+                searchResults = emptyList()
+            } finally {
+                isLoading = false
             }
         }
     }
@@ -124,7 +177,7 @@ fun DestinationSearchDialog(
         )
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(0.95f),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface
@@ -191,25 +244,130 @@ fun DestinationSearchDialog(
                     )
                 )
                 
-                // Destination list
+                // Loading indicator
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(28.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+                
+                // Error message
+                if (isError) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp)
+                            .background(
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Error,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Could not load search results.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (errorMessage.isNotEmpty()) {
+                                Text(
+                                    text = errorMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                // Destination list with optimized LazyColumn
                 LazyColumn(
+                    state = lazyListState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .weight(1f, fill = false)
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    items(filteredDestinations) { destination ->
+                    // Initial prompt when no search
+                    if (searchQuery.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Enter a location to search",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Search results
+                    items(
+                        items = searchResults,
+                        key = { it.placeId } // Provide stable keys for better performance
+                    ) { suggestion ->
                         DestinationItem(
-                            destination = destination,
+                            suggestion = suggestion,
                             onClick = {
-                                onDestinationSelected(destination.latLng)
-                                onDismiss()
+                                coroutineScope.launch {
+                                    try {
+                                        // Show loading while fetching details
+                                        isLoading = true
+                                        
+                                        Log.d(TAG, "Getting place details for: ${suggestion.placeId}")
+                                        
+                                        // Use IO dispatcher for network call
+                                        val placeDetails = withContext(Dispatchers.IO) {
+                                            PlacesApiService.getPlaceDetails(suggestion.placeId)
+                                        }
+                                        
+                                        if (placeDetails?.latLng != null) {
+                                            Log.d(TAG, "Got place details, lat/lng: ${placeDetails.latLng}")
+                                            currentOnDestinationSelected(placeDetails.latLng!!)
+                                            currentOnDismiss()
+                                        } else {
+                                            Log.e(TAG, "Place details returned null latLng")
+                                            isError = true
+                                            errorMessage = "Could not get location coordinates"
+                                            isLoading = false
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Error getting place details", e)
+                                        isError = true
+                                        errorMessage = "Failed to get location details: ${e.message}"
+                                        isLoading = false
+                                    }
+                                }
                             }
                         )
                     }
                     
-                    // If no results found
-                    if (filteredDestinations.isEmpty()) {
+                    // If no results found but search was performed
+                    if (searchResults.isEmpty() && searchQuery.length >= 3 && !isLoading) {
                         item {
                             Box(
                                 modifier = Modifier
@@ -225,6 +383,14 @@ fun DestinationSearchDialog(
                         }
                     }
                 }
+                
+                // Help text at bottom
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Type at least 3 characters to search",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -235,14 +401,14 @@ fun DestinationSearchDialog(
  */
 @Composable
 fun DestinationItem(
-    destination: Destination,
+    suggestion: PlaceSuggestion,
     onClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 8.dp)
+            .padding(vertical = 6.dp) // Reduced padding for better list density
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -251,22 +417,16 @@ fun DestinationItem(
             // Icon container
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(32.dp) // Slightly smaller 
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
-                val icon: ImageVector = when {
-                    destination.isRecent -> Icons.Default.History
-                    destination.isFavorite -> Icons.Default.Star
-                    else -> Icons.Default.Place
-                }
-                
                 Icon(
-                    imageVector = icon,
+                    imageVector = Icons.Default.Place,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp) // Smaller icon
                 )
             }
             
@@ -277,36 +437,29 @@ fun DestinationItem(
                     .weight(1f)
             ) {
                 Text(
-                    text = destination.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    text = suggestion.primaryText,
+                    style = MaterialTheme.typography.bodyMedium, // Smaller text
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis // Prevent long text from causing layout issues
                 )
                 
                 Text(
-                    text = destination.address,
+                    text = suggestion.secondaryText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis // Prevent long text from causing layout issues
                 )
             }
         }
         
         Divider(
             modifier = Modifier
-                .padding(top = 8.dp)
+                .padding(top = 6.dp)
                 .fillMaxWidth(),
             thickness = 0.5.dp,
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
     }
 }
-
-/**
- * Data class representing a destination
- */
-data class Destination(
-    val name: String,
-    val address: String,
-    val latLng: LatLng,
-    val isRecent: Boolean = false,
-    val isFavorite: Boolean = false
-) 

@@ -5,5 +5,5 @@
     For security, consider using a separate file that is added to .gitignore
     or use BuildConfig fields with gradle properties
     -->
-    <string name="google_maps_key">AIzaSyCmhSJa07ZS67ZcKnJOmwHHMz-qzKhjShE</string>
+    <string name="google_maps_key">AIzaSyAgkXbkJMvuxJs9d1bBYlSgxxgp1lcoRaU</string>
 </resources> 

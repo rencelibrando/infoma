@@ -18,27 +18,17 @@ object RideMetricsUtils {
     const val MAX_GPS_JUMP_DISTANCE = 100000f // 100km maximum jump between GPS points (in meters)
 
     /**
-     * Calculate distance between two geographic points using Android's Location.distanceBetween
-     * Returns distance in meters for maximum precision
-     */
-    fun calculateDistanceInMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Float {
-        val results = FloatArray(1)
-        Location.distanceBetween(lat1, lon1, lat2, lon2, results)
-        return results[0]
-    }
-
-    /**
      * Calculate distance between two LatLng points
      */
     fun calculateDistanceInMeters(start: LatLng, end: LatLng): Float {
-        return calculateDistanceInMeters(start.latitude, start.longitude, end.latitude, end.longitude)
+        return DistanceCalculationUtils.calculateDistance(start, end)
     }
 
     /**
      * Calculate distance between two BikeLocation points
      */
     fun calculateDistanceInMeters(start: BikeLocation, end: BikeLocation): Float {
-        return calculateDistanceInMeters(start.latitude, start.longitude, end.latitude, end.longitude)
+        return DistanceCalculationUtils.calculateDistance(start, end)
     }
 
     /**

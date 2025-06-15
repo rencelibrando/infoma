@@ -3,6 +3,11 @@ package com.example.bikerental.utils
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import com.example.bikerental.utils.RideMetricsUtils.formatSpeed
+import com.google.android.gms.maps.model.LatLng
+import java.text.SimpleDateFormat
+import java.util.*
+import com.example.bikerental.ui.theme.RouteInfo
 
 /**
  * CENTRALIZED Formatting Utilities
@@ -107,5 +112,58 @@ object FormattingUtils {
             return "Invalid coordinates"
         }
         return String.format(Locale.US, "%.${precision}f, %.${precision}f", lat, lng)
+    }
+
+    /**
+     * Calculate and format the Estimated Time of Arrival (ETA) string
+     */
+    fun calculateEtaString(
+        route: RouteInfo,
+        currentStepIndex: Int,
+        currentLocation: LatLng?
+    ): String {
+        // If current location is null, return default ETA based on route data
+        if (currentLocation == null) {
+            return formatEta(route.durationValue.toLong())
+        }
+        
+        // Calculate remaining distance
+        val remainingDistanceInCurrentStep = DistanceCalculationUtils.calculateDistance(
+            currentLocation,
+            route.steps[currentStepIndex].endLocation
+        )
+        val remainingDistanceInFutureSteps = route.steps.drop(currentStepIndex + 1).sumOf { it.distanceValue }
+        val totalRemainingDistance = remainingDistanceInCurrentStep + remainingDistanceInFutureSteps
+
+        // Calculate estimated average speed from the initial route data
+        val averageSpeedMps = if (route.durationValue > 0) {
+            route.distanceValue.toFloat() / route.durationValue.toFloat()
+        } else {
+            5f // Default to 5 m/s (18 km/h) if duration is zero
+        }
+
+        // Calculate remaining time in seconds
+        val remainingTimeSeconds = if (averageSpeedMps > 0) {
+            (totalRemainingDistance / averageSpeedMps).toLong()
+        } else {
+            0L
+        }
+        
+        return formatEta(remainingTimeSeconds)
+    }
+
+    /**
+     * Format ETA from seconds to a user-friendly string (e.g., "15 min", "< 1 min")
+     */
+    private fun formatEta(seconds: Long): String {
+        return when {
+            seconds < 60 -> "< 1 min"
+            seconds < 3600 -> "${seconds / 60} min"
+            else -> {
+                val hours = seconds / 3600
+                val minutes = (seconds % 3600) / 60
+                "$hours hr $minutes min"
+            }
+        }
     }
 } 
