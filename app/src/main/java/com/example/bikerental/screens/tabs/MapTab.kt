@@ -672,20 +672,20 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         MapProperties(
             isMyLocationEnabled = hasLocationPermission && !isPOVMode, // Hide default location button in POV
             mapType = MapType.NORMAL,
-            isTrafficEnabled = true // Enable traffic for navigation
+            isTrafficEnabled = false // Enable traffic for navigation
         )
     }
 
     // Enhanced UI settings for POV navigation
     val uiSettings = remember(isPOVMode) {
         MapUiSettings(
-            zoomControlsEnabled = !isPOVMode,
-            myLocationButtonEnabled = !isPOVMode,
+            zoomControlsEnabled = isPOVMode,
+            myLocationButtonEnabled = isPOVMode,
             mapToolbarEnabled = false,
             compassEnabled = isPOVMode, // Show compass in POV mode
-            rotationGesturesEnabled = !isPOVMode, // Disable rotation in POV
-            scrollGesturesEnabled = !isPOVMode, // Limit scrolling in POV
-            tiltGesturesEnabled = false,
+            rotationGesturesEnabled = isPOVMode, // Disable rotation in POV
+            scrollGesturesEnabled = isPOVMode, // Limit scrolling in POV
+            tiltGesturesEnabled = true,
             zoomGesturesEnabled = true
         )
     }
@@ -949,10 +949,13 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                                 }
                                 
                                 backgroundScope.launch {
-                                    cameraPositionState.animate(
-                                        CameraUpdateFactory.newCameraPosition(newPosition),
-                                        durationMs = 1000
-                                    )
+                                    // Ensure we're on the main thread for Google Maps animations
+                                    withContext(Dispatchers.Main) {
+                                        cameraPositionState.animate(
+                                            CameraUpdateFactory.newCameraPosition(newPosition),
+                                            durationMs = 1000
+                                        )
+                                    }
                                 }
                             }
                         },
