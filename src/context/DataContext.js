@@ -53,7 +53,27 @@ export const DataProvider = ({ children }) => {
     
     // Set up real-time listener for all collections
     const unsubscribe = subscribeToAnalytics((updatedData) => {
-      setDashboardData(updatedData);
+      // Debug log to check for bike count discrepancy
+      console.log(`DataContext received update - Raw bikes count: ${updatedData.bikes?.length}`);
+      console.log(`DataContext received update - Stats total bikes: ${updatedData.stats?.totalBikes}`);
+      
+      // Filter bikes with same logic as calculateStats to ensure consistency
+      const validBikes = updatedData.bikes?.filter(bike => 
+        bike !== null && 
+        typeof bike === 'object' &&
+        !bike.isDeleted &&
+        !bike.isTest &&
+        bike.id
+      ) || [];
+      console.log(`DataContext filtered bikes count: ${validBikes.length}`);
+      
+      // Update with filtered bikes for consistency
+      const filteredData = {
+        ...updatedData,
+        bikes: validBikes
+      };
+      
+      setDashboardData(filteredData);
       setLastUpdateTime(new Date());
       setShowUpdateIndicator(true);
       

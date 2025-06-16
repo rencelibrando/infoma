@@ -768,11 +768,25 @@ const calculateStats = (bikes, users, rides, reviews, activeRidesFromRealtime = 
 
   const averageRating = reviewCount > 0 ? Number((totalRating / reviewCount).toFixed(2)) : 0;
 
+  // Fix the bike count calculation to match the logic in BikesList
+  // Only count valid bikes using the same logic as BikesList
+  // First filter out any null or non-object bikes, then filter out any "deleted" or test bikes
+  const validBikes = bikes?.filter(bike => 
+    bike !== null && 
+    typeof bike === 'object' &&
+    !bike.isDeleted &&
+    !bike.isTest &&
+    bike.id // Make sure it has an ID
+  ) || [];
+  
   return {
-    totalBikes: bikes?.length || 0,
-    activeBikes: bikes?.filter(bike => bike.status === 'active')?.length || 0,
-    inUseBikes: bikes?.filter(bike => bike.status === 'in-use')?.length || 0,
-    maintenanceBikes: bikes?.filter(bike => bike.status === 'maintenance')?.length || 0,
+    totalBikes: validBikes.length || 0, // Fixed to match BikesList total count
+    activeBikes: validBikes.filter(bike => bike.isAvailable && bike.maintenanceStatus === 'operational').length || 0,
+    inUseBikes: validBikes.filter(bike => bike.isInUse).length || 0,
+    maintenanceBikes: validBikes.filter(bike => 
+      bike.maintenanceStatus && 
+      ['maintenance', 'repair', 'out-of-service'].includes(bike.maintenanceStatus)
+    ).length || 0,
     totalUsers: users?.length || 0,
     activeRides: totalActiveRides, // Now using Realtime Database data
     totalRides: rides?.length || 0,

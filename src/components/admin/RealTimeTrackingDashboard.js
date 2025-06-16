@@ -1,4 +1,4 @@
-/* global google */
+/* eslint-disable no-undef */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, getDoc, doc, updateDoc, getDocs } from 'firebase/firestore';
 import { ref, onValue, off, child, get } from 'firebase/database';
@@ -1547,7 +1547,7 @@ const RealTimeTrackingDashboard = () => {
   const RouteModal = () => {
     const { isLoaded } = useJsApiLoader({
       id: 'google-map-script',
-      googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "AIzaSyASfb-LFSstZrbPUIgPn1rKOqNTFF6mhhk"
+      googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "AIzaSyAgkXbkJMvuxJs9d1bBYlSgxxgp1lcoRaU"
     });
 
     if (!showRouteModal || !selectedHistoryRide) return null;
