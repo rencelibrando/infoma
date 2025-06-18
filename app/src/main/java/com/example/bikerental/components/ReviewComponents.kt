@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
@@ -41,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +61,11 @@ import com.example.bikerental.utils.ColorUtils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.navigation.NavController
+import com.example.bikerental.navigation.Screen
+import com.example.bikerental.utils.ProfileRestrictionUtils
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 private val DarkGreen = ColorUtils.DarkGreen
 
@@ -481,10 +488,40 @@ fun ReviewSection(
     onToggleForm: () -> Unit,
     onSubmitReview: (rating: Float, comment: String) -> Unit,
     onDeleteReview: ((Review) -> Unit)? = null,
+    navController: NavController? = null,
     modifier: Modifier = Modifier
 ) {
     // Log for debugging visibility of review section
     Log.d("ReviewSection", "Rendering ReviewSection for bike $bikeId with ${reviews.size} reviews")
+    
+    // Load user data to check restrictions
+    var userData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    var isLoadingUserData by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        if (currentUser != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    if (document.exists()) {
+                        userData = document.data
+                    }
+                    isLoadingUserData = false
+                }
+                .addOnFailureListener {
+                    isLoadingUserData = false
+                }
+        } else {
+            isLoadingUserData = false
+        }
+    }
+    
+    // Check if the write_review feature is restricted
+    val isRestricted = ProfileRestrictionUtils.isFeatureRestricted("write_review", userData)
+    val restrictionMessage = ProfileRestrictionUtils.getRestrictionMessage("write_review", userData)
     
     Column(
         modifier = modifier.fillMaxWidth()
@@ -503,6 +540,29 @@ fun ReviewSection(
                 color = MaterialTheme.colorScheme.onSurface
             )
             
+            if (isLoadingUserData) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = DarkGreen,
+                    strokeWidth = 2.dp
+                )
+            } else if (isRestricted) {
+                Button(
+                    onClick = { navController?.navigate(Screen.IdVerification.route) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Badge,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Verify ID")
+                }
+            } else {
             Button(
                 onClick = onToggleForm,
                 colors = ButtonDefaults.buttonColors(
@@ -512,6 +572,7 @@ fun ReviewSection(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(if (showForm) "Cancel" else "Write Review")
+                }
             }
         }
         
@@ -519,9 +580,63 @@ fun ReviewSection(
         
         Spacer(modifier = Modifier.height(16.dp))
         
-        // Review form or reviews list
+        // Show restriction message if trying to write a review but restricted
+        if (showForm && isRestricted) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f)
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Badge,
+                        contentDescription = "ID Verification Required",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "ID Verification Required",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        text = restrictionMessage,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Button(
+                        onClick = { navController?.navigate(Screen.IdVerification.route) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Verify ID Now")
+                    }
+                }
+            }
+        }
+        
+        // Review form (only shown if user passes ID verification)
         AnimatedVisibility(
-            visible = showForm,
+            visible = showForm && !isRestricted,
             enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
             exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
         ) {
@@ -531,8 +646,9 @@ fun ReviewSection(
             )
         }
         
+        // Always show reviews list if not showing form
         AnimatedVisibility(
-            visible = !showForm,
+            visible = !showForm || isRestricted,
             enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
             exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
         ) {

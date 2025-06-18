@@ -377,6 +377,11 @@ fun AppNavigation(
         composable(Screen.SignUp.route) { SignUpScreen(navController) }
         composable(Screen.EmailVerification.route) { EmailVerificationScreen(navController) }
         
+        // ID verification route
+        composable(Screen.IdVerification.route) {
+            com.example.bikerental.screens.verification.IdVerificationScreen(navController)
+        }
+        
         // Main app routes
         composable(Screen.Home.route) { HomeScreen(navController, fusedLocationClient) }
         composable(Screen.EditProfile.route) { EditProfileScreen(navController) }

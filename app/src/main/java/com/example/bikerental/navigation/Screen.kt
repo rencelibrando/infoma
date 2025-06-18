@@ -34,4 +34,11 @@ sealed class Screen(val route: String) {
     object BookingDetails : Screen("bookingDetails/{bookingId}") {
         fun createRoute(bookingId: String) = "bookingDetails/$bookingId"
     }
+    object IdVerification : Screen("id_verification")
+}
+
+object NavigationRoute {
+    const val HOME_ROUTE = "home_route"
+    const val AUTH_ROUTE = "auth_route"
+    const val SPLASH_ROUTE = "splash_route"
 } 

@@ -29,6 +29,9 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -149,6 +152,10 @@ fun ProfileScreen(
     
     // State for tracking previous phone auth state
     var previousPhoneAuthState by remember { mutableStateOf<PhoneAuthState?>(null) }
+
+    // Add ID verification state
+    var idVerificationStatus by remember { mutableStateOf("not_submitted") }
+    var idType by remember { mutableStateOf<String?>(null) }
     
     // Function to check if profile is complete
     fun isProfileComplete(): Boolean {
@@ -170,6 +177,20 @@ fun ProfileScreen(
 
     fun isPhoneVerified(): Boolean {
         return profileData?.get("isPhoneVerified") as? Boolean == true
+    }
+
+    fun isIdVerified(): Boolean {
+        return profileData?.get("isIdVerified") as? Boolean == true
+    }
+    
+    // Function to get ID verification status
+    fun getIdVerificationStatus(): String {
+        return profileData?.get("idVerificationStatus")?.toString() ?: "not_submitted"
+    }
+
+    // Function to get ID type
+    fun getIdType(): String? {
+        return profileData?.get("idType")?.toString()
     }
     
     // Function to update phone number in Firestore
@@ -221,6 +242,10 @@ fun ProfileScreen(
                     formattedPhoneNumber = formatPhilippinePhoneNumber(
                         profileData?.get("phoneNumber")?.toString() ?: ""
                     )
+
+                    // Get ID verification data
+                    idVerificationStatus = getIdVerificationStatus()
+                    idType = getIdType()
                 } else {
                     Log.e("ProfileTab", "Failed to reload Firebase Auth user: ${reloadTask.exception?.message}")
                 }
@@ -237,6 +262,10 @@ fun ProfileScreen(
                             // Update phone number state with the latest data
                             phoneNumber = profileData?.get("phoneNumber")?.toString() ?: ""
                             formattedPhoneNumber = formatPhilippinePhoneNumber(phoneNumber)
+                            
+                            // Get ID verification data
+                            idVerificationStatus = getIdVerificationStatus()
+                            idType = getIdType()
                             
                             // Sync Firebase Auth email with Firestore if needed
                             val firestoreEmail = profileData?.get("email")?.toString()
@@ -619,6 +648,89 @@ fun ProfileScreen(
                 }
             }
 
+            // ID Verification Warning
+            if (!isIdVerified()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navController.navigate(Screen.IdVerification.route) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = when (getIdVerificationStatus()) {
+                            "pending" -> Color(0xFFFFF3E0) // Light orange background
+                            "rejected" -> MaterialTheme.colorScheme.errorContainer
+                            else -> MaterialTheme.colorScheme.errorContainer
+                        }
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = when (getIdVerificationStatus()) {
+                                "pending" -> Icons.Default.HourglassTop
+                                "rejected" -> Icons.Default.Error
+                                else -> Icons.Default.Badge
+                            },
+                            contentDescription = "Warning",
+                            tint = when (getIdVerificationStatus()) {
+                                "pending" -> Color(0xFFF57C00) // Orange
+                                else -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = when (getIdVerificationStatus()) {
+                                    "pending" -> "ID Verification in Progress"
+                                    "rejected" -> "ID Verification Failed"
+                                    else -> "Verify Your Identity"
+                                },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = when (getIdVerificationStatus()) {
+                                    "pending" -> Color(0xFFF57C00) // Orange
+                                    else -> MaterialTheme.colorScheme.error
+                                }
+                            )
+                            Text(
+                                text = when (getIdVerificationStatus()) {
+                                    "pending" -> "We're reviewing your submitted ID. This usually takes 1-2 business days."
+                                    "rejected" -> "Your ID verification was rejected. Please submit a clearer image."
+                                    else -> "ID verification is required to rent bikes and access payment features."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        Button(
+                            onClick = { navController.navigate(Screen.IdVerification.route) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = when (getIdVerificationStatus()) {
+                                    "pending" -> Color(0xFFF57C00) // Orange
+                                    else -> MaterialTheme.colorScheme.error
+                                }
+                            ),
+                            modifier = Modifier.padding(start = 8.dp)
+                        ) {
+                            Text(
+                                text = when (getIdVerificationStatus()) {
+                                    "pending" -> "Check Status"
+                                    "rejected" -> "Resubmit"
+                                    else -> "Verify"
+                                },
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Profile Card with Verification Status
             Card(
                 modifier = Modifier
@@ -648,6 +760,7 @@ fun ProfileScreen(
                                     color = when {
                                         !isProfileComplete() -> MaterialTheme.colorScheme.error
                                         !isPhoneVerified() -> MaterialTheme.colorScheme.error
+                                        !isIdVerified() -> MaterialTheme.colorScheme.error
                                         else -> ColorUtils.DarkGreen
                                     },
                                     shape = CircleShape
@@ -751,12 +864,53 @@ fun ProfileScreen(
                                 )
                             }
                         }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val idStatus = getIdVerificationStatus()
+                            Text(
+                                text = when (idStatus) {
+                                    "verified" -> "ID Verified (${getIdType() ?: "Valid ID"})"
+                                    "pending" -> "ID Verification Pending"
+                                    "rejected" -> "ID Verification Failed"
+                                    else -> "ID Not Verified"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = when (idStatus) {
+                                    "verified" -> ColorUtils.blackcol()
+                                    "pending" -> Color(0xFFF57C00) // Orange
+                                    else -> MaterialTheme.colorScheme.error
+                                }
+                            )
+                            
+                            Icon(
+                                imageVector = when (idStatus) {
+                                    "verified" -> Icons.Default.CheckCircle
+                                    "pending" -> Icons.Default.HourglassTop
+                                    "rejected" -> Icons.Default.Error
+                                    else -> Icons.Default.Warning
+                                },
+                                contentDescription = when (idStatus) {
+                                    "verified" -> "Verified"
+                                    "pending" -> "Pending"
+                                    "rejected" -> "Rejected"
+                                    else -> "Not Verified"
+                                },
+                                tint = when (idStatus) {
+                                    "verified" -> MaterialTheme.colorScheme.primary
+                                    "pending" -> Color(0xFFF57C00) // Orange
+                                    else -> MaterialTheme.colorScheme.error
+                                },
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
 
             // Progress Indicator
-            if (!isProfileComplete()) {
+            if (!isProfileComplete() || !isIdVerified()) {
                 LinearProgressIndicator(
                     progress = { 
                         profileData?.let { data ->
@@ -767,10 +921,17 @@ fun ProfileScreen(
                                 "barangay",
                                 "city"
                             )
-                            val completedFields = requiredFields.count { field ->
+                            var completeFields = requiredFields.count { field ->
                                 data[field].toString().isNotBlank()
+                            }.toFloat()
+                            
+                            // Add weight for ID verification (worth 3 regular fields)
+                            if (isIdVerified()) {
+                                completeFields += 3
+                                completeFields / (requiredFields.size + 3)
+                            } else {
+                                completeFields / (requiredFields.size + 3)
                             }
-                            completedFields.toFloat() / requiredFields.size
                         } ?: 0f
                     },
                     modifier = Modifier
@@ -791,15 +952,84 @@ fun ProfileScreen(
                                 "barangay",
                                 "city"
                             )
-                            val completedFields = requiredFields.count { field ->
+                            var completeFields = requiredFields.count { field ->
                                 data[field].toString().isNotBlank()
+                            }.toFloat()
+                            
+                            // Add weight for ID verification
+                            val totalFields = requiredFields.size + 3
+                            if (isIdVerified()) {
+                                completeFields += 3
                             }
-                            (completedFields.toFloat() / requiredFields.size * 100).toInt()
+                            
+                            (completeFields / totalFields * 100).toInt()
                         } ?: 0)}%",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+
+            // ID Verification Card (when not yet verified)
+            if (getIdVerificationStatus() == "not_submitted") {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { navController.navigate(Screen.IdVerification.route) },
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Badge,
+                            contentDescription = "ID Verification",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(bottom = 8.dp)
+                        )
+                        
+                        Text(
+                            text = "Verify Your Identity",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "Upload a valid government ID to unlock all features including bike rental and payment options.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Button(
+                            onClick = { navController.navigate(Screen.IdVerification.route) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth(0.7f)
+                                .height(48.dp)
+                        ) {
+                            Text(
+                                text = "Upload ID Now",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
             }
 
             // Account Settings Section
@@ -962,6 +1192,50 @@ fun ProfileScreen(
                             if (it.isLowerCase()) it.titlecase() else it.toString() 
                         } ?: "Email", ColorUtils.blackcol())
                         CompactInfoRow("Email Verified", if (user?.isEmailVerified == true) "Yes" else "No", ColorUtils.blackcol())
+                        
+                        // Add ID Verification Information
+                        Text(
+                            text = "Verification",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = ColorUtils.DarkGreen,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                        )
+                        
+                        CompactInfoRow(
+                            "ID Type", 
+                            profileData?.get("idType")?.toString() ?: "Not submitted", 
+                            ColorUtils.blackcol()
+                        )
+                        
+                        CompactInfoRow(
+                            "ID Status", 
+                            when (profileData?.get("idVerificationStatus")?.toString()) {
+                                "verified" -> "Verified"
+                                "pending" -> "Pending verification"
+                                "rejected" -> "Verification failed"
+                                else -> "Not submitted"
+                            },
+                            ColorUtils.blackcol()
+                        )
+                        
+                        // Show verification date if verified
+                        if (profileData?.get("idVerificationStatus")?.toString() == "verified") {
+                            profileData?.get("idSubmissionDate")?.let {
+                                CompactInfoRow(
+                                    "Verified On",
+                                    // Format timestamp as readable date
+                                    try {
+                                        val timestamp = it as? com.google.firebase.Timestamp 
+                                        val date = timestamp?.toDate()
+                                        val formatter = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault())
+                                        formatter.format(date) ?: "Unknown"
+                                    } catch (e: Exception) {
+                                        "Unknown"
+                                    },
+                                    ColorUtils.blackcol()
+                                )
+                            }
+                        }
                     }
                 }
             },

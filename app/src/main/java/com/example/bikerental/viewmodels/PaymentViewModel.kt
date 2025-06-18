@@ -292,6 +292,9 @@ class PaymentViewModel @Inject constructor(
         )
     }
     
+    /**
+     * Submit a payment
+     */
     fun submitPayment(
         mobileNumber: String,
         referenceNumber: String,
@@ -303,6 +306,12 @@ class PaymentViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _uiState.value = PaymentUiState.Loading
+                
+                // Check if user is ID verified before proceeding
+                if (!isUserIdVerified()) {
+                    _uiState.value = PaymentUiState.Error("ID verification is required to make payments. Please verify your ID first.")
+                    return@launch
+                }
                 
                 val currentUser = auth.currentUser
                     ?: throw Exception("User not authenticated")
@@ -345,6 +354,7 @@ class PaymentViewModel @Inject constructor(
                 
                 println("PaymentViewModel: Payment successfully saved to Firestore")
                 
+                // Update the UI state
                 _uiState.value = PaymentUiState.Success
                 
                 // Clear selected unpaid booking after successful payment
@@ -359,6 +369,45 @@ class PaymentViewModel @Inject constructor(
                 e.printStackTrace()
                 _uiState.value = PaymentUiState.Error("Failed to submit payment: ${e.message}")
             }
+        }
+    }
+    
+    /**
+     * Check if user has ID verification complete
+     */
+    private suspend fun isUserIdVerified(): Boolean {
+        return try {
+            val userId = auth.currentUser?.uid ?: return false
+            
+            val userDoc = firestore.collection("users")
+                .document(userId)
+                .get()
+                .await()
+                
+            if (userDoc.exists()) {
+                userDoc.getBoolean("isIdVerified") ?: false
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
+    /**
+     * Update booking payment status
+     */
+    private suspend fun updateBookingPaymentStatus(bookingId: String) {
+        try {
+            // Update booking status to indicate payment completed
+            firestore.collection("bookings")
+                .document(bookingId)
+                .update("paymentStatus", "PAID")
+                .await()
+                
+            println("Payment status updated for booking: $bookingId")
+        } catch (e: Exception) {
+            println("Failed to update booking payment status: ${e.message}")
         }
     }
     

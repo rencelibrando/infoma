@@ -50,7 +50,19 @@ data class User(
     
     var verificationAttempts: Long? = null,
     
-    var authProvider: String? = null
+    var authProvider: String? = null,
+    
+    // ID verification fields
+    var idType: String? = null,
+    var idImageUrl: String? = null,
+    
+    @get:PropertyName("isIdVerified")
+    @set:PropertyName("isIdVerified")
+    var isIdVerified: Boolean = false,
+    
+    var idVerificationStatus: String = "not_submitted", // Possible values: not_submitted, pending, verified, rejected
+    var idSubmissionDate: Timestamp? = null,
+    var idVerificationNote: String? = null
 ) {
     
     /**
@@ -85,7 +97,13 @@ data class User(
             "isPhoneVerified" to isPhoneVerified,
             "phoneVerified" to isPhoneVerified,  // Write to both fields for compatibility
             "verificationAttempts" to verificationAttempts,
-            "authProvider" to authProvider
+            "authProvider" to authProvider,
+            "idType" to idType,
+            "idImageUrl" to idImageUrl,
+            "isIdVerified" to isIdVerified,
+            "idVerificationStatus" to idVerificationStatus,
+            "idSubmissionDate" to idSubmissionDate,
+            "idVerificationNote" to idVerificationNote
         )
     }
 } 

@@ -6,25 +6,64 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.navigation.NavController
+import com.example.bikerental.navigation.Screen
 import com.example.bikerental.utils.ColorUtils
+import com.example.bikerental.utils.ProfileRestrictionUtils
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 @Composable
 fun StartRideDialog(
     isVisible: Boolean,
     onDismiss: () -> Unit,
-    onStartQRScan: () -> Unit
+    onStartQRScan: () -> Unit,
+    navController: NavController? = null
 ) {
+    val context = LocalContext.current
+    var userData by remember { mutableStateOf<Map<String, Any>?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    // Load user data to check restrictions
+    LaunchedEffect(Unit) {
+        val currentUser = FirebaseAuth.getInstance().currentUser
+        if (currentUser != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(currentUser.uid)
+                .get()
+                .addOnSuccessListener { document ->
+                    if (document.exists()) {
+                        userData = document.data
+                    }
+                    isLoading = false
+                }
+                .addOnFailureListener {
+                    isLoading = false
+                }
+        } else {
+            isLoading = false
+        }
+    }
+
+    // Check if the feature is restricted
+    val isRestricted = ProfileRestrictionUtils.isFeatureRestricted("start_ride", userData)
+    val restrictionMessage = ProfileRestrictionUtils.getRestrictionMessage("start_ride", userData)
+
     if (isVisible) {
         Dialog(onDismissRequest = onDismiss) {
             Surface(
@@ -34,6 +73,100 @@ fun StartRideDialog(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surface
             ) {
+                if (isLoading) {
+                    // Show loading state
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                } else if (isRestricted) {
+                    // Show restriction message
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Badge,
+                            contentDescription = "ID Verification Required",
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "ID Verification Required",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = restrictionMessage,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Cancel Button
+                            OutlinedButton(
+                                onClick = onDismiss,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "Cancel",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            
+                            // Verify ID Button
+                            Button(
+                                onClick = {
+                                    onDismiss()
+                                    navController?.navigate(Screen.IdVerification.route)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Badge,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Verify ID",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Show normal ride start dialog
                 Column(
                     modifier = Modifier.padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -115,6 +248,7 @@ fun StartRideDialog(
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             )
+                            }
                         }
                     }
                 }

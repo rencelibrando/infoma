@@ -30,12 +30,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
@@ -94,6 +97,7 @@ import com.example.bikerental.viewmodels.AuthViewModel
 import com.example.bikerental.viewmodels.NotificationViewModel
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.bikerental.navigation.Screen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
@@ -173,6 +177,16 @@ fun AppNavigationDrawer(
     // Function to check if phone is verified
     fun isPhoneVerified(): Boolean {
         return profileData?.get("isPhoneVerified") as? Boolean == true
+    }
+
+    // Function to check ID verification status
+    fun getIdVerificationStatus(): String {
+        return profileData?.get("idVerificationStatus")?.toString() ?: "not_submitted"
+    }
+
+    // Function to check if ID is verified
+    fun isIdVerified(): Boolean {
+        return profileData?.get("isIdVerified") as? Boolean == true
     }
     
     // Performance optimization - pre-create menu items lists
@@ -302,6 +316,52 @@ fun AppNavigationDrawer(
                                     restrictionType = "phone",
                                     onClick = {
                                         onItemSelected(4)
+                                        scope.launch {
+                                            drawerState.close()
+                                        }
+                                    },
+                                    warningColor = warningColor,
+                                    accentColor = greenColor
+                                )
+                            }
+
+                            // Add ID verification warning
+                            val idStatus = getIdVerificationStatus()
+                            if (idStatus == "not_submitted") {
+                                CompactProfileWarningCard(
+                                    icon = Icons.Default.Badge,
+                                    title = "ID Verification Required",
+                                    restrictionType = "id_missing",
+                                    onClick = {
+                                        navController?.navigate(Screen.IdVerification.route)
+                                        scope.launch {
+                                            drawerState.close()
+                                        }
+                                    },
+                                    warningColor = warningColor,
+                                    accentColor = greenColor
+                                )
+                            } else if (idStatus == "pending") {
+                                CompactProfileWarningCard(
+                                    icon = Icons.Default.HourglassTop,
+                                    title = "ID Verification Pending",
+                                    restrictionType = "id_pending",
+                                    onClick = {
+                                        navController?.navigate(Screen.IdVerification.route)
+                                        scope.launch {
+                                            drawerState.close()
+                                        }
+                                    },
+                                    warningColor = Color(0xFFFFA000), // Amber/Orange for pending
+                                    accentColor = greenColor
+                                )
+                            } else if (idStatus == "rejected") {
+                                CompactProfileWarningCard(
+                                    icon = Icons.Default.Error,
+                                    title = "ID Verification Failed",
+                                    restrictionType = "id_rejected",
+                                    onClick = {
+                                        navController?.navigate(Screen.IdVerification.route)
                                         scope.launch {
                                             drawerState.close()
                                         }
@@ -742,6 +802,9 @@ fun CompactProfileWarningCard(
                         "profile" -> "Some features restricted"
                         "phone" -> "Verification required"
                         "email" -> "Email verification needed"
+                        "id_missing" -> "Required for bike rental"
+                        "id_pending" -> "Awaiting approval"
+                        "id_rejected" -> "Action needed"
                         else -> "Action required"
                     },
                     style = MaterialTheme.typography.bodySmall,

@@ -173,6 +173,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.layout.aspectRatio
+import com.example.bikerental.components.RestrictedFeature
 
 // Updated color scheme for white and dark green theme - consistent with PaymentTab
 object BookingColors {
@@ -209,302 +210,308 @@ fun BookingsTab(
     bookingViewModel: BookingViewModel = viewModel(),
     bikeId: String? = null
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    // Create dedicated scopes for background operations
-    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
-    
-    // UI State for new booking flow
-    var showBookingForm by remember { mutableStateOf(bikeId != null) }
-    var selectedBikeType by remember { mutableStateOf<String?>(null) }
-    var selectedDate by remember { mutableStateOf<Date?>(null) }
-    var selectedTime by remember { mutableStateOf<String?>(null) }
-    var selectedDuration by remember { mutableStateOf<String?>(null) }
-    
-    // Filtering state (removed search query)
-    var selectedCategory by remember { mutableStateOf(BookingCategory.ALL) }
-    
-    // Collect bookings state
-    val bookings by bookingViewModel.bookings.collectAsState()
-    val isLoading by bookingViewModel.isLoading.collectAsState()
-    val error by bookingViewModel.error.collectAsState()
-    
-    // Category counts state
-    var allCount by remember { mutableStateOf(0) }
-    var activeCount by remember { mutableStateOf(0) }
-    var completedCount by remember { mutableStateOf(0) }
-    var cancelledCount by remember { mutableStateOf(0) }
-    
-    // Filter bookings based on selected category only
-    val filteredBookings by remember(bookings, selectedCategory) {
-        derivedStateOf {
-            computeScope.launch {
-                // Calculate counts on a background thread
-                val newAllCount = bookings.size
-                val newActiveCount = bookings.count { it.status == "PENDING" || it.status == "CONFIRMED" }
-                val newCompletedCount = bookings.count { it.status == "COMPLETED" }
-                val newCancelledCount = bookings.count { it.status == "CANCELLED" }
-                
-                // Update UI on main thread
-                withContext(Dispatchers.Main) {
-                    allCount = newAllCount
-                    activeCount = newActiveCount
-                    completedCount = newCompletedCount
-                    cancelledCount = newCancelledCount
+    // Use RestrictedFeature to prevent access if user is not ID verified
+    RestrictedFeature(
+        featureType = "booking",
+        navController = navController ?: androidx.navigation.compose.rememberNavController()
+    ) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        
+        // Create dedicated scopes for background operations
+        val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+        val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+        
+        // UI State for new booking flow
+        var showBookingForm by remember { mutableStateOf(bikeId != null) }
+        var selectedBikeType by remember { mutableStateOf<String?>(null) }
+        var selectedDate by remember { mutableStateOf<Date?>(null) }
+        var selectedTime by remember { mutableStateOf<String?>(null) }
+        var selectedDuration by remember { mutableStateOf<String?>(null) }
+        
+        // Filtering state (removed search query)
+        var selectedCategory by remember { mutableStateOf(BookingCategory.ALL) }
+        
+        // Collect bookings state
+        val bookings by bookingViewModel.bookings.collectAsState()
+        val isLoading by bookingViewModel.isLoading.collectAsState()
+        val error by bookingViewModel.error.collectAsState()
+        
+        // Category counts state
+        var allCount by remember { mutableStateOf(0) }
+        var activeCount by remember { mutableStateOf(0) }
+        var completedCount by remember { mutableStateOf(0) }
+        var cancelledCount by remember { mutableStateOf(0) }
+        
+        // Filter bookings based on selected category only
+        val filteredBookings by remember(bookings, selectedCategory) {
+            derivedStateOf {
+                computeScope.launch {
+                    // Calculate counts on a background thread
+                    val newAllCount = bookings.size
+                    val newActiveCount = bookings.count { it.status == "PENDING" || it.status == "CONFIRMED" }
+                    val newCompletedCount = bookings.count { it.status == "COMPLETED" }
+                    val newCancelledCount = bookings.count { it.status == "CANCELLED" }
+                    
+                    // Update UI on main thread
+                    withContext(Dispatchers.Main) {
+                        allCount = newAllCount
+                        activeCount = newActiveCount
+                        completedCount = newCompletedCount
+                        cancelledCount = newCancelledCount
+                    }
                 }
-            }
-            
-            // Return filtered bookings based on category only
-            bookings.filter { booking ->
-                when (selectedCategory) {
-                    BookingCategory.ALL -> true
-                    BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
-                    BookingCategory.COMPLETED -> booking.status == "COMPLETED"
-                    BookingCategory.CANCELLED -> booking.status == "CANCELLED"
+                
+                // Return filtered bookings based on category only
+                bookings.filter { booking ->
+                    when (selectedCategory) {
+                        BookingCategory.ALL -> true
+                        BookingCategory.ACTIVE -> booking.status == "PENDING" || booking.status == "CONFIRMED"
+                        BookingCategory.COMPLETED -> booking.status == "COMPLETED"
+                        BookingCategory.CANCELLED -> booking.status == "CANCELLED"
+                    }
                 }
             }
         }
-    }
-    
-    // Selected booking for detailed view
-    var selectedBooking by remember { mutableStateOf<BookingWithBikeDetails?>(null) }
-    val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    var showBottomSheet by remember { mutableStateOf(false) }
-    
-    // Pull-to-refresh state
-    val pullRefreshState = rememberPullRefreshState(
-        refreshing = isLoading,
-        onRefresh = {
+        
+        // Selected booking for detailed view
+        var selectedBooking by remember { mutableStateOf<BookingWithBikeDetails?>(null) }
+        val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        var showBottomSheet by remember { mutableStateOf(false) }
+        
+        // Pull-to-refresh state
+        val pullRefreshState = rememberPullRefreshState(
+            refreshing = isLoading,
+            onRefresh = {
+                ioScope.launch {
+                    bookingViewModel.fetchUserBookings()
+                }
+            }
+        )
+        
+        // Fetch bookings when screen is shown - use background thread
+        LaunchedEffect(Unit) {
             ioScope.launch {
                 bookingViewModel.fetchUserBookings()
             }
         }
-    )
-    
-    // Fetch bookings when screen is shown - use background thread
-    LaunchedEffect(Unit) {
-        ioScope.launch {
-            bookingViewModel.fetchUserBookings()
-        }
-    }
-    
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BookingColors.White)
-    ) {
-        if (showBookingForm) {
-            BookingForm(
-                bikeId = bikeId,
-                onBookingComplete = {
-                    showBookingForm = false
-                    // Refresh bookings list
-                    ioScope.launch {
-                        bookingViewModel.fetchUserBookings()
-                    }
-                },
-                onCancel = {
-                    showBookingForm = false
-                }
-            )
-        } else {
-            // Existing bookings list with pull-to-refresh
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pullRefresh(pullRefreshState)
-            ) {
-                if (isLoading && bookings.isEmpty()) {
-                    // Show loading indicator while initializing
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = BookingColors.DarkGreen)
-                    }
-                } else if (error != null && bookings.isEmpty()) {
-                    // Show error state
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Error",
-                                tint = BookingColors.Error,
-                                modifier = Modifier.size(64.dp)
-                            )
-                            Text(
-                                text = "Error loading bookings",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BookingColors.Error
-                            )
-                            Text(
-                                text = error ?: "Unknown error",
-                                fontSize = 14.sp,
-                                color = BookingColors.DarkGray,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    ioScope.launch {
-                                        bookingViewModel.fetchUserBookings()
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = BookingColors.DarkGreen
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Try Again", color = BookingColors.White)
-                            }
+        
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(BookingColors.White)
+        ) {
+            if (showBookingForm) {
+                BookingForm(
+                    bikeId = bikeId,
+                    onBookingComplete = {
+                        showBookingForm = false
+                        // Refresh bookings list
+                        ioScope.launch {
+                            bookingViewModel.fetchUserBookings()
                         }
+                    },
+                    onCancel = {
+                        showBookingForm = false
                     }
-                } else if (bookings.isEmpty()) {
-                    // Empty state
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                )
+            } else {
+                // Existing bookings list with pull-to-refresh
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pullRefresh(pullRefreshState)
+                ) {
+                    if (isLoading && bookings.isEmpty()) {
+                        // Show loading indicator while initializing
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CalendarToday,
-                                contentDescription = "No Bookings",
-                                tint = BookingColors.DarkGray,
-                                modifier = Modifier.size(64.dp)
-                            )
-                            Text(
-                                text = "No Active Bookings",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BookingColors.DarkGreen
-                            )
-                            Text(
-                                text = "Your booking history will appear here",
-                                fontSize = 14.sp,
-                                color = BookingColors.DarkGray,
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = { showBookingForm = true },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = BookingColors.DarkGreen
-                                ),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text("Book a Bike", color = BookingColors.White)
-                            }
+                            CircularProgressIndicator(color = BookingColors.DarkGreen)
                         }
-                    }
-                } else {
-                    // List of bookings
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Category tabs with counts
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    } else if (error != null && bookings.isEmpty()) {
+                        // Show error state
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            items(BookingCategory.values()) { category ->
-                                val count = when (category) {
-                                    BookingCategory.ALL -> allCount
-                                    BookingCategory.ACTIVE -> activeCount
-                                    BookingCategory.COMPLETED -> completedCount
-                                    BookingCategory.CANCELLED -> cancelledCount
-                                }
-                                CategoryCard(
-                                    category = category,
-                                    isSelected = selectedCategory == category,
-                                    count = count,
-                                    onSelect = { selectedCategory = category }
-                                )
-                            }
-                        }
-
-                        // Add a "Book a Bike" button
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { showBookingForm = true },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = BookingColors.DarkGreen
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Book a Bike")
-                            }
-                        }
-
-                        // Show filtered bookings or empty state
-                        if (filteredBookings.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.padding(16.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FilterList,
-                                        contentDescription = "No matching bookings",
-                                        tint = BookingColors.DarkGray.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(64.dp)
-                                    )
-                                    Text(
-                                        text = "No bookings found",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = BookingColors.DarkGray
-                                    )
-                                    Text(
-                                        text = "Try adjusting your filters or book a new bike",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = BookingColors.DarkGray.copy(alpha = 0.7f),
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        } else {
-                            // Show filtered bookings list
-                            LazyColumn(
-                                modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(12.dp),
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(filteredBookings) { booking ->
-                                    BookingCard(
-                                        booking = booking,
-                                        onClick = {
-                                            selectedBooking = booking
-                                            showBottomSheet = true
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Error",
+                                    tint = BookingColors.Error,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    text = "Error loading bookings",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BookingColors.Error
+                                )
+                                Text(
+                                    text = error ?: "Unknown error",
+                                    fontSize = 14.sp,
+                                    color = BookingColors.DarkGray,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = {
+                                        ioScope.launch {
+                                            bookingViewModel.fetchUserBookings()
                                         }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BookingColors.DarkGreen
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Try Again", color = BookingColors.White)
+                                }
+                            }
+                        }
+                    } else if (bookings.isEmpty()) {
+                        // Empty state
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CalendarToday,
+                                    contentDescription = "No Bookings",
+                                    tint = BookingColors.DarkGray,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Text(
+                                    text = "No Active Bookings",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BookingColors.DarkGreen
+                                )
+                                Text(
+                                    text = "Your booking history will appear here",
+                                    fontSize = 14.sp,
+                                    color = BookingColors.DarkGray,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(
+                                    onClick = { showBookingForm = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BookingColors.DarkGreen
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Book a Bike", color = BookingColors.White)
+                                }
+                            }
+                        }
+                    } else {
+                        // List of bookings
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Category tabs with counts
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(BookingCategory.values()) { category ->
+                                    val count = when (category) {
+                                        BookingCategory.ALL -> allCount
+                                        BookingCategory.ACTIVE -> activeCount
+                                        BookingCategory.COMPLETED -> completedCount
+                                        BookingCategory.CANCELLED -> cancelledCount
+                                    }
+                                    CategoryCard(
+                                        category = category,
+                                        isSelected = selectedCategory == category,
+                                        count = count,
+                                        onSelect = { selectedCategory = category }
                                     )
+                                }
+                            }
+
+                            // Add a "Book a Bike" button
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { showBookingForm = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BookingColors.DarkGreen
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Book a Bike")
+                                }
+                            }
+
+                            // Show filtered bookings or empty state
+                            if (filteredBookings.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.FilterList,
+                                            contentDescription = "No matching bookings",
+                                            tint = BookingColors.DarkGray.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(64.dp)
+                                        )
+                                        Text(
+                                            text = "No bookings found",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = BookingColors.DarkGray
+                                        )
+                                        Text(
+                                            text = "Try adjusting your filters or book a new bike",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = BookingColors.DarkGray.copy(alpha = 0.7f),
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Show filtered bookings list
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(filteredBookings) { booking ->
+                                        BookingCard(
+                                            booking = booking,
+                                            onClick = {
+                                                selectedBooking = booking
+                                                showBottomSheet = true
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -570,375 +577,381 @@ fun BookingForm(
     viewModel: BikeViewModel = viewModel(),
     bookingViewModel: BookingViewModel = viewModel()
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
-    val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
-    
-    // State for bike selection
-    val bikes by viewModel.bikes.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val error by viewModel.error.collectAsState()
-    var selectedBike by remember { mutableStateOf<Bike?>(null) }
-    var isCreatingBooking by remember { mutableStateOf(false) }
-    
-    // Date selection
-    val currentMonth = remember { Calendar.getInstance() }
-    var selectedDate by remember { mutableStateOf<Date?>(null) }
-    
-    // Time selection
-    val timeSlots = remember { listOf(
-        "08:00", "09:00", "10:00", "11:00", "12:00", "13:00",
-        "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"
-    )}
-    var selectedTime by remember { mutableStateOf<String?>(null) }
-    
-    // Duration options
-    val durationOptions = remember { listOf(
-        DurationOption("1 Hour", "$10", 1),
-        DurationOption("2 Hours", "$18", 2),
-        DurationOption("3 Hours", "$24", 3),
-        DurationOption("4 Hours", "$32", 4),
-        DurationOption("6 Hours", "$45", 6),
-        DurationOption("Full Day", "$60", 8)
-    )}
-    var selectedDuration by remember { mutableStateOf<DurationOption?>(null) }
-    
-    // Pre-computed price value
-    var estimatedPrice by remember { mutableStateOf("₱0.00") }
-    
-    // Calculate estimated price in a coroutine when inputs change
-    LaunchedEffect(selectedBike, selectedDuration) {
-        computeScope.launch {
-            val calculatedPrice = if (selectedBike != null && selectedDuration != null) {
-                val hourlyRate = selectedBike!!.priceValue
-                val hours = selectedDuration!!.hours
-                String.format("₱%.2f", hourlyRate * hours)
-            } else {
-                "₱0.00"
-            }
-            
-            withContext(Dispatchers.Main) {
-                estimatedPrice = calculatedPrice
-            }
-        }
-    }
-
-    // Load bikes if needed
-    LaunchedEffect(Unit) {
-        if (bikes.isEmpty()) {
-            ioScope.launch {
-                viewModel.fetchBikesFromFirestore()
-            }
-        }
-    }
-
-    // Load specific bike if bikeId is provided
-    LaunchedEffect(bikeId, bikes) {
-        if (bikeId != null) {
-            // If bikes are already loaded, find the bike
-            val bike = bikes.find { it.id == bikeId }
-            if (bike != null) {
-                selectedBike = bike
-            } else {
-                // Otherwise fetch the specific bike
-                ioScope.launch {
-                    viewModel.getBikeById(bikeId)
-                }
-            }
-        }
-    }
-
-    // Listen for selected bike updates
-    val viewModelSelectedBike by viewModel.selectedBike.collectAsState()
-    LaunchedEffect(viewModelSelectedBike) {
-        viewModelSelectedBike?.let {
-            selectedBike = it
-        }
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Top
+    // Use RestrictedFeature to prevent access if user is not ID verified
+    RestrictedFeature(
+        featureType = "booking",
+        navController = androidx.navigation.compose.rememberNavController()
     ) {
-        // Header
-        Text(
-            text = "Book Your BambiBike",
-            style = MaterialTheme.typography.headlineMedium,
-            color = BookingColors.DarkGreen,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val ioScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+        val computeScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
         
-        // Choose Your BambiBike section
-        Text(
-            text = "Choose Your BambiBike",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        // Display bike selection or loading state
-        if (isLoading && bikes.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = BookingColors.DarkGreen)
+        // State for bike selection
+        val bikes by viewModel.bikes.collectAsState()
+        val isLoading by viewModel.isLoading.collectAsState()
+        val error by viewModel.error.collectAsState()
+        var selectedBike by remember { mutableStateOf<Bike?>(null) }
+        var isCreatingBooking by remember { mutableStateOf(false) }
+        
+        // Date selection
+        val currentMonth = remember { Calendar.getInstance() }
+        var selectedDate by remember { mutableStateOf<Date?>(null) }
+        
+        // Time selection
+        val timeSlots = remember { listOf(
+            "08:00", "09:00", "10:00", "11:00", "12:00", "13:00",
+            "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"
+        )}
+        var selectedTime by remember { mutableStateOf<String?>(null) }
+        
+        // Duration options
+        val durationOptions = remember { listOf(
+            DurationOption("1 Hour", "$10", 1),
+            DurationOption("2 Hours", "$18", 2),
+            DurationOption("3 Hours", "$24", 3),
+            DurationOption("4 Hours", "$32", 4),
+            DurationOption("6 Hours", "$45", 6),
+            DurationOption("Full Day", "$60", 8)
+        )}
+        var selectedDuration by remember { mutableStateOf<DurationOption?>(null) }
+        
+        // Pre-computed price value
+        var estimatedPrice by remember { mutableStateOf("₱0.00") }
+        
+        // Calculate estimated price in a coroutine when inputs change
+        LaunchedEffect(selectedBike, selectedDuration) {
+            computeScope.launch {
+                val calculatedPrice = if (selectedBike != null && selectedDuration != null) {
+                    val hourlyRate = selectedBike!!.priceValue
+                    val hours = selectedDuration!!.hours
+                    String.format("₱%.2f", hourlyRate * hours)
+                } else {
+                    "₱0.00"
+                }
+                
+                withContext(Dispatchers.Main) {
+                    estimatedPrice = calculatedPrice
+                }
             }
-        } else if (error != null && bikes.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Outlined.Error,
-                        contentDescription = "Error",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Text(
-                        text = "Failed to load bikes",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                    Button(
-                        onClick = { 
-                            ioScope.launch {
-                                viewModel.fetchBikesFromFirestore()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen)
-                    ) {
-                        Text("Retry")
+        }
+
+        // Load bikes if needed
+        LaunchedEffect(Unit) {
+            if (bikes.isEmpty()) {
+                ioScope.launch {
+                    viewModel.fetchBikesFromFirestore()
+                }
+            }
+        }
+
+        // Load specific bike if bikeId is provided
+        LaunchedEffect(bikeId, bikes) {
+            if (bikeId != null) {
+                // If bikes are already loaded, find the bike
+                val bike = bikes.find { it.id == bikeId }
+                if (bike != null) {
+                    selectedBike = bike
+                } else {
+                    // Otherwise fetch the specific bike
+                    ioScope.launch {
+                        viewModel.getBikeById(bikeId)
                     }
                 }
             }
-        } else {
-            // Display available bikes
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(250.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(bikes.filter { it.isAvailable }) { bike ->
-                    BikeSelectionCard(
-                        bike = bike,
-                        isSelected = selectedBike?.id == bike.id,
-                        onSelect = { selectedBike = bike }
-                    )
+        }
+
+        // Listen for selected bike updates
+        val viewModelSelectedBike by viewModel.selectedBike.collectAsState()
+        LaunchedEffect(viewModelSelectedBike) {
+            viewModelSelectedBike?.let {
+                selectedBike = it
+            }
+        }
+
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Top
+        ) {
+            // Header
+            Text(
+                text = "Book Your BambiBike",
+                style = MaterialTheme.typography.headlineMedium,
+                color = BookingColors.DarkGreen,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            // Choose Your BambiBike section
+            Text(
+                text = "Choose Your BambiBike",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Display bike selection or loading state
+            if (isLoading && bikes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = BookingColors.DarkGreen)
                 }
-            }
-        }
-
-        // Calendar
-        Text(
-            text = "Select Date",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-        )
-        
-        CustomCalendar(
-            currentMonth = currentMonth,
-            selectedDate = selectedDate,
-            onDateSelected = { selectedDate = it }
-        )
-        
-        // Time Selection
-        Text(
-            text = "Select Time",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-        )
-        
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(timeSlots) { time ->
-                TimeSlot(
-                    time = time,
-                    isSelected = selectedTime == time,
-                    onSelect = { selectedTime = time }
-                )
-            }
-        }
-        
-        // Rental Duration
-        Text(
-            text = "Rental Duration",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
-        )
-        
-        // Duration options in a grid layout
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.height(160.dp)
-        ) {
-            items(durationOptions) { option ->
-                DurationCard(
-                    durationOption = option,
-                    isSelected = selectedDuration == option,
-                    onSelect = { selectedDuration = option }
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // Show estimated price
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            ),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Estimated Total",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Text(
-                    text = estimatedPrice,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = BookingColors.DarkGreen
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Buttons
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            OutlinedButton(
-                onClick = onCancel,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, BookingColors.DarkGreen)
-            ) {
-                Text("Cancel", color = BookingColors.DarkGreen)
-            }
-            
-            Spacer(modifier = Modifier.width(16.dp))
-            
-            Button(
-                onClick = {
-                    if (selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null) {
-                        isCreatingBooking = true
-                        
-                        // Run date processing and booking creation in IO thread
-                        ioScope.launch {
-                            try {
-                                // Parse the selected time
-                                val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                                val parsedTime = timeFormat.parse(selectedTime!!)
-                                
-                                // Combine date and time
-                                val calendar = Calendar.getInstance()
-                                calendar.time = selectedDate!!
-                                
-                                val timeCalendar = Calendar.getInstance()
-                                timeCalendar.time = parsedTime!!
-                                
-                                calendar.set(Calendar.HOUR_OF_DAY, timeCalendar.get(Calendar.HOUR_OF_DAY))
-                                calendar.set(Calendar.MINUTE, timeCalendar.get(Calendar.MINUTE))
-                                
-                                val startDateTime = calendar.time
-                                
-                                // Calculate end time based on duration
-                                val endCalendar = calendar.clone() as Calendar
-                                endCalendar.add(Calendar.HOUR, selectedDuration!!.hours)
-                                val endDateTime = endCalendar.time
-                                
-                                // Get user information
-                                val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
-                                    withContext(Dispatchers.Main) {
-                                        Toast.makeText(context, "You must be logged in to make a booking", Toast.LENGTH_SHORT).show()
-                                        isCreatingBooking = false
-                                    }
-                                    return@launch
+            } else if (error != null && bikes.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Outlined.Error,
+                            contentDescription = "Error",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "Failed to load bikes",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Button(
+                            onClick = { 
+                                ioScope.launch {
+                                    viewModel.fetchBikesFromFirestore()
                                 }
-                                
-                                val userName = FirebaseAuth.getInstance().currentUser?.displayName ?: "User"
-                                
-                                // Create the booking object
-                                val booking = Booking.createHourly(
-                                    bikeId = selectedBike!!.id,
-                                    userId = userId,
-                                    userName = userName,
-                                    startDate = startDateTime,
-                                    endDate = endDateTime,
-                                    pricePerHour = selectedBike!!.priceValue
-                                )
-                                
-                                // Create booking in Firestore (this is already handled in IO dispatcher by BookingViewModel)
-                                bookingViewModel.createBooking(
-                                    booking = booking,
-                                    onSuccess = {
-                                        // Run this callback on main thread directly without suspend call
-                                        Toast.makeText(context, "Booking confirmed!", Toast.LENGTH_SHORT).show()
-                                        isCreatingBooking = false
-                                        onBookingComplete()
-                                    },
-                                    onError = { error ->
-                                        // Run this callback on main thread directly without suspend call
-                                        Toast.makeText(context, "Error: $error", Toast.LENGTH_LONG).show()
-                                        isCreatingBooking = false
-                                    }
-                                )
-                            } catch (e: Exception) {
-                                // Use launch(Dispatchers.Main) instead of withContext since we're already in a coroutine
-                                launch(Dispatchers.Main) {
-                                    Toast.makeText(context, "Error creating booking: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                                    isCreatingBooking = false
-                                }
-                            }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen)
+                        ) {
+                            Text("Retry")
                         }
-                    } else {
-                        Toast.makeText(context, "Please complete all booking details", Toast.LENGTH_SHORT).show()
                     }
-                },
-                modifier = Modifier.weight(1f),
-                enabled = selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null && !isCreatingBooking,
-                colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen),
+                }
+            } else {
+                // Display available bikes
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(250.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(bikes.filter { it.isAvailable }) { bike ->
+                        BikeSelectionCard(
+                            bike = bike,
+                            isSelected = selectedBike?.id == bike.id,
+                            onSelect = { selectedBike = bike }
+                        )
+                    }
+                }
+            }
+
+            // Calendar
+            Text(
+                text = "Select Date",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+            )
+            
+            CustomCalendar(
+                currentMonth = currentMonth,
+                selectedDate = selectedDate,
+                onDateSelected = { selectedDate = it }
+            )
+            
+            // Time Selection
+            Text(
+                text = "Select Time",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+            )
+            
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(timeSlots) { time ->
+                    TimeSlot(
+                        time = time,
+                        isSelected = selectedTime == time,
+                        onSelect = { selectedTime = time }
+                    )
+                }
+            }
+            
+            // Rental Duration
+            Text(
+                text = "Rental Duration",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+            )
+            
+            // Duration options in a grid layout
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.height(160.dp)
+            ) {
+                items(durationOptions) { option ->
+                    DurationCard(
+                        durationOption = option,
+                        isSelected = selectedDuration == option,
+                        onSelect = { selectedDuration = option }
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Show estimated price
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                if (isCreatingBooking) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        strokeWidth = 2.dp
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Estimated Total",
+                        style = MaterialTheme.typography.titleMedium
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Creating...")
-                } else {
-                    Text("Confirm Booking")
+                    Text(
+                        text = estimatedPrice,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = BookingColors.DarkGreen
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, BookingColors.DarkGreen)
+                ) {
+                    Text("Cancel", color = BookingColors.DarkGreen)
+                }
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Button(
+                    onClick = {
+                        if (selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null) {
+                            isCreatingBooking = true
+                            
+                            // Run date processing and booking creation in IO thread
+                            ioScope.launch {
+                                try {
+                                    // Parse the selected time
+                                    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+                                    val parsedTime = timeFormat.parse(selectedTime!!)
+                                    
+                                    // Combine date and time
+                                    val calendar = Calendar.getInstance()
+                                    calendar.time = selectedDate!!
+                                    
+                                    val timeCalendar = Calendar.getInstance()
+                                    timeCalendar.time = parsedTime!!
+                                    
+                                    calendar.set(Calendar.HOUR_OF_DAY, timeCalendar.get(Calendar.HOUR_OF_DAY))
+                                    calendar.set(Calendar.MINUTE, timeCalendar.get(Calendar.MINUTE))
+                                    
+                                    val startDateTime = calendar.time
+                                    
+                                    // Calculate end time based on duration
+                                    val endCalendar = calendar.clone() as Calendar
+                                    endCalendar.add(Calendar.HOUR, selectedDuration!!.hours)
+                                    val endDateTime = endCalendar.time
+                                    
+                                    // Get user information
+                                    val userId = FirebaseAuth.getInstance().currentUser?.uid ?: run {
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "You must be logged in to make a booking", Toast.LENGTH_SHORT).show()
+                                            isCreatingBooking = false
+                                        }
+                                        return@launch
+                                    }
+                                    
+                                    val userName = FirebaseAuth.getInstance().currentUser?.displayName ?: "User"
+                                    
+                                    // Create the booking object
+                                    val booking = Booking.createHourly(
+                                        bikeId = selectedBike!!.id,
+                                        userId = userId,
+                                        userName = userName,
+                                        startDate = startDateTime,
+                                        endDate = endDateTime,
+                                        pricePerHour = selectedBike!!.priceValue
+                                    )
+                                    
+                                    // Create booking in Firestore (this is already handled in IO dispatcher by BookingViewModel)
+                                    bookingViewModel.createBooking(
+                                        booking = booking,
+                                        onSuccess = {
+                                            // Run this callback on main thread directly without suspend call
+                                            Toast.makeText(context, "Booking confirmed!", Toast.LENGTH_SHORT).show()
+                                            isCreatingBooking = false
+                                            onBookingComplete()
+                                        },
+                                        onError = { error ->
+                                            // Run this callback on main thread directly without suspend call
+                                            Toast.makeText(context, "Error: $error", Toast.LENGTH_LONG).show()
+                                            isCreatingBooking = false
+                                        }
+                                    )
+                                } catch (e: Exception) {
+                                    // Use launch(Dispatchers.Main) instead of withContext since we're already in a coroutine
+                                    launch(Dispatchers.Main) {
+                                        Toast.makeText(context, "Error creating booking: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        isCreatingBooking = false
+                                    }
+                                }
+                            }
+                        } else {
+                            Toast.makeText(context, "Please complete all booking details", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = selectedBike != null && selectedDate != null && selectedTime != null && selectedDuration != null && !isCreatingBooking,
+                    colors = ButtonDefaults.buttonColors(containerColor = BookingColors.DarkGreen),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (isCreatingBooking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Creating...")
+                    } else {
+                        Text("Confirm Booking")
+                    }
                 }
             }
         }

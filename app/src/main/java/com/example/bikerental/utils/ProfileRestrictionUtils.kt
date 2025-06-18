@@ -27,14 +27,20 @@ object ProfileRestrictionUtils {
         
         // Different features may have different requirements
         return when (featureType) {
-            // Booking requires email verification and profile completion
-            "booking" -> !isEmailVerified(userData) || !isProfileComplete(userData)
+            // Booking requires email verification, profile completion, and ID verification
+            "booking" -> !isEmailVerified(userData) || !isProfileComplete(userData) || !isIdVerified(userData)
             
-            // Payment features require email verification
-            "payment" -> !isEmailVerified(userData) || !isProfileComplete(userData)
+            // Payment features require email verification, profile completion, and ID verification
+            "payment" -> !isEmailVerified(userData) || !isProfileComplete(userData) || !isIdVerified(userData)
             
-            // Rental requires email verification
-            "rental" -> !isEmailVerified(userData)
+            // Rental requires email verification and ID verification
+            "rental" -> !isEmailVerified(userData) || !isIdVerified(userData)
+            
+            // Start ride requires ID verification
+            "start_ride" -> !isIdVerified(userData)
+            
+            // Writing reviews requires ID verification
+            "write_review" -> !isIdVerified(userData)
             
             // Chat requires phone verification
             "chat" -> !isPhoneVerified(userData)
@@ -67,6 +73,8 @@ object ProfileRestrictionUtils {
                     "Your email address needs to be verified before you can book a bike. This helps us ensure the security of our rental services."
                 else if (!isProfileComplete(userData)) 
                     "Please complete your profile information to book a bike. We need your details to process your booking."
+                else if (!isIdVerified(userData))
+                    "Your ID verification is required before you can book a bike. This is for your security and to prevent fraud."
                 else "Feature unavailable"
             }
             "payment" -> {
@@ -74,13 +82,27 @@ object ProfileRestrictionUtils {
                     "Email verification is required to access payment features. This security measure protects your payment information."
                 else if (!isProfileComplete(userData)) 
                     "Your profile information is incomplete. Please provide all required details to use payment features."
+                else if (!isIdVerified(userData))
+                    "ID verification is required to access payment features. This helps us comply with financial regulations."
                 else "Feature unavailable"
             }
             "rental" -> {
                 if (!isEmailVerified(userData)) 
                     "For security reasons, you need to verify your email address before renting a bike. This helps us confirm your identity."
+                else if (!isIdVerified(userData))
+                    "ID verification is required to rent a bike. This is for security and insurance purposes."
                 else 
                     "Complete your profile information to rent a bike. We need these details to process your rental agreement."
+            }
+            "start_ride" -> {
+                if (!isIdVerified(userData))
+                    "ID verification is required before you can start a ride. This is a security measure to protect our bikes and customers."
+                else "Feature unavailable"
+            }
+            "write_review" -> {
+                if (!isIdVerified(userData))
+                    "ID verification is required before you can write reviews. This helps ensure authentic and reliable feedback."
+                else "Feature unavailable"
             }
             "account_settings" -> 
                 "Please verify your email address to access account settings. This ensures only you can make changes to your account."
@@ -124,6 +146,28 @@ object ProfileRestrictionUtils {
      */
     fun isEmailVerified(userData: Map<String, Any>?): Boolean {
         return userData?.get("isEmailVerified") as? Boolean ?: false
+    }
+
+    /**
+     * Check if the user's ID is verified
+     */
+    fun isIdVerified(userData: Map<String, Any>?): Boolean {
+        return userData?.get("isIdVerified") as? Boolean ?: false
+    }
+
+    /**
+     * Check if the user has submitted ID for verification
+     */
+    fun hasSubmittedId(userData: Map<String, Any>?): Boolean {
+        val status = userData?.get("idVerificationStatus")?.toString() ?: "not_submitted"
+        return status != "not_submitted"
+    }
+
+    /**
+     * Get the current ID verification status
+     */
+    fun getIdVerificationStatus(userData: Map<String, Any>?): String {
+        return userData?.get("idVerificationStatus")?.toString() ?: "not_submitted"
     }
     
     /**
@@ -179,6 +223,9 @@ object ProfileRestrictionUtils {
                 val isProfileComplete = userData?.let { isProfileComplete(it) } ?: false
                 val isPhoneVerified = userData?.let { isPhoneVerified(it) } ?: false
                 val isEmailVerified = userData?.let { isEmailVerified(it) } ?: false
+                val isIdVerified = userData?.let { isIdVerified(it) } ?: false
+                val idVerificationStatus = userData?.let { getIdVerificationStatus(it) } ?: "not_submitted"
+                val hasSubmittedId = userData?.let { hasSubmittedId(it) } ?: false
             }
         }
     }

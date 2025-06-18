@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import com.example.bikerental.components.RestrictedFeature
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -106,172 +107,178 @@ object PaymentColors {
 fun PaymentTab(
     viewModel: PaymentViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
-    val userPayments by viewModel.userPayments.collectAsStateWithLifecycle()
-    val paymentSettings by viewModel.paymentSettings.collectAsStateWithLifecycle()
-    
-    // New state for unpaid bookings
-    val unpaidBookings by viewModel.unpaidBookings.collectAsStateWithLifecycle()
-    val isLoadingUnpaidBookings by viewModel.isLoadingUnpaidBookings.collectAsStateWithLifecycle()
-    
-    // State for selected unpaid booking
-    val selectedUnpaidBooking by viewModel.selectedUnpaidBooking.collectAsStateWithLifecycle()
-    
-    // Get current user info for personalization
-    val currentUser = remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
-    val userName = remember { 
-        currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
-    }
-    
-    // Load user payments and unpaid bookings on first composition
-    LaunchedEffect(Unit) {
-        viewModel.loadUserPayments()
-        viewModel.loadUnpaidBookings()
-    }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(PaymentColors.White)
-            .verticalScroll(rememberScrollState())
-            .padding(8.dp)
+    // Use RestrictedFeature to prevent access if user is not ID verified
+    RestrictedFeature(
+        featureType = "payment",
+        navController = androidx.navigation.compose.rememberNavController()
     ) {
-        // Add personalized header
-        if (currentStep == 1 && selectedUnpaidBooking == null) {
-            PersonalizedHeader(
-                userName = userName,
-                unpaidBookingsCount = unpaidBookings.size,
-                hasPaymentHistory = userPayments.isNotEmpty()
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+        val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+        val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()
+        val userPayments by viewModel.userPayments.collectAsStateWithLifecycle()
+        val paymentSettings by viewModel.paymentSettings.collectAsStateWithLifecycle()
+        
+        // New state for unpaid bookings
+        val unpaidBookings by viewModel.unpaidBookings.collectAsStateWithLifecycle()
+        val isLoadingUnpaidBookings by viewModel.isLoadingUnpaidBookings.collectAsStateWithLifecycle()
+        
+        // State for selected unpaid booking
+        val selectedUnpaidBooking by viewModel.selectedUnpaidBooking.collectAsStateWithLifecycle()
+        
+        // Get current user info for personalization
+        val currentUser = remember { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }
+        val userName = remember { 
+            currentUser?.displayName?.split(" ")?.firstOrNull() ?: "there"
         }
         
-        val currentUiState = uiState
-        when (currentUiState) {
-            is PaymentUiState.Success -> {
-                PaymentSuccessScreen(
-                    onMakeAnotherPayment = { viewModel.resetPaymentFlow() },
-                    wasBookingPayment = selectedUnpaidBooking != null
+        // Load user payments and unpaid bookings on first composition
+        LaunchedEffect(Unit) {
+            viewModel.loadUserPayments()
+            viewModel.loadUnpaidBookings()
+        }
+        
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(PaymentColors.White)
+                .verticalScroll(rememberScrollState())
+                .padding(8.dp)
+        ) {
+            // Add personalized header
+            if (currentStep == 1 && selectedUnpaidBooking == null) {
+                PersonalizedHeader(
+                    userName = userName,
+                    unpaidBookingsCount = unpaidBookings.size,
+                    hasPaymentHistory = userPayments.isNotEmpty()
                 )
+                Spacer(modifier = Modifier.height(16.dp))
             }
-            is PaymentUiState.Loading -> {
-                PaymentProcessingScreen()
-            }
-            is PaymentUiState.Error -> {
-                val errorMessage = currentUiState.message
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = PaymentColors.LightGray),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, PaymentColors.Error)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            
+            val currentUiState = uiState
+            when (currentUiState) {
+                is PaymentUiState.Success -> {
+                    PaymentSuccessScreen(
+                        onMakeAnotherPayment = { viewModel.resetPaymentFlow() },
+                        wasBookingPayment = selectedUnpaidBooking != null
+                    )
+                }
+                is PaymentUiState.Loading -> {
+                    PaymentProcessingScreen()
+                }
+                is PaymentUiState.Error -> {
+                    val errorMessage = currentUiState.message
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = PaymentColors.LightGray),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, PaymentColors.Error)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = PaymentColors.Error,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = errorMessage,
-                            color = PaymentColors.Error,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-            else -> {
-                // Show unpaid bookings section first if not in payment flow
-                if (currentStep == 1) {
-                    UnpaidBookingsSection(
-                        unpaidBookings = unpaidBookings,
-                        isLoading = isLoadingUnpaidBookings,
-                        userName = userName,
-                        onPayBooking = { booking ->
-                            // Pre-fill payment details with booking information
-                            viewModel.selectUnpaidBookingForPayment(booking)
-                            viewModel.setCurrentStep(2)
-                        }
-                    )
-                    
-                    // Show "No unpaid bookings" message if list is empty and not loading
-                    if (unpaidBookings.isEmpty() && !isLoadingUnpaidBookings) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        NoUnpaidBookingsMessage(userName = userName)
-                    }
-                }
-                
-                when (currentStep) {
-                    1 -> {
-                        // Only show payment method selection if there are unpaid bookings or if coming from booking selection
-                        if (selectedUnpaidBooking != null) {
-                            PaymentMethodSelection(
-                                onGCashSelected = { viewModel.setCurrentStep(2) },
-                                onCashSelected = { viewModel.setCurrentStep(4) },
-                                selectedBooking = selectedUnpaidBooking,
-                                onBackClick = { viewModel.clearSelectedUnpaidBooking() },
-                                paymentSettings = paymentSettings
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = PaymentColors.Error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = errorMessage,
+                                color = PaymentColors.Error,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
-                    2 -> GCashQRCodeScreen(
-                        onBackClick = { 
-                            viewModel.clearSelectedUnpaidBooking()
-                            viewModel.setCurrentStep(1) 
-                        },
-                        onPaymentMade = { viewModel.setCurrentStep(3) },
-                        paymentSettings = paymentSettings
-                    )
-                    3 -> GCashConfirmationScreen(
-                        onBackClick = { viewModel.setCurrentStep(2) },
-                        onConfirmPayment = { mobileNumber, referenceNumber, screenshotUri ->
-                            val booking = selectedUnpaidBooking // Create local variable to fix smart cast
-                            val (amount, bikeType, duration) = if (booking != null) {
-                                Triple(
-                                    booking.totalPrice,
-                                    booking.bikeType,
-                                    booking.getFormattedDuration()
-                                )
-                            } else {
-                                Triple(150.0, "Mountain Bike", "2 hours")
+                }
+                else -> {
+                    // Show unpaid bookings section first if not in payment flow
+                    if (currentStep == 1) {
+                        UnpaidBookingsSection(
+                            unpaidBookings = unpaidBookings,
+                            isLoading = isLoadingUnpaidBookings,
+                            userName = userName,
+                            onPayBooking = { booking ->
+                                // Pre-fill payment details with booking information
+                                viewModel.selectUnpaidBookingForPayment(booking)
+                                viewModel.setCurrentStep(2)
                             }
-                            viewModel.submitPayment(
-                                mobileNumber = mobileNumber,
-                                referenceNumber = referenceNumber,
-                                amount = amount,
-                                bikeType = bikeType,
-                                duration = duration,
-                                screenshotUri = screenshotUri
-                            )
-                        },
-                        viewModel = viewModel,
-                        paymentSettings = paymentSettings,
-                        selectedBooking = selectedUnpaidBooking
-                    )
-                    4 -> CashPaymentScreen(
-                        onBackClick = { 
-                            viewModel.clearSelectedUnpaidBooking()
-                            viewModel.setCurrentStep(1) 
-                        },
-                        onConfirmCash = { 
-                            viewModel.resetPaymentFlow()
-                        },
-                        selectedBooking = selectedUnpaidBooking
-                    )
+                        )
+                        
+                        // Show "No unpaid bookings" message if list is empty and not loading
+                        if (unpaidBookings.isEmpty() && !isLoadingUnpaidBookings) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            NoUnpaidBookingsMessage(userName = userName)
+                        }
+                    }
+                    
+                    when (currentStep) {
+                        1 -> {
+                            // Only show payment method selection if there are unpaid bookings or if coming from booking selection
+                            if (selectedUnpaidBooking != null) {
+                                PaymentMethodSelection(
+                                    onGCashSelected = { viewModel.setCurrentStep(2) },
+                                    onCashSelected = { viewModel.setCurrentStep(4) },
+                                    selectedBooking = selectedUnpaidBooking,
+                                    onBackClick = { viewModel.clearSelectedUnpaidBooking() },
+                                    paymentSettings = paymentSettings
+                                )
+                            }
+                        }
+                        2 -> GCashQRCodeScreen(
+                            onBackClick = { 
+                                viewModel.clearSelectedUnpaidBooking()
+                                viewModel.setCurrentStep(1) 
+                            },
+                            onPaymentMade = { viewModel.setCurrentStep(3) },
+                            paymentSettings = paymentSettings
+                        )
+                        3 -> GCashConfirmationScreen(
+                            onBackClick = { viewModel.setCurrentStep(2) },
+                            onConfirmPayment = { mobileNumber, referenceNumber, screenshotUri ->
+                                val booking = selectedUnpaidBooking // Create local variable to fix smart cast
+                                val (amount, bikeType, duration) = if (booking != null) {
+                                    Triple(
+                                        booking.totalPrice,
+                                        booking.bikeType,
+                                        booking.getFormattedDuration()
+                                    )
+                                } else {
+                                    Triple(150.0, "Mountain Bike", "2 hours")
+                                }
+                                viewModel.submitPayment(
+                                    mobileNumber = mobileNumber,
+                                    referenceNumber = referenceNumber,
+                                    amount = amount,
+                                    bikeType = bikeType,
+                                    duration = duration,
+                                    screenshotUri = screenshotUri
+                                )
+                            },
+                            viewModel = viewModel,
+                            paymentSettings = paymentSettings,
+                            selectedBooking = selectedUnpaidBooking
+                        )
+                        4 -> CashPaymentScreen(
+                            onBackClick = { 
+                                viewModel.clearSelectedUnpaidBooking()
+                                viewModel.setCurrentStep(1) 
+                            },
+                            onConfirmCash = { 
+                                viewModel.resetPaymentFlow()
+                            },
+                            selectedBooking = selectedUnpaidBooking
+                        )
+                    }
                 }
             }
-        }
-        
-        // Show payment history if not in payment flow and there are no selected bookings
-        if (currentStep == 1 && selectedUnpaidBooking == null && currentUiState !is PaymentUiState.Success && currentUiState !is PaymentUiState.Loading) {
-            Spacer(modifier = Modifier.height(16.dp))
-            PaymentHistory(payments = userPayments, userName = userName)
+            
+            // Show payment history if not in payment flow and there are no selected bookings
+            if (currentStep == 1 && selectedUnpaidBooking == null && currentUiState !is PaymentUiState.Success && currentUiState !is PaymentUiState.Loading) {
+                Spacer(modifier = Modifier.height(16.dp))
+                PaymentHistory(payments = userPayments, userName = userName)
+            }
         }
     }
 }
