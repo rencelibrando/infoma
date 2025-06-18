@@ -50,9 +50,22 @@ class LocationTrackingService : Service() {
     private var currentSpeed: Float = 0f // in km/h
     private var rideStartTime: Long = 0L
     
+    // Add geofence-related fields to the class below other constants
+    private val NOTIFICATION_ID = 12345
+    private val GEOFENCE_NOTIFICATION_ID = 12346
+    
     companion object {
-        const val CHANNEL_ID = "location_tracking_channel"
-        const val NOTIFICATION_ID = 1001
+        const val CHANNEL_ID = "LocationTracking"
+        const val CHANNEL_NAME = "Location Tracking"
+        
+        // Geofence notification constants
+        const val GEOFENCE_CHANNEL_ID = "GeofenceBoundary"
+        const val GEOFENCE_CHANNEL_NAME = "Boundary Alerts"
+        
+        // Tracking state
+        private var serviceRunning = false
+        private var currentRideId: String? = null
+        
         const val ACTION_START_TRACKING = "START_TRACKING"
         const val ACTION_STOP_TRACKING = "STOP_TRACKING"
         const val EXTRA_RIDE_ID = "ride_id"
@@ -62,6 +75,7 @@ class LocationTrackingService : Service() {
         const val FASTEST_INTERVAL = 1000L // 1 second minimum
         const val DISPLACEMENT_THRESHOLD = 2f // 2 meters minimum displacement
         
+        @JvmStatic
         fun startLocationTracking(context: Context, rideId: String) {
             val intent = Intent(context, LocationTrackingService::class.java).apply {
                 action = ACTION_START_TRACKING
@@ -75,6 +89,7 @@ class LocationTrackingService : Service() {
             }
         }
         
+        @JvmStatic
         fun stopLocationTracking(context: Context) {
             val intent = Intent(context, LocationTrackingService::class.java).apply {
                 action = ACTION_STOP_TRACKING
@@ -82,6 +97,10 @@ class LocationTrackingService : Service() {
             context.startService(intent)
         }
     }
+    
+    // Add new field to track geofence warning state
+    private var insideBoundaryWarningZone = false
+    private var lastBoundaryWarningTime = 0L
     
     override fun onCreate() {
         super.onCreate()
@@ -299,6 +318,12 @@ class LocationTrackingService : Service() {
         val speed = currentSpeed.toInt()
         val distanceKm = totalDistance / 1000.0
         updateNotification("Speed: ${speed} km/h • Distance: ${String.format("%.2f", distanceKm)} km")
+        
+        // Create LatLng object for geofence checking
+        val latLng = com.google.android.gms.maps.model.LatLng(location.latitude, location.longitude)
+        
+        // Check geofence boundary
+        checkGeofenceBoundary(latLng)
     }
     
     private fun sendLocationUpdate(location: Location, rideId: String, isActive: Boolean) {
@@ -501,16 +526,13 @@ class LocationTrackingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Location Tracking",
+                CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Tracks your location during active bike rides"
+                description = "Location tracking for bike rides"
                 setShowBadge(false)
-                enableLights(false)
-                enableVibration(false)
             }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
     }
@@ -525,13 +547,12 @@ class LocationTrackingService : Service() {
         )
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Bike Ride Active")
+            .setContentTitle("Ride in Progress")
             .setContentText(contentText)
-            .setSmallIcon(R.drawable.ic_location)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
     
@@ -542,7 +563,7 @@ class LocationTrackingService : Service() {
         }
         
         val notification = createNotification(contentText)
-        val notificationManager = getSystemService(NotificationManager::class.java)
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
     
@@ -555,5 +576,71 @@ class LocationTrackingService : Service() {
         }
         
         LogManager.logInfo("LocationTrackingService", "Service destroyed")
+    }
+    
+    // Add this new method to monitor geofence boundary
+    private fun checkGeofenceBoundary(location: com.google.android.gms.maps.model.LatLng) {
+        try {
+            val locationManager = com.example.bikerental.utils.LocationManager.getInstance(this)
+            
+            // If not in Intramuros at all, don't process (handled by ride start checks)
+            if (!locationManager.isWithinIntramuros(location)) {
+                return
+            }
+            
+            // Check if near the boundary (but still inside)
+            val isNearBoundary = locationManager.isNearIntramurosExit(location)
+            
+            // If state changed to near boundary or it's been more than 60 seconds since last warning
+            val currentTime = System.currentTimeMillis()
+            if (isNearBoundary && 
+                (!insideBoundaryWarningZone || currentTime - lastBoundaryWarningTime > 60000)) {
+                
+                // Update warning state
+                insideBoundaryWarningZone = true
+                lastBoundaryWarningTime = currentTime
+                
+                // Show boundary warning notification
+                showBoundaryWarningNotification()
+            } else if (!isNearBoundary) {
+                // Reset warning state when safely inside
+                insideBoundaryWarningZone = false
+            }
+        } catch (e: Exception) {
+            LogManager.logError("LocationTrackingService", "Error checking geofence boundary: ${e.message}")
+        }
+    }
+    
+    // Add this to show a boundary warning notification
+    private fun showBoundaryWarningNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        // Create the notification channel for boundary warnings (Android 8.0+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                GEOFENCE_CHANNEL_ID,
+                GEOFENCE_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts when approaching service area boundary"
+                enableVibration(true)
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, null)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+        
+        // Build the notification
+        val notification = NotificationCompat.Builder(this, GEOFENCE_CHANNEL_ID)
+            .setSmallIcon(androidx.core.R.drawable.notification_icon_background)
+            .setContentTitle("⚠️ Approaching Boundary")
+            .setContentText("You're near the edge of Intramuros. Please turn around to stay in the service area.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 250, 250, 250))
+            .build()
+        
+        // Show the notification
+        notificationManager.notify(GEOFENCE_NOTIFICATION_ID, notification)
     }
 } 

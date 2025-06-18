@@ -690,6 +690,11 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
         )
     }
 
+    // Add these variables inside the MapTab Composable function
+    var isOutsideGeofence by remember { mutableStateOf(false) }
+    var showGeofenceError by remember { mutableStateOf(false) }
+    var showGeofenceBoundary by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
@@ -873,6 +878,39 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                         }
                     }
                 }
+            }
+
+            // Add the Intramuros geofence visualization
+            val intramurosGeofence = remember {
+                listOf(
+                    LatLng(14.5867, 120.9754), // Northwest corner
+                    LatLng(14.5875, 120.9790), // Northeast corner
+                    LatLng(14.5893, 120.9815), // East point
+                    LatLng(14.5866, 120.9846), // Southeast corner
+                    LatLng(14.5826, 120.9832), // South point
+                    LatLng(14.5813, 120.9788), // Southwest corner
+                    LatLng(14.5826, 120.9758), // West point
+                    LatLng(14.5867, 120.9754)  // Back to start to close the polygon
+                )
+            }
+
+            // Display the Intramuros geofence polygon only when toggle is on
+            if (showGeofenceBoundary) {
+                Polygon(
+                    points = intramurosGeofence,
+                    fillColor = Color(0x336200EE), // Semi-transparent purple fill
+                    strokeColor = Color(0xFF6200EE), // Purple outline
+                    strokeWidth = 5f,
+                    geodesic = true
+                )
+                
+                // Add a "Service Area" marker at the center of Intramuros
+                Marker(
+                    state = MarkerState(position = LatLng(14.5850, 120.9790)),
+                    title = "Bike Service Area",
+                    snippet = "Intramuros, Manila",
+                    alpha = 0.7f
+                )
             }
         }
 
@@ -1209,7 +1247,26 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                     Button(
                         onClick = { 
                             if (permissionsState.allPermissionsGranted) {
-                                showStartRideDialog = true
+                                // Check if user is within Intramuros before showing the StartRideDialog
+                                CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+                                    try {
+                                        val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+                                        val locationManager = com.example.bikerental.utils.LocationManager.getInstance(context)
+                                        
+                                        if (locationManager.isWithinIntramuros(location)) {
+                                            isOutsideGeofence = false
+                                            showStartRideDialog = true
+                                        } else {
+                                            isOutsideGeofence = true
+                                            showGeofenceError = true
+                                            Log.w("MapTab", "User outside Intramuros geofence: $location")
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("MapTab", "Error checking location for geofence", e)
+                                        // If we can't determine location, allow starting the ride but let BikeViewModel do the check
+                                        showStartRideDialog = true
+                                    }
+                                }
                             } else {
                                 showPermissionDialog = true
                             }
@@ -1410,6 +1467,28 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                 }
             }
         )
+
+        // Service Area Toggle
+        FloatingActionButton(
+            onClick = { showGeofenceBoundary = !showGeofenceBoundary },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            containerColor = if (showGeofenceBoundary) 
+                MaterialTheme.colorScheme.primary 
+            else 
+                MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (showGeofenceBoundary) 
+                Color.White 
+            else 
+                MaterialTheme.colorScheme.primary
+        ) {
+            Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = "Toggle Service Area",
+                modifier = Modifier.size(24.dp)
+            )
+        }
     }
     
     // Permission Dialog
@@ -1556,6 +1635,48 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
             bikeViewModel.dismissRideRating()
         }
     )
+
+    // Add the Geofence Error Dialog
+    if (showGeofenceError) {
+        AlertDialog(
+            onDismissRequest = { showGeofenceError = false },
+            title = { 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Location Restriction") 
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "You must be inside Intramuros, Manila to start a ride.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Please move to the designated area to use our bikes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showGeofenceError = false },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 }
 
 // These functions are now part of the RideProgressDialog component

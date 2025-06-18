@@ -827,6 +827,17 @@ class BikeViewModel : ViewModel() {
                 
                 Log.d(TAG, "User authenticated: ${currentUser.uid}")
                 
+                // GEOFENCE CHECK: Verify user is within Intramuros
+                val locationManager = com.example.bikerental.utils.LocationManager.getInstance(
+                    com.example.bikerental.BikeRentalApplication.instance
+                )
+                
+                if (!locationManager.isWithinIntramuros(userLocation)) {
+                    Log.w(TAG, "Geofence restriction: User outside Intramuros area")
+                    _unlockError.value = "You must be inside Intramuros, Manila to start a ride."
+                    return@launch
+                }
+                
                 // SAFETY CHECK: Ensure no active ride exists before starting a new one
                 val currentActiveRide = _activeRide.value
                 if (currentActiveRide != null) {
@@ -1253,6 +1264,9 @@ class BikeViewModel : ViewModel() {
             }
             UnlockStatus.TRANSACTION_FAILED -> {
                 _unlockError.value = "Failed to unlock bike due to a technical issue. Please try again."
+            }
+            UnlockStatus.GEOFENCE_ERROR -> {
+                _unlockError.value = "You must be inside Intramuros, Manila to start a ride."
             }
             UnlockStatus.UNKNOWN_ERROR -> {
                 _unlockError.value = result.errorMessage ?: "An unknown error occurred."
@@ -2437,5 +2451,6 @@ enum class UnlockStatus {
     BIKE_NOT_LOCKED,
     USER_HAS_ACTIVE_RIDE,
     TRANSACTION_FAILED,
+    GEOFENCE_ERROR, // New status for geofence restriction
     UNKNOWN_ERROR
 } 
