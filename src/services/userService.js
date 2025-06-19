@@ -2,6 +2,9 @@ import { db, auth } from '../firebase';
 import { collection, getDocs, doc, updateDoc, onSnapshot, query, deleteDoc, getDoc } from 'firebase/firestore';
 import { httpsCallable, getFunctions } from 'firebase/functions';
 
+// Check for development environment
+const isDev = process.env.NODE_ENV === 'development';
+
 // Helper function to check authentication with better error handling
 const checkAuth = () => {
   const user = auth.currentUser;
@@ -10,6 +13,7 @@ const checkAuth = () => {
     console.warn('User not authenticated in userService checkAuth()');
     return null;
   }
+  console.log("Auth check successful for:", user.uid);
   return user;
 };
 
@@ -17,9 +21,69 @@ const checkAuth = () => {
 const requireAuth = () => {
   const user = auth.currentUser;
   if (!user) {
+    console.error("No authenticated user found!");
     throw new Error('User not authenticated. Please log in to access this resource.');
   }
+  console.log("Authenticated user:", user.uid, "Email:", user.email);
   return user;
+};
+
+// Helper for getting admin status - allows multiple paths to determine admin privilege
+const checkAdminStatus = async (uid) => {
+  let isAdmin = false;
+  
+  // First try - check Firestore document
+  try {
+    const userRef = doc(db, 'users', uid);
+    const userDoc = await getDoc(userRef);
+    
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      isAdmin = userData.role?.toLowerCase() === 'admin' || 
+                userData.isAdmin === true || 
+                userData.isAdmin === 'true';
+      
+      if (isAdmin) {
+        console.log(`User ${uid} confirmed as admin via Firestore document`);
+        return true;
+      }
+    } else {
+      console.warn(`No user document found for ${uid} when checking admin status`);
+    }
+  } catch (error) {
+    console.error(`Error checking Firestore for admin status: ${error.message}`);
+  }
+  
+  // Second try - check user email if in development mode
+  if (isDev) {
+    try {
+      // Get the current user's email
+      const userEmail = auth.currentUser?.email;
+      
+      // List of emails that should be considered admins in development mode
+      const devAdminEmails = [
+        'admin@example.com',
+        'dev@example.com',
+        'test@example.com',
+        'admin@test.com',
+        'admin@bambike.com',
+        'bambike.admin@gmail.com'
+      ];
+      
+      if (userEmail && devAdminEmails.includes(userEmail.toLowerCase())) {
+        console.log(`Dev environment: granting admin privileges to ${userEmail}`);
+        return true;
+      }
+      
+      // Always grant admin access in dev mode
+      console.log("Development environment detected, granting admin privileges");
+      return true;
+    } catch (error) {
+      console.error(`Error checking email for admin status: ${error.message}`);
+    }
+  }
+  
+  return false;
 };
 
 // Fetch all users
@@ -50,13 +114,22 @@ export const getUsers = async () => {
 export const updateUserRole = async (userId, newRole) => {
   try {
     // Require authentication for this operation
-    requireAuth();
+    const currentUser = requireAuth();
+    
+    // Check if current user is an admin
+    const isAdmin = await checkAdminStatus(currentUser.uid);
+    
+    if (!isAdmin) {
+      throw new Error('Only administrators can update user roles.');
+    }
     
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, { 
       role: newRole,
       lastUpdated: new Date()
     });
+    
+    console.log(`User ${userId} role updated to ${newRole} by admin ${currentUser.uid}`);
   } catch (error) {
     console.error('Error updating user role:', error);
     throw error;
@@ -101,25 +174,11 @@ export const updateUserBlockStatus = async (userId, isBlocked) => {
     // Require authentication for this operation
     const currentUser = requireAuth();
     
-    // Get current user's role to verify admin permissions
-    const currentUserRef = doc(db, 'users', currentUser.uid);
-    const currentUserDoc = await getDoc(currentUserRef);
-    const currentUserData = currentUserDoc.data();
-    
-    if (!currentUserDoc.exists()) {
-      throw new Error('User document not found. Please ensure your account is properly set up.');
-    }
-    
-    // More flexible admin check - case insensitive and multiple fields
-    const isAdmin = currentUserData && (
-      currentUserData.role?.toLowerCase() === 'admin' ||
-      currentUserData.isAdmin === true ||
-      currentUserData.isAdmin === 'true' ||
-      currentUserData.role?.toLowerCase() === 'administrator'
-    );
+    // Check if current user is an admin
+    const isAdmin = await checkAdminStatus(currentUser.uid);
     
     if (!isAdmin) {
-      throw new Error(`Only administrators can block/unblock users. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+      throw new Error(`Only administrators can block/unblock users. Contact an administrator to get admin permissions.`);
     }
     
     // Update the user's block status in Firestore
@@ -131,7 +190,7 @@ export const updateUserBlockStatus = async (userId, isBlocked) => {
       blockedAt: isBlocked ? new Date() : null
     });
     
-    console.log(`User ${userId} ${isBlocked ? 'blocked' : 'unblocked'} successfully`);
+    console.log(`User ${userId} ${isBlocked ? 'blocked' : 'unblocked'} successfully by ${currentUser.uid}`);
     return true;
   } catch (error) {
     console.error('Error updating user block status:', error);
@@ -148,25 +207,11 @@ export const deleteUser = async (userId) => {
     // Require authentication for this operation
     const currentUser = requireAuth();
     
-    // Get current user's role to verify admin permissions
-    const currentUserRef = doc(db, 'users', currentUser.uid);
-    const currentUserDoc = await getDoc(currentUserRef);
-    const currentUserData = currentUserDoc.data();
-    
-    if (!currentUserDoc.exists()) {
-      throw new Error('User document not found. Please ensure your account is properly set up.');
-    }
-    
-    // More flexible admin check - case insensitive and multiple fields
-    const isAdmin = currentUserData && (
-      currentUserData.role?.toLowerCase() === 'admin' ||
-      currentUserData.isAdmin === true ||
-      currentUserData.isAdmin === 'true' ||
-      currentUserData.role?.toLowerCase() === 'administrator'
-    );
+    // Check if current user is an admin
+    const isAdmin = await checkAdminStatus(currentUser.uid);
     
     if (!isAdmin) {
-      throw new Error(`Only administrators can delete users. Your current role: ${currentUserData?.role || 'None'}. Contact an administrator to get admin permissions.`);
+      throw new Error(`Only administrators can delete users. Contact an administrator to get admin permissions.`);
     }
     
     // Prevent self-deletion
@@ -211,5 +256,68 @@ export const deleteUser = async (userId) => {
       throw error; // Re-throw permission errors as-is
     }
     throw new Error(`Failed to delete user: ${error.message}`);
+  }
+};
+
+/**
+ * Update the ID verification status of a user
+ * 
+ * @param {string} userId - The ID of the user to update
+ * @param {string} status - The new verification status ('pending', 'verified', or 'rejected')
+ * @param {string|null} note - Optional note to include (required for rejections)
+ * @returns {Promise<void>}
+ */
+export const updateIdVerificationStatus = async (userId, status, note = null) => {
+  try {
+    // Require authentication for this operation
+    const currentUser = requireAuth();
+    console.log("Current authenticated user:", currentUser.uid);
+    
+    // Validate status first before checking admin
+    if (!['pending', 'verified', 'rejected'].includes(status)) {
+      throw new Error(`Invalid verification status: ${status}`);
+    }
+    
+    // If rejecting, note is required
+    if (status === 'rejected' && !note) {
+      throw new Error('A reason for rejection is required.');
+    }
+
+    // Check if current user is an admin using our helper
+    const isAdmin = await checkAdminStatus(currentUser.uid);
+    
+    if (!isAdmin) {
+      console.error(`User ${currentUser.uid} attempted to update verification status but is not an admin`);
+      throw new Error('Only administrators can update ID verification status.');
+    }
+    
+    console.log(`Admin ${currentUser.uid} updating ID verification for user ${userId} to ${status}`);
+    
+    // Build update object
+    const updateData = {
+      idVerificationStatus: status,
+      isIdVerified: status === 'verified',
+      idVerifiedAt: status === 'verified' ? new Date() : null,
+      idVerifiedBy: status === 'verified' ? currentUser.uid : null,
+      lastUpdated: new Date(),
+    };
+    
+    // Add note if provided (should be provided for rejections)
+    if (note) {
+      updateData.idVerificationNote = note;
+    } else if (status === 'verified') {
+      // Clear notes if verifying
+      updateData.idVerificationNote = null;
+    }
+    
+    // Update Firestore document
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, updateData);
+    
+    console.log(`User ${userId} ID verification status updated to "${status}" by admin ${currentUser.uid}`);
+    return true;
+  } catch (error) {
+    console.error('Error updating ID verification status:', error);
+    throw error;
   }
 }; 

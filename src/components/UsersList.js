@@ -87,6 +87,22 @@ const AvatarImage = styled.img`
   object-fit: cover;
 `;
 
+const StatusIndicator = styled.div`
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: ${props =>
+    props.status === 'verified' ? colors.success :
+    props.status === 'pending' ? colors.warning :
+    props.status === 'rejected' ? colors.error :
+    'transparent'
+  };
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  border: 2px solid white;
+`;
+
 const UserName = styled.div`
   display: flex;
   align-items: center;
@@ -168,6 +184,27 @@ const LastUpdateTime = styled.div`
   font-style: italic;
 `;
 
+const IdBadge = styled.span`
+  display: inline-block;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  margin-left: 8px;
+  background-color: ${props => 
+    props.status === 'verified' ? 'rgba(76, 175, 80, 0.2)' :
+    props.status === 'pending' ? 'rgba(255, 152, 0, 0.2)' :
+    props.status === 'rejected' ? 'rgba(244, 67, 54, 0.2)' :
+    'transparent'
+  };
+  color: ${props => 
+    props.status === 'verified' ? colors.success :
+    props.status === 'pending' ? colors.warning :
+    props.status === 'rejected' ? colors.error :
+    'transparent'
+  };
+  white-space: nowrap;
+`;
+
 // Helper function to get user initials
 const getUserInitials = (name) => {
   if (!name) return '?';
@@ -187,6 +224,7 @@ const UsersList = () => {
   const [showUpdateIndicator, setShowUpdateIndicator] = useState(false);
   const [availableRoles, setAvailableRoles] = useState(['User', 'Admin', 'Manager']);
   const [optionsLoaded, setOptionsLoaded] = useState(false);
+  const [verificationFilter, setVerificationFilter] = useState('all');
 
   // Preload options data
   useEffect(() => {
@@ -261,12 +299,15 @@ const UsersList = () => {
         user.role?.toLowerCase() === roleFilter.toLowerCase();
       
       const matchesVerification = 
-        roleFilter === 'all' || 
-        user.role?.toLowerCase() === roleFilter.toLowerCase();
+        verificationFilter === 'all' || 
+        (verificationFilter === 'pending' && user.idVerificationStatus === 'pending') ||
+        (verificationFilter === 'verified' && user.idVerificationStatus === 'verified') ||
+        (verificationFilter === 'rejected' && user.idVerificationStatus === 'rejected') ||
+        (verificationFilter === 'none' && !user.idVerificationStatus);
         
       return matchesSearch && matchesRole && matchesVerification;
     });
-  }, [searchTerm, roleFilter, users]);
+  }, [searchTerm, roleFilter, verificationFilter, users]);
 
   // Update filtered users when memoized result changes
   useEffect(() => {
@@ -292,9 +333,23 @@ const UsersList = () => {
     setShowDetailsDialog(true);
   };
 
-  const handleCloseDetailsDialog = () => {
+  const handleCloseDetailsDialog = (refreshNeeded = false) => {
     setShowDetailsDialog(false);
     setDetailsUser(null);
+    
+    // If there were changes that require refresh
+    if (refreshNeeded) {
+      // Force refresh from the database
+      setLoading(true);
+      getUsers().then(userData => {
+        setUsers(userData);
+        setFilteredUsers(userData);
+        setLoading(false);
+      }).catch(err => {
+        console.error('Error refreshing users data:', err);
+        setLoading(false);
+      });
+    }
   };
 
   if (loading && !optionsLoaded) {
@@ -334,6 +389,17 @@ const UsersList = () => {
             </option>
           ))}
         </Select>
+
+        <Select
+          value={verificationFilter}
+          onChange={e => setVerificationFilter(e.target.value)}
+        >
+          <option value="all">All Verification</option>
+          <option value="pending">Pending ID Verification</option>
+          <option value="verified">Verified ID</option>
+          <option value="rejected">Rejected ID</option>
+          <option value="none">No ID Submitted</option>
+        </Select>
       </SearchContainer>
 
       {loading ? (
@@ -349,6 +415,7 @@ const UsersList = () => {
                 <TableHeader>Email</TableHeader>
                 <TableHeader>Phone</TableHeader>
                 <TableHeader>Role</TableHeader>
+                <TableHeader>ID Verification</TableHeader>
               </tr>
             </TableHead>
             <tbody>
@@ -357,20 +424,34 @@ const UsersList = () => {
                   <TableRow key={user.id} onClick={() => handleRowClick(user)}>
                     <TableCell>
                       <UserName>
-                        <Avatar>
-                          {user.profilePictureUrl ? 
-                            <AvatarImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} /> :
-                            user.photoURL ?
-                              <AvatarImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
-                              getUserInitials(user.fullName || user.displayName)
-                          }
-                        </Avatar>
+                        <div style={{ position: 'relative' }}>
+                          <Avatar>
+                            {user.profilePictureUrl ? 
+                              <AvatarImage src={user.profilePictureUrl} alt={user.fullName || user.displayName} /> :
+                              user.photoURL ?
+                                <AvatarImage src={user.photoURL} alt={user.fullName || user.displayName} /> :
+                                getUserInitials(user.fullName || user.displayName)
+                            }
+                          </Avatar>
+                          {user.idVerificationStatus && (
+                            <StatusIndicator status={user.idVerificationStatus} />
+                          )}
+                        </div>
                         {user.fullName || user.displayName || 'N/A'}
                       </UserName>
                     </TableCell>
                     <TableCell>{user.email || 'N/A'}</TableCell>
                     <TableCell>{user.phoneNumber || 'N/A'}</TableCell>
                     <TableCell>{user.role || 'User'}</TableCell>
+                    <TableCell>
+                      {user.idVerificationStatus ? (
+                        <IdBadge status={user.idVerificationStatus}>
+                          {user.idVerificationStatus.charAt(0).toUpperCase() + user.idVerificationStatus.slice(1)}
+                        </IdBadge>
+                      ) : (
+                        'Not submitted'
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (

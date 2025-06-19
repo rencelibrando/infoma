@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
-import { updateUserBlockStatus, deleteUser } from '../services/userService';
+import { updateUserBlockStatus, deleteUser, updateIdVerificationStatus } from '../services/userService';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // Pine green and gray theme colors
@@ -178,6 +178,63 @@ const RoleSelect = styled.select`
   }
 `;
 
+const TextArea = styled.textarea`
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  min-height: 100px;
+  resize: vertical;
+  
+  &:focus {
+    outline: none;
+    border-color: ${colors.pineGreen};
+  }
+`;
+
+const IdImageContainer = styled.div`
+  width: 100%;
+  margin: 20px 0;
+  border: 1px solid ${colors.lightGray};
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  min-height: 200px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: ${colors.lightGray};
+`;
+
+const IdImage = styled.img`
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+`;
+
+const BadgeStatus = styled.span`
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  background-color: ${props =>
+    props.status === 'verified' ? 'rgba(76, 175, 80, 0.2)' :
+    props.status === 'pending' ? 'rgba(255, 152, 0, 0.2)' :
+    props.status === 'rejected' ? 'rgba(244, 67, 54, 0.2)' :
+    'rgba(0, 0, 0, 0.1)'
+  };
+  color: ${props =>
+    props.status === 'verified' ? colors.success :
+    props.status === 'pending' ? colors.warning :
+    props.status === 'rejected' ? colors.error :
+    colors.mediumGray
+  };
+  margin-left: 8px;
+`;
+
 const ActionSection = styled.div`
   display: flex;
   gap: 10px;
@@ -197,6 +254,7 @@ const Button = styled.button`
     props.danger ? colors.error : 
     props.secondary ? colors.lightGray : 
     props.success ? colors.success :
+    props.warning ? colors.warning :
     colors.pineGreen};
   color: ${props => props.secondary ? colors.darkGray : colors.white};
   transition: all 0.3s ease;
@@ -225,6 +283,9 @@ const UserDetailsDialog = ({
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [verificationNote, setVerificationNote] = useState('');
+  const [confirmingReject, setConfirmingReject] = useState(false);
+  const [confirmingApprove, setConfirmingApprove] = useState(false);
 
   if (!user) return null;
 
@@ -272,6 +333,65 @@ const UserDetailsDialog = ({
     }
   };
 
+  const handleApproveId = async () => {
+    try {
+      setProcessing(true);
+      setError(null);
+      setSuccess(null);
+      
+      await updateIdVerificationStatus(user.id, 'verified', null);
+      
+      // Update local user object
+      user.idVerificationStatus = 'verified';
+      user.isIdVerified = true;
+      user.idVerificationNote = null;
+      
+      setConfirmingApprove(false);
+      setSuccess("ID verification approved successfully");
+      
+      // Close after 1.5 seconds with refresh flag
+      setTimeout(() => {
+        onClose(true); // Pass true to indicate refresh needed
+      }, 1500);
+    } catch (err) {
+      console.error("Error approving ID verification:", err);
+      setError(err.message || "Failed to approve ID verification. Please try again.");
+      setProcessing(false);
+    }
+  };
+
+  const handleRejectId = async () => {
+    if (!verificationNote.trim()) {
+      setError("Please provide a reason for rejection");
+      return;
+    }
+    
+    try {
+      setProcessing(true);
+      setError(null);
+      setSuccess(null);
+      
+      await updateIdVerificationStatus(user.id, 'rejected', verificationNote);
+      
+      // Update local user object
+      user.idVerificationStatus = 'rejected';
+      user.isIdVerified = false;
+      user.idVerificationNote = verificationNote;
+      
+      setConfirmingReject(false);
+      setSuccess("ID verification rejected successfully");
+      
+      // Close after 1.5 seconds with refresh flag
+      setTimeout(() => {
+        onClose(true); // Pass true to indicate refresh needed
+      }, 1500);
+    } catch (err) {
+      console.error("Error rejecting ID verification:", err);
+      setError(err.message || "Failed to reject ID verification. Please try again.");
+      setProcessing(false);
+    }
+  };
+
   const getInitials = (name) => {
     if (!name) return '?';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
@@ -296,6 +416,9 @@ const UserDetailsDialog = ({
     return 'Invalid date format';
   };
 
+  // Check if user has submitted ID for verification
+  const hasSubmittedId = user.idImageUrl && user.idVerificationStatus;
+
   return (
     <Modal onClick={onClose}>
       <ModalContent onClick={e => e.stopPropagation()}>
@@ -313,7 +436,14 @@ const UserDetailsDialog = ({
           </UserAvatar>
           
           <UserInfo>
-            <UserName>{user.fullName || user.displayName || 'Anonymous User'}</UserName>
+            <UserName>
+              {user.fullName || user.displayName || 'Anonymous User'}
+              {user.idVerificationStatus && (
+                <BadgeStatus status={user.idVerificationStatus}>
+                  {user.idVerificationStatus}
+                </BadgeStatus>
+              )}
+            </UserName>
             <UserEmail>{user.email}</UserEmail>
           </UserInfo>
         </UserHeader>
@@ -325,6 +455,14 @@ const UserDetailsDialog = ({
           >
             User Information
           </Tab>
+          {hasSubmittedId && (
+            <Tab 
+              active={activeTab === 'id-verification'} 
+              onClick={() => setActiveTab('id-verification')}
+            >
+              ID Verification
+            </Tab>
+          )}
           <Tab 
             active={activeTab === 'management'} 
             onClick={() => setActiveTab('management')}
@@ -489,6 +627,190 @@ const UserDetailsDialog = ({
                 </DetailValue>
               </>
             )}
+          </DetailSection>
+        )}
+        
+        {activeTab === 'id-verification' && hasSubmittedId && (
+          <DetailSection>
+            <SectionTitle>ID Verification</SectionTitle>
+            
+            {error && (
+              <div style={{
+                padding: '10px', 
+                marginBottom: '16px', 
+                backgroundColor: 'rgba(244, 67, 54, 0.1)', 
+                color: colors.error,
+                borderRadius: '4px'
+              }}>
+                {error}
+              </div>
+            )}
+            
+            {success && (
+              <div style={{
+                padding: '10px', 
+                marginBottom: '16px', 
+                backgroundColor: 'rgba(76, 175, 80, 0.1)', 
+                color: colors.success,
+                borderRadius: '4px'
+              }}>
+                {success}
+              </div>
+            )}
+            
+            <DetailGrid>
+              <DetailItem>
+                <DetailLabel>ID Type</DetailLabel>
+                <DetailValue>{user.idType || 'Not specified'}</DetailValue>
+              </DetailItem>
+              
+              <DetailItem>
+                <DetailLabel>Submission Date</DetailLabel>
+                <DetailValue>{formatDate(user.idSubmissionDate)}</DetailValue>
+              </DetailItem>
+              
+              <DetailItem>
+                <DetailLabel>Verification Status</DetailLabel>
+                <DetailValue>
+                  <BadgeStatus status={user.idVerificationStatus}>
+                    {user.idVerificationStatus || 'not_submitted'}
+                  </BadgeStatus>
+                </DetailValue>
+              </DetailItem>
+              
+              {user.idVerificationNote && (
+                <FullWidthDetailItem>
+                  <DetailLabel>Verification Note</DetailLabel>
+                  <DetailValue style={{
+                    backgroundColor: 'rgba(244, 67, 54, 0.05)', 
+                    padding: '8px', 
+                    borderRadius: '4px'
+                  }}>
+                    {user.idVerificationNote}
+                  </DetailValue>
+                </FullWidthDetailItem>
+              )}
+            </DetailGrid>
+            
+            <IdImageContainer>
+              {user.idImageUrl ? (
+                <IdImage 
+                  src={user.idImageUrl} 
+                  alt={`${user.fullName || user.displayName}'s ID`} 
+                />
+              ) : (
+                <div>No ID image available</div>
+              )}
+            </IdImageContainer>
+            
+            <div>
+              {user.idVerificationStatus === 'pending' && (
+                <ActionSection>
+                  <Button 
+                    warning
+                    onClick={() => setConfirmingReject(true)}
+                    disabled={processing}
+                  >
+                    Reject ID
+                  </Button>
+                  <Button 
+                    success
+                    onClick={() => setConfirmingApprove(true)}
+                    disabled={processing}
+                  >
+                    Approve ID
+                  </Button>
+                </ActionSection>
+              )}
+              
+              {confirmingApprove && (
+                <div>
+                  <DetailValue style={{marginBottom: '10px'}}>
+                    Are you sure you want to approve this ID? This will grant the user access to all restricted features.
+                  </DetailValue>
+                  
+                  <ActionSection>
+                    <Button 
+                      secondary 
+                      onClick={() => setConfirmingApprove(false)}
+                      disabled={processing}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      success
+                      onClick={handleApproveId}
+                      disabled={processing}
+                    >
+                      {processing ? 'Processing...' : 'Confirm Approval'}
+                    </Button>
+                  </ActionSection>
+                </div>
+              )}
+              
+              {confirmingReject && (
+                <div>
+                  <DetailValue style={{marginBottom: '10px'}}>
+                    Please provide a reason for rejection. This will be shown to the user.
+                  </DetailValue>
+                  
+                  <TextArea
+                    value={verificationNote}
+                    onChange={(e) => setVerificationNote(e.target.value)}
+                    placeholder="Enter reason for rejection (required)"
+                  />
+                  
+                  <ActionSection>
+                    <Button 
+                      secondary 
+                      onClick={() => setConfirmingReject(false)}
+                      disabled={processing}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      danger
+                      onClick={handleRejectId}
+                      disabled={processing || !verificationNote.trim()}
+                    >
+                      {processing ? 'Processing...' : 'Confirm Rejection'}
+                    </Button>
+                  </ActionSection>
+                </div>
+              )}
+              
+              {user.idVerificationStatus === 'verified' && (
+                <div style={{
+                  padding: '10px',
+                  backgroundColor: 'rgba(76, 175, 80, 0.1)', 
+                  color: colors.success,
+                  borderRadius: '4px',
+                  textAlign: 'center',
+                  marginTop: '10px'
+                }}>
+                  This ID has been verified and approved
+                </div>
+              )}
+              
+              {user.idVerificationStatus === 'rejected' && (
+                <ActionSection>
+                  <Button 
+                    warning
+                    onClick={() => setConfirmingReject(true)}
+                    disabled={processing}
+                  >
+                    Update Rejection Reason
+                  </Button>
+                  <Button 
+                    success
+                    onClick={() => setConfirmingApprove(true)}
+                    disabled={processing}
+                  >
+                    Change to Approved
+                  </Button>
+                </ActionSection>
+              )}
+            </div>
           </DetailSection>
         )}
         
