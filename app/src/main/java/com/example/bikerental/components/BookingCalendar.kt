@@ -547,9 +547,9 @@ fun BookingCalendar(
                                 BookingSummaryRow(
                                     label = "Rate:",
                                     value = if (bookingType == BookingType.DAILY) 
-                                        "$${String.format("%.2f", bike.priceValue)}/day" 
+                                        "₱${String.format("%.2f", bike.priceValue)}/day" 
                                     else 
-                                        "$${String.format("%.2f", bike.priceValue)}/hour"
+                                        "₱${String.format("%.2f", bike.priceValue)}/hour"
                                 )
                                 
                                 Divider(
@@ -560,7 +560,7 @@ fun BookingCalendar(
                                 
                                 BookingSummaryRow(
                                     label = "Total:",
-                                    value = "$${String.format("%.2f", totalCost)}",
+                                    value = "₱${String.format("%.2f", totalCost)}",
                                     isHighlighted = true
                                 )
                             }

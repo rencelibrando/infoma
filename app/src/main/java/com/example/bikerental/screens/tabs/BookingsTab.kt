@@ -607,12 +607,12 @@ fun BookingForm(
         
         // Duration options
         val durationOptions = remember { listOf(
-            DurationOption("1 Hour", "$10", 1),
-            DurationOption("2 Hours", "$18", 2),
-            DurationOption("3 Hours", "$24", 3),
-            DurationOption("4 Hours", "$32", 4),
-            DurationOption("6 Hours", "$45", 6),
-            DurationOption("Full Day", "$60", 8)
+            DurationOption("1 Hour", "₱10", 1),
+            DurationOption("2 Hours", "₱18", 2),
+            DurationOption("3 Hours", "₱24", 3),
+            DurationOption("4 Hours", "₱32", 4),
+            DurationOption("6 Hours", "₱45", 6),
+            DurationOption("Full Day", "₱60", 8)
         )}
         var selectedDuration by remember { mutableStateOf<DurationOption?>(null) }
         
