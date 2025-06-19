@@ -9,7 +9,8 @@ import {
   getBookingsByDateRange,
   calculateBookingDuration,
   getRevenueByPeriod,
-  getBookingsByUserRole
+  getBookingsByUserRole,
+  cancelBooking
 } from '../services/bookingService';
 import { getAllBikes as getBikes, updateBikeStatus } from '../services/bikeService';
 import { getUsers } from '../services/userService';
@@ -23,7 +24,11 @@ import {
   getDocs,
   collectionGroup,
   addDoc,
-  setDoc
+  setDoc,
+  onSnapshot,
+  updateDoc,
+  where,
+  writeBatch
 } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
@@ -196,6 +201,47 @@ const BookingsTable = styled.div`
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   margin-bottom: 25px;
+`;
+
+// Add styled components for cancellation features
+const CancellationReason = styled.div`
+  font-size: 12px;
+  margin-top: 4px;
+  color: #666;
+  font-style: italic;
+`;
+
+const RecentCancellations = styled.div`
+  margin-top: 20px;
+  background-color: white;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+`;
+
+const CancellationTitle = styled.h3`
+  font-size: 18px;
+  color: ${colors.darkGray};
+  margin: 0 0 15px 0;
+  display: flex;
+  align-items: center;
+  
+  svg {
+    margin-right: 10px;
+    color: ${colors.red};
+  }
+`;
+
+const CancellationItem = styled.div`
+  padding: 12px 15px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  &:last-child {
+    border-bottom: none;
+  }
 `;
 
 const TableHeader = styled.div`
@@ -900,10 +946,185 @@ const Notification = styled.div`
   }
 `;
 
+// Tab components
+const TabContainer = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid ${colors.lightGray};
+`;
+
+const TabButton = styled.button`
+  background: none;
+  border: none;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: ${props => props.active ? '600' : '400'};
+  color: ${props => props.active ? colors.pineGreen : colors.mediumGray};
+  border-bottom: 3px solid ${props => props.active ? colors.pineGreen : 'transparent'};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  
+  &:hover {
+    color: ${colors.pineGreen};
+  }
+`;
+
+const TabBadge = styled.span`
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  background-color: ${colors.red};
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+// Notifications tab styled components
+const NotificationsContainer = styled.div`
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  min-height: 250px;
+`;
+
+const NotificationsHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  
+  h3 {
+    font-size: 18px;
+    margin: 0;
+    color: ${colors.darkGray};
+  }
+`;
+
+const ClearAllButton = styled.button`
+  background: ${colors.lightGray};
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  color: ${colors.mediumGray};
+  font-size: 14px;
+  cursor: pointer;
+  
+  &:hover {
+    background: ${colors.mediumGray};
+    color: white;
+  }
+`;
+
+const EmptyNotifications = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: ${colors.mediumGray};
+  
+  svg {
+    opacity: 0.5;
+    margin-bottom: 16px;
+  }
+  
+  p {
+    font-size: 18px;
+    margin: 0 0 8px 0;
+  }
+  
+  span {
+    font-size: 14px;
+  }
+`;
+
+const NotificationsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+`;
+
+const NotificationItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  border-radius: 8px;
+  background-color: ${props => props.read ? 'white' : colors.lightBlue};
+  border: 1px solid ${props => props.read ? colors.lightGray : colors.blue};
+  transition: all 0.2s;
+  
+  &:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+`;
+
+const NotificationContent = styled.div`
+  flex: 1;
+  cursor: pointer;
+`;
+
+const NotificationTitle = styled.div`
+  font-weight: 600;
+  color: ${colors.darkGray};
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const UnreadDot = styled.div`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: ${colors.blue};
+`;
+
+const NotificationMessage = styled.div`
+  color: ${colors.mediumGray};
+  font-size: 14px;
+  margin-bottom: 8px;
+`;
+
+const NotificationTime = styled.div`
+  color: ${colors.mediumGray};
+  font-size: 12px;
+  opacity: 0.8;
+`;
+
+const DeleteNotificationButton = styled.button`
+  background: none;
+  border: none;
+  color: ${colors.mediumGray};
+  cursor: pointer;
+  opacity: 0.6;
+  
+  &:hover {
+    opacity: 1;
+    color: ${colors.red};
+  }
+`;
+
 const BookingManagement = () => {
   const [bookings, setBookings] = useState([]);
   const [bikes, setBikes] = useState([]);
   const [users, setUsers] = useState([]);
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState('bookings'); // 'bookings' or 'notifications'
+  
+  // Notifications state
+  const [bookingNotifications, setBookingNotifications] = useState([]);
+  
   const [revenueSummary, setRevenueSummary] = useState({
     day: { totalRevenue: 0, bookings: 0, completedBookings: 0 },
     week: { totalRevenue: 0, bookings: 0, completedBookings: 0 },
@@ -938,6 +1159,9 @@ const BookingManagement = () => {
   // Notification state
   const [notification, setNotification] = useState(null);
   
+  // Cancellation count for notification badge
+  const [cancellationCount, setCancellationCount] = useState(0);
+  
   // Function to show a notification
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -966,6 +1190,81 @@ const BookingManagement = () => {
     return () => unsubscribe();
   }, []);
   
+  // Add real-time listener for booking cancellations
+  useEffect(() => {
+    if (authLoading || !isAuthenticated || !isAdmin) {
+      return;
+    }
+    
+    const bookingsRef = collection(db, "bookings");
+    
+    // Set up real-time listener for booking updates
+    const unsubscribe = onSnapshot(bookingsRef, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const bookingData = change.doc.data();
+        const bookingId = change.doc.id;
+        
+        // Check for booking cancellations
+        if (change.type === "modified" && bookingData.status === "CANCELLED") {
+          const cancelledBy = bookingData.cancelledBy || "User";
+          const reason = bookingData.cancelReason || "No reason provided";
+          const userEmail = bookingData.userEmail || "A user";
+          const bikeModel = bookingData.bikeModel || bookingData.bikeName || "a bike";
+          
+          // Only show notification if cancelled by user, not by admin
+          if (cancelledBy.toLowerCase() === "user") {
+            // Create detailed notification object
+            const newNotification = {
+              id: `${bookingId}-${Date.now()}`,
+              type: 'cancellation',
+              title: 'Booking Cancelled',
+              message: `${userEmail} cancelled booking for ${bikeModel}. ${reason ? `Reason: ${reason}` : ''}`,
+              timestamp: new Date(),
+              bookingId,
+              bikeModel,
+              userEmail,
+              reason,
+              read: false,
+              bookingData: { ...bookingData }, // Store full booking data for details view
+              dateCreated: bookingData.createdAt || new Date(),
+              dateCancelled: bookingData.updatedAt || new Date(),
+              bookingDate: bookingData.bookingDate || bookingData.date
+            };
+            
+            // Show notification to admin
+            showNotification(
+              `${userEmail} cancelled booking for ${bikeModel}. ${reason ? `Reason: ${reason}` : ''}`, 
+              'warning'
+            );
+            
+            // Add to notifications list
+            setBookingNotifications(prev => [newNotification, ...prev]);
+            
+            // Update cancellation count for badge
+            setCancellationCount(prev => prev + 1);
+            
+            // Update the bookings list without full reload
+            setBookings(prevBookings => 
+              prevBookings.map(booking => 
+                booking.id === bookingId ? {...booking, ...bookingData} : booking
+              )
+            );
+            
+            // Update filtered bookings as well
+            setFilteredBookings(prevBookings => 
+              prevBookings.map(booking => 
+                booking.id === bookingId ? {...booking, ...bookingData} : booking
+              )
+            );
+          }
+        }
+      });
+    });
+    
+    // Clean up listener on component unmount
+    return () => unsubscribe();
+  }, [authLoading, isAuthenticated, isAdmin]);
+  
   // Mock data for filters and pagination
   const [statusFilter, setStatusFilter] = useState('all');
   const [bikeFilter, setBikeFilter] = useState('all');
@@ -975,6 +1274,11 @@ const BookingManagement = () => {
   const [endDateFilter, setEndDateFilter] = useState('');
   const [activeFilters, setActiveFilters] = useState([]);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  
+  // Cancellation modal state
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [bookingToCancel, setBookingToCancel] = useState(null);
+  const [cancellationReason, setCancellationReason] = useState('');
   
   // Pagination constants
   const indexOfLastBooking = currentPage * itemsPerPage;
@@ -998,15 +1302,24 @@ const BookingManagement = () => {
   };
 
   // Function to handle status changes
-  const handleStatusChange = async (bookingId, newStatus) => {
+  const handleStatusChange = async (bookingId, newStatus, reason = "", cancelledBy = "admin") => {
     try {
       setUpdating(true);
       
-      // Update booking status in the database
-      const updatedBooking = await updateBooking(bookingId, {
+      // Create update object
+      const updateData = {
         status: newStatus,
-        updatedAt: new Date()
-      });
+        updatedAt: new Date().toISOString()
+      };
+      
+      // Add cancellation details if status is CANCELLED
+      if (newStatus === 'CANCELLED') {
+        updateData.cancelReason = reason;
+        updateData.cancelledBy = cancelledBy;
+      }
+      
+      // Update booking status in the database
+      const updatedBooking = await updateBooking(bookingId, updateData);
       
       // If status is changing to COMPLETED or CANCELLED, also update the bike availability
       if (newStatus === 'COMPLETED' || newStatus === 'CANCELLED') {
@@ -1032,20 +1345,20 @@ const BookingManagement = () => {
       // Update the bookings state with the updated booking
       setBookings(prevBookings => 
         prevBookings.map(booking => 
-          booking.id === bookingId ? {...booking, status: newStatus} : booking
+          booking.id === bookingId ? {...booking, ...updateData, status: newStatus} : booking
         )
       );
       
       // Update filtered bookings
       setFilteredBookings(prevFilteredBookings => 
         prevFilteredBookings.map(booking => 
-          booking.id === bookingId ? {...booking, status: newStatus} : booking
+          booking.id === bookingId ? {...booking, ...updateData, status: newStatus} : booking
         )
       );
       
       // If the selected booking is the one being updated, update it too
       if (selectedBooking && selectedBooking.id === bookingId) {
-        setSelectedBooking({...selectedBooking, status: newStatus});
+        setSelectedBooking({...selectedBooking, ...updateData, status: newStatus});
       }
       
       // Show success notification
@@ -1073,6 +1386,71 @@ const BookingManagement = () => {
   const handleViewDetails = (booking) => {
     setSelectedBooking(booking);
     setShowDetailsModal(true);
+  };
+  
+  // Function to handle opening the cancel modal
+  const handleOpenCancelModal = (booking) => {
+    setBookingToCancel(booking);
+    setCancellationReason('');
+    setShowCancelModal(true);
+  };
+  
+  // Function to confirm cancellation with reason
+  const handleConfirmCancellation = async () => {
+    if (bookingToCancel) {
+      try {
+        setUpdating(true);
+        
+        // Use the new cancelBooking function
+        const result = await cancelBooking(
+          bookingToCancel.id, 
+          cancellationReason || 'Cancelled by admin', 
+          'admin'
+        );
+        
+        // Update the UI
+        setBookings(prevBookings => 
+          prevBookings.map(booking => 
+            booking.id === bookingToCancel.id 
+              ? {
+                  ...booking, 
+                  status: "CANCELLED",
+                  cancelReason: cancellationReason || 'Cancelled by admin',
+                  cancelledBy: 'admin',
+                  updatedAt: new Date().toISOString()
+                } 
+              : booking
+          )
+        );
+        
+        // Update filtered bookings
+        setFilteredBookings(prevFilteredBookings => 
+          prevFilteredBookings.map(booking => 
+            booking.id === bookingToCancel.id 
+              ? {
+                  ...booking, 
+                  status: "CANCELLED",
+                  cancelReason: cancellationReason || 'Cancelled by admin',
+                  cancelledBy: 'admin',
+                  updatedAt: new Date().toISOString()
+                } 
+              : booking
+          )
+        );
+        
+        // Show success notification
+        showNotification(`${bookingToCancel.bikeName || 'Booking'} successfully cancelled`, 'success');
+        
+        // Clean up
+        setShowCancelModal(false);
+        setBookingToCancel(null);
+        setCancellationReason('');
+      } catch (error) {
+        showNotification(`Error cancelling booking: ${error.message}`, 'error');
+      } finally {
+        setUpdating(false);
+      }
+    }
   };
   
   // Function to handle user click
@@ -1574,836 +1952,1166 @@ const BookingManagement = () => {
     );
   }
 
+  // Function to check if booking dates overlap with provided range
+  const overlapWithRange = (booking, startDate, endDate) => {
+    if (!booking.startDate || !booking.endDate) return false;
+    return (
+      (booking.startDate >= startDate && booking.startDate <= endDate) ||
+      (booking.endDate >= startDate && booking.endDate <= endDate) ||
+      (booking.startDate <= startDate && booking.endDate >= endDate)
+    );
+  };
+  
+  // Render recent cancellations section
+  const renderRecentCancellations = () => {
+    // Make sure we have bookings data before trying to filter
+    if (!bookings || bookings.length === 0) {
+      return null;
+    }
+    
+    const recentCancellations = bookings
+      .filter(booking => booking.status === 'CANCELLED')
+      .sort((a, b) => {
+        // Helper function to safely get a comparable date value
+        const getCompareDate = (booking) => {
+          try {
+            if (booking.updatedAt) {
+              const date = booking.updatedAt instanceof Date 
+                ? booking.updatedAt 
+                : (booking.updatedAt.toDate ? booking.updatedAt.toDate() : new Date(booking.updatedAt));
+              
+              if (!isNaN(date.getTime())) {
+                return date.getTime();
+              }
+            }
+            
+            if (booking.createdAt) {
+              const date = booking.createdAt instanceof Date 
+                ? booking.createdAt 
+                : (booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt));
+              
+              if (!isNaN(date.getTime())) {
+                return date.getTime();
+              }
+            }
+            
+            return 0; // Fallback value for invalid dates
+          } catch (e) {
+            console.error('Date comparison error:', e);
+            return 0;
+          }
+        };
+
+        // Sort by comparing the safe date values
+        return getCompareDate(b) - getCompareDate(a); // Descending order
+      })
+      .slice(0, 5); // Show up to 5 most recent cancellations
+      
+    if (recentCancellations.length === 0) {
+      return null;
+    }
+    
+    return (
+      <RecentCancellations>
+        <CancellationTitle>
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="15"></line>
+          </svg>
+          Recent Cancellations
+        </CancellationTitle>
+        
+        {recentCancellations.map(booking => (
+          <CancellationItem key={booking.id}>
+            <div>
+              <strong>{booking.userEmail || booking.userName || 'User'}</strong> - {booking.bikeModel || booking.bikeName || 'Bike'}
+              <div style={{ fontSize: '13px', color: '#666', marginTop: '4px' }}>
+                {booking.cancelReason ? `Reason: ${booking.cancelReason}` : 'No reason provided'}
+              </div>
+            </div>
+            <div style={{ fontSize: '13px', color: '#999' }}>
+              {(() => {
+                // Safe date formatting with validation
+                try {
+                  if (booking.updatedAt) {
+                    const date = booking.updatedAt instanceof Date 
+                      ? booking.updatedAt 
+                      : (booking.updatedAt.toDate ? booking.updatedAt.toDate() : new Date(booking.updatedAt));
+                    
+                    // Check if date is valid
+                    if (!isNaN(date.getTime())) {
+                      return format(date, 'MMM d, yyyy h:mm a');
+                    }
+                  }
+                  
+                  if (booking.createdAt) {
+                    // Handle different date formats that might be in the data
+                    const date = booking.createdAt instanceof Date 
+                      ? booking.createdAt 
+                      : (booking.createdAt.toDate ? booking.createdAt.toDate() : new Date(booking.createdAt));
+                    
+                    // Check if date is valid
+                    if (!isNaN(date.getTime())) {
+                      return format(date, 'MMM d, yyyy h:mm a');
+                    }
+                  }
+                  
+                  // Fallback if no valid date is available
+                  return 'Date unavailable';
+                } catch (e) {
+                  console.error('Date formatting error:', e);
+                  return 'Date unavailable';
+                }
+              })()}
+            </div>
+          </CancellationItem>
+        ))}
+      </RecentCancellations>
+    );
+  };
+
+  // Function to reset cancellation count
+  const resetCancellationCount = () => {
+    setCancellationCount(0);
+    
+    // Mark all notifications as read
+    setBookingNotifications(prev =>
+      prev.map(notification => ({
+        ...notification,
+        read: true
+      }))
+    );
+  };
+
+  // Mark single notification as read
+  const markNotificationAsRead = (notificationId) => {
+    // Update the notification to mark it as read without losing data
+    setBookingNotifications(prev =>
+      prev.map(notification => 
+        notification.id === notificationId
+          ? { ...notification, read: true }
+          : notification
+      )
+    );
+    
+    // Update the badge counter to reflect unread notifications only
+    const unreadCount = bookingNotifications
+      .filter(notification => !notification.read)
+      .length - 1; // Subtract 1 for the one being marked as read
+    
+    setCancellationCount(Math.max(0, unreadCount));
+  };
+  
+  // Delete a notification
+  const deleteNotification = (notificationId) => {
+    setBookingNotifications(prev => 
+      prev.filter(notification => notification.id !== notificationId)
+    );
+    
+    // Update the badge counter
+    const unreadCount = bookingNotifications
+      .filter(notification => !notification.read && notification.id !== notificationId)
+      .length;
+    
+    setCancellationCount(unreadCount);
+  };
+  
+  // Clear all notifications
+  const clearAllNotifications = () => {
+    setBookingNotifications([]);
+    setCancellationCount(0);
+  };
+
   return (
     <Container>
+      {/* Notification popup */}
+      {notification && (
+        <div className={`notification ${notification.type}`}>
+          {notification.message}
+        </div>
+      )}
+      
       <PageHeader>
         <PageTitle>Booking Management</PageTitle>
-        {isAdmin && (
-          <div>
-            <ViewToggleButton 
-              active={showAllBikesView}
-              onClick={handleViewAllBikes}
-            >
-              All Bookings
-            </ViewToggleButton>
-            <ViewToggleButton 
-              active={!showAllBikesView}
-              onClick={() => setShowAllBikesView(false)}
-            >
-              Per Bike View
-            </ViewToggleButton>
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {isAdmin && (
+            <div>
+              <ViewToggleButton 
+                active={showAllBikesView}
+                onClick={handleViewAllBikes}
+              >
+                All Bookings
+              </ViewToggleButton>
+              <ViewToggleButton 
+                active={!showAllBikesView}
+                onClick={() => setShowAllBikesView(false)}
+              >
+                Per Bike View
+              </ViewToggleButton>
+            </div>
+          )}
+        </div>
       </PageHeader>
       
-      {/* Debug Information - Remove this section completely */}
+      {/* Tab Navigation */}
+      <TabContainer>
+        <TabButton 
+          active={activeTab === 'bookings'} 
+          onClick={() => setActiveTab('bookings')}
+        >
+          Bookings
+        </TabButton>
+        <TabButton 
+          active={activeTab === 'notifications'} 
+          onClick={() => {
+            setActiveTab('notifications');
+            resetCancellationCount(); // Clear badge when tab is opened
+          }}
+        >
+          Notifications
+          {cancellationCount > 0 && (
+            <TabBadge>{cancellationCount}</TabBadge>
+          )}
+        </TabButton>
+      </TabContainer>
       
-      {/* Revenue Summary - Admin Only */}
-      {isAdmin && (
-        <RevenueSummaryContainer>
-          <RevenueCard period="day">
-            <RevenueAmount>₱{revenueSummary?.day?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
-            <RevenuePeriod>Today's Revenue</RevenuePeriod>
-            <BookingCount>{revenueSummary?.day?.completedBookings || 0} completed bookings</BookingCount>
-          </RevenueCard>
-          <RevenueCard period="week">
-            <RevenueAmount>₱{revenueSummary?.week?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
-            <RevenuePeriod>This Week's Revenue</RevenuePeriod>
-            <BookingCount>{revenueSummary?.week?.completedBookings || 0} completed bookings</BookingCount>
-          </RevenueCard>
-          <RevenueCard period="month">
-            <RevenueAmount>₱{revenueSummary?.month?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
-            <RevenuePeriod>This Month's Revenue</RevenuePeriod>
-            <BookingCount>{revenueSummary?.month?.completedBookings || 0} completed bookings</BookingCount>
-          </RevenueCard>
-        </RevenueSummaryContainer>
-      )}
-      
-      {/* Booking Summary - Show for both admin and regular users */}
-      <BookingSummarySection>
-        <BookingSummaryTitle>
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-            <line x1="16" y1="2" x2="16" y2="6"></line>
-            <line x1="8" y1="2" x2="8" y2="6"></line>
-            <line x1="3" y1="10" x2="21" y2="10"></line>
-          </svg>
-          {isAdmin ? 'Booking Overview' : 'Your Bookings'}
-        </BookingSummaryTitle>
-        <BookingSummaryGrid>
-          <SummaryCard>
-            <SummaryLabel>Total Bookings</SummaryLabel>
-            <SummaryValue>{bookings.length}</SummaryValue>
-            <SummarySubtext>{isAdmin ? 'All-time bookings' : 'All your bookings'}</SummarySubtext>
-          </SummaryCard>
-          
-          <SummaryCard>
-            <SummaryLabel>Active Bookings</SummaryLabel>
-            <SummaryValue>{bookings.filter(b => b.status === 'CONFIRMED').length}</SummaryValue>
-            <SummarySubtext>Currently confirmed bookings</SummarySubtext>
-          </SummaryCard>
-          
-          <SummaryCard>
-            <SummaryLabel>Pending Bookings</SummaryLabel>
-            <SummaryValue>{bookings.filter(b => b.status === 'PENDING').length}</SummaryValue>
-            <SummarySubtext>Awaiting confirmation</SummarySubtext>
-          </SummaryCard>
-          
-          <SummaryCard>
-            <SummaryLabel>Hourly vs Daily</SummaryLabel>
-            <SummaryValue>
-              {bookings.filter(b => b.isHourly).length} / {bookings.filter(b => !b.isHourly).length}
-            </SummaryValue>
-            <SummarySubtext>Hourly / Daily bookings</SummarySubtext>
-          </SummaryCard>
-        </BookingSummaryGrid>
-      </BookingSummarySection>
-      
-      {/* View Toggle for Admin Users */}
-      {isAdmin && (
-        <ViewSwitchContainer>
-          <ViewSwitchButton 
-            active={viewMode === 'list'} 
-            onClick={() => setViewMode('list')}
-          >
-            List View
-          </ViewSwitchButton>
-          <ViewSwitchButton 
-            active={viewMode === 'calendar'} 
-            onClick={() => setViewMode('calendar')}
-          >
-            Calendar View
-          </ViewSwitchButton>
-        </ViewSwitchContainer>
-      )}
-      
-      {/* Calendar View - Admin Only */}
-      {isAdmin && viewMode === 'calendar' && (
-        <CalendarContainer>
-          <Calendar
-            localizer={localizer}
-            events={formatBookingsForCalendar()}
-            startAccessor="start"
-            endAccessor="end"
-            style={{ height: 650 }}
-            eventPropGetter={eventStyleGetter}
-            components={{
-              event: EventTooltip,
-              toolbar: CalendarToolbar
-            }}
-            views={['month', 'week', 'day', 'agenda']}
-            defaultView="week"
-            step={60}
-            timeslots={2}
-            selectable
-            onSelectEvent={(event) => handleViewDetails(event.booking)}
-            dayPropGetter={date => {
-              const today = new Date();
-              return {
-                style: {
-                  backgroundColor: 
-                    date.getDate() === today.getDate() &&
-                    date.getMonth() === today.getMonth() &&
-                    date.getFullYear() === today.getFullYear()
-                      ? '#f8f9ff'
-                      : undefined,
-                }
-              };
-            }}
-            dayLayoutAlgorithm="no-overlap"
-            popup
-            tooltipAccessor={null}
-            formats={{
-              timeGutterFormat: (date, culture, localizer) =>
-                localizer.format(date, 'h a', culture),
-              dayFormat: (date, culture, localizer) =>
-                localizer.format(date, 'ddd dd', culture),
-            }}
+      {/* Notifications Tab Content */}
+      {activeTab === 'notifications' && (
+        <NotificationsContainer>
+          {/* Use our EnhancedNotificationList component */}
+          <EnhancedNotificationList
+            notifications={bookingNotifications}
+            onMarkAsRead={markNotificationAsRead}
+            onDeleteNotification={deleteNotification}
+            onClearAll={clearAllNotifications}
           />
-        </CalendarContainer>
+        </NotificationsContainer>
       )}
       
-      {/* Only show the list view when in list mode */}
-      {viewMode === 'list' && (
+      {/* Only show the booking management UI when bookings tab is active */}
+      {activeTab === 'bookings' && (
         <>
-          {/* Filters Section */}
-          <FiltersSection>
-            <BookingSummaryTitle>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-              </svg>
-              Filters & Search
-            </BookingSummaryTitle>
-            
-            <FiltersGrid>
-              <div>
-                <FilterSelect 
-                  value={statusFilter} 
-                  onChange={e => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="CONFIRMED">Confirmed</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </FilterSelect>
-              </div>
-              
-              <div>
-                <FilterSelect 
-                  value={bikeFilter} 
-                  onChange={e => setBikeFilter(e.target.value)}
-                >
-                  <option value="all">All Bikes</option>
-                  {bikes.map(bike => (
-                    <option key={bike.id} value={bike.id}>{bike.name}</option>
-                  ))}
-                </FilterSelect>
-              </div>
-              
-              <div>
-                <FilterSelect 
-                  value={bookingTypeFilter} 
-                  onChange={e => setBookingTypeFilter(e.target.value)}
-                >
-                  <option value="all">All Types</option>
-                  <option value="hourly">Hourly Bookings</option>
-                  <option value="daily">Daily Bookings</option>
-                </FilterSelect>
-              </div>
-              
-              <div>
-                <FilterInput 
-                  type="text"
-                  placeholder="Search by name or ID"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                />
-              </div>
-              
-              <div>
-                <FilterInput 
-                  type="date"
-                  value={startDateFilter}
-                  onChange={e => setStartDateFilter(e.target.value)}
-                  placeholder="Start Date"
-                />
-              </div>
-              
-              <div>
-                <FilterInput 
-                  type="date"
-                  value={endDateFilter}
-                  onChange={e => setEndDateFilter(e.target.value)}
-                  placeholder="End Date"
-                />
-              </div>
-              
-              {/* Clear Filters Button */}
-              <FilterButton onClick={clearFilters}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-                Clear Filters
-              </FilterButton>
-            </FiltersGrid>
-            
-            {/* Display active filters as tags */}
-            {activeFilters.length > 0 && (
-              <ActiveFiltersContainer>
-                {activeFilters.map((filter, index) => (
-                  <FilterTag key={index}>
-                    {filter.label}
-                    <button onClick={() => removeFilter(filter.type)}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
-                    </button>
-                  </FilterTag>
-                ))}
-              </ActiveFiltersContainer>
-            )}
-          </FiltersSection>
+          {/* Revenue Summary - Admin Only */}
+          {isAdmin && (
+            <RevenueSummaryContainer>
+              <RevenueCard period="day">
+                <RevenueAmount>₱{revenueSummary?.day?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+                <RevenuePeriod>Today's Revenue</RevenuePeriod>
+                <BookingCount>{revenueSummary?.day?.completedBookings || 0} completed bookings</BookingCount>
+              </RevenueCard>
+              <RevenueCard period="week">
+                <RevenueAmount>₱{revenueSummary?.week?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+                <RevenuePeriod>This Week's Revenue</RevenuePeriod>
+                <BookingCount>{revenueSummary?.week?.completedBookings || 0} completed bookings</BookingCount>
+              </RevenueCard>
+              <RevenueCard period="month">
+                <RevenueAmount>₱{revenueSummary?.month?.totalRevenue?.toFixed(2) || '0.00'}</RevenueAmount>
+                <RevenuePeriod>This Month's Revenue</RevenuePeriod>
+                <BookingCount>{revenueSummary?.month?.completedBookings || 0} completed bookings</BookingCount>
+              </RevenueCard>
+            </RevenueSummaryContainer>
+          )}
           
-          {/* Bookings Table */}
-          <BookingsTable>
-            <TableHeader>
-              <div>Bike</div>
-              <div>User</div>
-              <div>Booking Period</div>
-              <div>Duration</div>
-              <div>Total Price</div>
-              <div>Status</div>
-              <div>Created</div>
-              <div>Actions</div>
-            </TableHeader>
-            
-            {isLoading ? (
-              <EmptyState>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center',
-                  gap: '10px',
-                  color: colors.pineGreen 
-                }}>
-                  <div style={{
-                    width: '20px',
-                    height: '20px',
-                    border: `3px solid ${colors.lightGray}`,
-                    borderTop: `3px solid ${colors.pineGreen}`,
+          {/* Booking Summary - Show for both admin and regular users */}
+          <BookingSummarySection>
+            <BookingSummaryTitle>
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+              {isAdmin ? 'Booking Overview' : 'Your Bookings'}
+            </BookingSummaryTitle>
+            <BookingSummaryGrid>
+              <SummaryCard>
+                <SummaryLabel>Total Bookings</SummaryLabel>
+                <SummaryValue>{bookings.length}</SummaryValue>
+                <SummarySubtext>{isAdmin ? 'All-time bookings' : 'All your bookings'}</SummarySubtext>
+              </SummaryCard>
+              
+              <SummaryCard>
+                <SummaryLabel>Active Bookings</SummaryLabel>
+                <SummaryValue>{bookings.filter(b => b.status === 'CONFIRMED').length}</SummaryValue>
+                <SummarySubtext>Currently confirmed bookings</SummarySubtext>
+              </SummaryCard>
+              
+              <SummaryCard>
+                <SummaryLabel>Pending Bookings</SummaryLabel>
+                <SummaryValue>{bookings.filter(b => b.status === 'PENDING').length}</SummaryValue>
+                <SummarySubtext>Awaiting confirmation</SummarySubtext>
+              </SummaryCard>
+              
+              <SummaryCard>
+                <SummaryLabel>Hourly vs Daily</SummaryLabel>
+                <SummaryValue>
+                  {bookings.filter(b => b.isHourly).length} / {bookings.filter(b => !b.isHourly).length}
+                </SummaryValue>
+                <SummarySubtext>Hourly / Daily bookings</SummarySubtext>
+              </SummaryCard>
+            </BookingSummaryGrid>
+          </BookingSummarySection>
+          
+          {/* View Toggle for Admin Users */}
+          {isAdmin && (
+            <ViewSwitchContainer>
+              <ViewSwitchButton 
+                active={viewMode === 'list'} 
+                onClick={() => setViewMode('list')}
+              >
+                List View
+              </ViewSwitchButton>
+              <ViewSwitchButton 
+                active={viewMode === 'calendar'} 
+                onClick={() => setViewMode('calendar')}
+              >
+                Calendar View
+              </ViewSwitchButton>
+            </ViewSwitchContainer>
+          )}
+          
+          {/* Calendar View - Admin Only */}
+          {isAdmin && viewMode === 'calendar' && (
+            <CalendarContainer>
+              <Calendar
+                localizer={localizer}
+                events={formatBookingsForCalendar()}
+                startAccessor="start"
+                endAccessor="end"
+                style={{ height: 650 }}
+                eventPropGetter={eventStyleGetter}
+                components={{
+                  event: EventTooltip,
+                  toolbar: CalendarToolbar
+                }}
+                views={['month', 'week', 'day', 'agenda']}
+                defaultView="week"
+                step={60}
+                timeslots={2}
+                selectable
+                onSelectEvent={(event) => handleViewDetails(event.booking)}
+                dayPropGetter={date => {
+                  const today = new Date();
+                  return {
+                    style: {
+                      backgroundColor: 
+                        date.getDate() === today.getDate() &&
+                        date.getMonth() === today.getMonth() &&
+                        date.getFullYear() === today.getFullYear()
+                          ? '#f8f9ff'
+                          : undefined,
+                    }
+                  };
+                }}
+                dayLayoutAlgorithm="no-overlap"
+                popup
+                tooltipAccessor={null}
+                formats={{
+                  timeGutterFormat: (date, culture, localizer) =>
+                    localizer.format(date, 'h a', culture),
+                  dayFormat: (date, culture, localizer) =>
+                    localizer.format(date, 'ddd dd', culture),
+                }}
+              />
+            </CalendarContainer>
+          )}
+          
+          {/* Only show the list view when in list mode */}
+          {viewMode === 'list' && (
+            <>
+              {/* Filters Section */}
+              <FiltersSection>
+                <BookingSummaryTitle>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                  </svg>
+                  Filters & Search
+                </BookingSummaryTitle>
+                
+                <FiltersGrid>
+                  <div>
+                    <FilterSelect 
+                      value={statusFilter} 
+                      onChange={e => setStatusFilter(e.target.value)}
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="CONFIRMED">Confirmed</option>
+                      <option value="COMPLETED">Completed</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </FilterSelect>
+                  </div>
+                  
+                  <div>
+                    <FilterSelect 
+                      value={bikeFilter} 
+                      onChange={e => setBikeFilter(e.target.value)}
+                    >
+                      <option value="all">All Bikes</option>
+                      {bikes.map(bike => (
+                        <option key={bike.id} value={bike.id}>{bike.name}</option>
+                      ))}
+                    </FilterSelect>
+                  </div>
+                  
+                  <div>
+                    <FilterSelect 
+                      value={bookingTypeFilter} 
+                      onChange={e => setBookingTypeFilter(e.target.value)}
+                    >
+                      <option value="all">All Types</option>
+                      <option value="hourly">Hourly Bookings</option>
+                      <option value="daily">Daily Bookings</option>
+                    </FilterSelect>
+                  </div>
+                  
+                  <div>
+                    <FilterInput 
+                      type="text"
+                      placeholder="Search by name or ID"
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div>
+                    <FilterInput 
+                      type="date"
+                      value={startDateFilter}
+                      onChange={e => setStartDateFilter(e.target.value)}
+                      placeholder="Start Date"
+                    />
+                  </div>
+                  
+                  <div>
+                    <FilterInput 
+                      type="date"
+                      value={endDateFilter}
+                      onChange={e => setEndDateFilter(e.target.value)}
+                      placeholder="End Date"
+                    />
+                  </div>
+                  
+                  {/* Clear Filters Button */}
+                  <FilterButton onClick={clearFilters}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                    Clear Filters
+                  </FilterButton>
+                </FiltersGrid>
+                
+                {/* Display active filters as tags */}
+                {activeFilters.length > 0 && (
+                  <ActiveFiltersContainer>
+                    {activeFilters.map((filter, index) => (
+                      <FilterTag key={index}>
+                        {filter.label}
+                        <button onClick={() => removeFilter(filter.type)}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </svg>
+                        </button>
+                      </FilterTag>
+                    ))}
+                  </ActiveFiltersContainer>
+                )}
+              </FiltersSection>
+              
+              {/* Bookings Table */}
+              <BookingsTable>
+                <TableHeader>
+                  <div>Bike</div>
+                  <div>User</div>
+                  <div>Booking Period</div>
+                  <div>Duration</div>
+                  <div>Total Price</div>
+                  <div>Status</div>
+                  <div>Created</div>
+                  <div>Actions</div>
+                </TableHeader>
+                
+                {isLoading ? (
+                  <EmptyState>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      gap: '10px',
+                      color: colors.pineGreen 
+                    }}>
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        border: `3px solid ${colors.lightGray}`,
+                        borderTop: `3px solid ${colors.pineGreen}`,
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite'
+                      }}></div>
+                      <span>Loading bookings...</span>
+                    </div>
+                    <style>
+                      {`
+                        @keyframes spin {
+                          0% { transform: rotate(0deg); }
+                          100% { transform: rotate(360deg); }
+                        }
+                      `}
+                    </style>
+                  </EmptyState>
+                ) : currentBookings.length === 0 ? (
+                  <EmptyState>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <EmptyStateMessage>No bookings found</EmptyStateMessage>
+                    <EmptyStateSubtext>
+                      {activeFilters.length > 0 
+                        ? 'Try changing or clearing your filters to see more results.' 
+                        : 'There are no bookings in the system yet.'}
+                    </EmptyStateSubtext>
+                  </EmptyState>
+                ) : (
+                  currentBookings.map(booking => (
+                    <TableRow key={booking.id} status={booking.status} onClick={() => handleViewDetails(booking)} style={{ cursor: 'pointer' }}>
+                      <TableCell label="Bike:">
+                        <BikeNameDisplay>
+                          {booking.bikeImageUrl && (
+                            <BikeImage src={booking.bikeImageUrl} alt={booking.bikeName} />
+                          )}
+                          <div>
+                            <BookingInfoValue bold>{booking.bikeName || 'Unknown Bike'}</BookingInfoValue>
+                            <BookingTypeTag isHourly={booking.isHourly}>
+                              {booking.isHourly ? 'Hourly' : 'Daily'}
+                            </BookingTypeTag>
+                          </div>
+                        </BikeNameDisplay>
+                      </TableCell>
+                      
+                      <TableCell label="User:">
+                        <BookingInfoCard>
+                          <BookingInfoLabel>Customer</BookingInfoLabel>
+                          <BookingInfoValue bold>
+                            <UserNameLink onClick={(e) => handleUserClick(booking, e)}>
+                              {booking.fullName || booking.userName || (booking.userId ? `User ID: ${booking.userId.substring(0, 8)}...` : 'Unknown User')}
+                            </UserNameLink>
+                          </BookingInfoValue>
+                        </BookingInfoCard>
+                      </TableCell>
+                      
+                      <TableCell label="Booking Period:">
+                        <BookingInfoCard>
+                          <BookingInfoLabel>Dates</BookingInfoLabel>
+                          <BookingInfoValue>
+                            {booking.startDate ? (
+                              <>
+                                {format(booking.startDate, 'MMM d, yyyy')}
+                                {booking.isHourly && (
+                                  <>
+                                    <br />
+                                    {format(booking.startDate, 'h:mm a')} - 
+                                    {booking.endDate && format(booking.endDate, 'h:mm a')}
+                                  </>
+                                )}
+                              </>
+                            ) : 'N/A'}
+                          </BookingInfoValue>
+                        </BookingInfoCard>
+                      </TableCell>
+                      
+                      <TableCell label="Duration:">
+                        <BookingInfoCard>
+                          <BookingInfoLabel>Duration</BookingInfoLabel>
+                          <BookingDuration>
+                            {calculateBookingDuration(booking)}
+                          </BookingDuration>
+                        </BookingInfoCard>
+                      </TableCell>
+                      
+                      <TableCell label="Total Price:">
+                        <BookingInfoCard>
+                          <BookingInfoLabel>Price</BookingInfoLabel>
+                          <BookingPrice>₱{parseFloat(booking.totalPrice).toFixed(2)}</BookingPrice>
+                        </BookingInfoCard>
+                      </TableCell>
+                      
+                      <TableCell label="Status:">
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <StatusBadge status={booking.status}>
+                            {booking.status}
+                          </StatusBadge>
+                          <PaymentBadge status={booking.paymentStatus}>
+                            {booking.paymentStatus}
+                          </PaymentBadge>
+                        </div>
+                      </TableCell>
+                      
+                      <TableCell label="Created:">
+                        {booking.createdAt ? format(booking.createdAt, 'MMM d, yyyy') : 'N/A'}
+                      </TableCell>
+                      
+                      <TableCell label="Actions:">
+                        <ButtonGroup>
+                          <ViewDetailsButton onClick={(e) => {
+                            e.stopPropagation(); // Prevent row click event from firing
+                            handleViewDetails(booking);
+                          }}>
+                            Details
+                          </ViewDetailsButton>
+                          
+                          {booking.status === 'PENDING' && (
+                            <ActionButton 
+                              confirm
+                              disabled={updating}
+                              onClick={(e) => {
+                                e.stopPropagation(); // Prevent row click event from firing
+                                handleStatusChange(booking.id, 'CONFIRMED');
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                              Confirm
+                            </ActionButton>
+                          )}
+                        </ButtonGroup>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </BookingsTable>
+              
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <PaginationContainer>
+                  <PageInfo>
+                    Showing {indexOfFirstBooking + 1}-{Math.min(indexOfLastBooking, filteredBookings.length)} of {filteredBookings.length} bookings
+                  </PageInfo>
+                  
+                  <PaginationButton
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </PaginationButton>
+                  
+                  {Array.from({ length: totalPages }).map((_, index) => {
+                    // Show first, last, and pages around current page
+                    if (
+                      index === 0 || 
+                      index === totalPages - 1 || 
+                      (index >= currentPage - 2 && index <= currentPage + 1)
+                    ) {
+                      return (
+                        <PaginationButton
+                          key={index}
+                          active={currentPage === index + 1}
+                          onClick={() => setCurrentPage(index + 1)}
+                        >
+                          {index + 1}
+                        </PaginationButton>
+                      );
+                    } else if (
+                      // Show ellipsis for breaks
+                      (index === 1 && currentPage > 3) ||
+                      (index === totalPages - 2 && currentPage < totalPages - 2)
+                    ) {
+                      return <span key={index} style={{ margin: '0 5px' }}>...</span>;
+                    }
+                    return null;
+                  })}
+                  
+                  <PaginationButton
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </PaginationButton>
+                </PaginationContainer>
+              )}
+            </>
+          )}
+
+          {/* User Info Popup */}
+          {selectedUser && (
+            <UserInfoPopup 
+              className="user-info-popup"
+              x={userPopupPosition.x} 
+              y={userPopupPosition.y}
+            >
+              <UserInfoHeader>
+                <h4>User Details</h4>
+                {selectedUser.loading && (
+                  <div style={{ 
+                    display: 'inline-block', 
+                    marginLeft: '10px',
+                    width: '16px',
+                    height: '16px',
+                    border: '2px solid rgba(29, 60, 52, 0.3)',
+                    borderTopColor: colors.pineGreen,
                     borderRadius: '50%',
                     animation: 'spin 1s linear infinite'
-                  }}></div>
-                  <span>Loading bookings...</span>
-                </div>
+                  }} />
+                )}
                 <style>
                   {`
                     @keyframes spin {
-                      0% { transform: rotate(0deg); }
-                      100% { transform: rotate(360deg); }
+                      to { transform: rotate(360deg); }
                     }
                   `}
                 </style>
-              </EmptyState>
-            ) : currentBookings.length === 0 ? (
-              <EmptyState>
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              </UserInfoHeader>
+              
+              {selectedUser.profileUrl && (
+                <div style={{ textAlign: 'center', marginBottom: '15px' }}>
+                  <img 
+                    src={selectedUser.profileUrl} 
+                    alt={selectedUser.fullName} 
+                    style={{
+                      width: '60px',
+                      height: '60px',
+                      borderRadius: '50%',
+                      objectFit: 'cover',
+                      border: `2px solid ${colors.pineGreen}`
+                    }}
+                  />
+                </div>
+              )}
+              
+              <UserInfoRow>
+                <UserInfoLabel>Name:</UserInfoLabel>
+                <UserInfoValue bold>{selectedUser.fullName}</UserInfoValue>
+              </UserInfoRow>
+              
+              <UserInfoRow>
+                <UserInfoLabel>Email:</UserInfoLabel>
+                <UserInfoValue>
+                  <a 
+                    href={`mailto:${selectedUser.email}`} 
+                    style={{ color: colors.pineGreen, textDecoration: 'none' }}
+                  >
+                    {selectedUser.email}
+                  </a>
+                </UserInfoValue>
+              </UserInfoRow>
+              
+              <UserInfoRow>
+                <UserInfoLabel>Phone:</UserInfoLabel>
+                <UserInfoValue>
+                  <a 
+                    href={`tel:${selectedUser.phone}`} 
+                    style={{ color: colors.pineGreen, textDecoration: 'none' }}
+                  >
+                    {selectedUser.phone}
+                  </a>
+                </UserInfoValue>
+              </UserInfoRow>
+              
+              <UserInfoRow>
+                <UserInfoLabel>User ID:</UserInfoLabel>
+                <UserInfoValue>{selectedUser.userId || 'N/A'}</UserInfoValue>
+              </UserInfoRow>
+              
+              {selectedUser.address && (
+                <UserInfoRow>
+                  <UserInfoLabel>Address:</UserInfoLabel>
+                  <UserInfoValue>{selectedUser.address}</UserInfoValue>
+                </UserInfoRow>
+              )}
+              
+              {selectedUser.role && (
+                <UserInfoRow>
+                  <UserInfoLabel>Role:</UserInfoLabel>
+                  <UserInfoValue>{selectedUser.role}</UserInfoValue>
+                </UserInfoRow>
+              )}
+              
+              {selectedUser.membershipTier && (
+                <UserInfoRow>
+                  <UserInfoLabel>Membership:</UserInfoLabel>
+                  <UserInfoValue>{selectedUser.membershipTier}</UserInfoValue>
+                </UserInfoRow>
+              )}
+              
+              {selectedUser.joinDate && (
+                <UserInfoRow>
+                  <UserInfoLabel>Joined:</UserInfoLabel>
+                  <UserInfoValue>{selectedUser.joinDate}</UserInfoValue>
+                </UserInfoRow>
+              )}
+              
+              {selectedUser.emergencyContact && (
+                <UserInfoRow>
+                  <UserInfoLabel>Emergency:</UserInfoLabel>
+                  <UserInfoValue>{selectedUser.emergencyContact}</UserInfoValue>
+                </UserInfoRow>
+              )}
+              
+              {/* View Booking button */}
+              <button
+                onClick={() => {
+                  setSelectedBooking(selectedUser.booking);
+                  setShowDetailsModal(true);
+                  setSelectedUser(null);
+                }}
+                style={{
+                  backgroundColor: colors.pineGreen,
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '8px 12px',
+                  marginTop: '15px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  width: '100%',
+                  transition: 'background-color 0.2s'
+                }}
+              >
+                View Full Booking
+              </button>
+            </UserInfoPopup>
+          )}
+
+          {/* Booking Details Modal */}
+          {showDetailsModal && selectedBooking && (
+            <ModalWrapper>
+              <h3>Booking Details</h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '25px' }}>
+                <div>
+                  <h4 style={{ fontSize: '18px', margin: '0 0 5px 0', color: colors.darkGray }}>
+                    {selectedBooking.bikeName || 'Unknown Bike'}
+                  </h4>
+                  <BookingTypeTag isHourly={selectedBooking.isHourly} style={{ marginTop: '5px' }}>
+                    {selectedBooking.isHourly ? 'Hourly Rental' : 'Daily Rental'}
+                  </BookingTypeTag>
+                </div>
+                
+                <div>
+                  <BookingInfoLabel>Bike ID</BookingInfoLabel>
+                  <BookingInfoValue>{selectedBooking.bikeId || 'N/A'}</BookingInfoValue>
+                </div>
+                
+                <div>
+                  <BookingInfoLabel>Bike Type</BookingInfoLabel>
+                  <BookingInfoValue>{selectedBooking.bikeType || 'N/A'}</BookingInfoValue>
+                </div>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Name</BookingInfoLabel>
+                <BookingInfoValue bold>
+                  {selectedBooking.fullName || selectedBooking.userName || 'Unknown User'}
+                </BookingInfoValue>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>User ID</BookingInfoLabel>
+                <BookingInfoValue>{selectedBooking.userId || 'N/A'}</BookingInfoValue>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Email</BookingInfoLabel>
+                <BookingInfoValue>{selectedBooking.userEmail || 'N/A'}</BookingInfoValue>
+              </div>
+              
+              <div style={{ marginBottom: '10px' }}>
+                <BookingInfoLabel>Phone</BookingInfoLabel>
+                <BookingInfoValue>{selectedBooking.userPhone || 'N/A'}</BookingInfoValue>
+              </div>
+              
+              <div style={{ 
+                background: colors.lightGray, 
+                padding: '20px', 
+                borderRadius: '8px',
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr 1fr',
+                gap: '20px',
+                marginBottom: '25px'
+              }}>
+                <div>
+                  <BookingInfoLabel>Booking Status</BookingInfoLabel>
+                  <StatusBadge status={selectedBooking.status} style={{ marginTop: '8px' }}>
+                    {selectedBooking.status}
+                  </StatusBadge>
+                </div>
+                
+                <div>
+                  <BookingInfoLabel>Payment Status</BookingInfoLabel>
+                  <PaymentBadge status={selectedBooking.paymentStatus} style={{ marginTop: '8px' }}>
+                    {selectedBooking.paymentStatus || 'unpaid'}
+                  </PaymentBadge>
+                </div>
+                
+                <div>
+                  <BookingInfoLabel>Total Amount</BookingInfoLabel>
+                  <BookingPrice style={{ marginTop: '8px', fontSize: '18px' }}>
+                    ₱{parseFloat(selectedBooking.totalPrice).toFixed(2)}
+                  </BookingPrice>
+                </div>
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
+                <div>
+                  <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                    Booking Period
+                  </h3>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Date</BookingInfoLabel>
+                    <BookingInfoValue>
+                      {selectedBooking.startDate ? format(selectedBooking.startDate, 'MMMM d, yyyy') : 'N/A'}
+                    </BookingInfoValue>
+                  </div>
+                  
+                  {selectedBooking.isHourly && (
+                    <div style={{ marginBottom: '10px' }}>
+                      <BookingInfoLabel>Time</BookingInfoLabel>
+                      <BookingInfoValue>
+                        {selectedBooking.startDate && format(selectedBooking.startDate, 'h:mm a')} - 
+                        {selectedBooking.endDate && format(selectedBooking.endDate, 'h:mm a')}
+                      </BookingInfoValue>
+                    </div>
+                  )}
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Duration</BookingInfoLabel>
+                    <BookingDuration style={{ marginTop: '5px' }}>
+                      {calculateBookingDuration(selectedBooking)}
+                    </BookingDuration>
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                    Additional Information
+                  </h3>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Booking ID</BookingInfoLabel>
+                    <BookingInfoValue>{selectedBooking.id || 'N/A'}</BookingInfoValue>
+                  </div>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Created At</BookingInfoLabel>
+                    <BookingInfoValue>
+                      {selectedBooking.createdAt ? format(selectedBooking.createdAt, 'MMMM d, yyyy h:mm a') : 'N/A'}
+                    </BookingInfoValue>
+                  </div>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Additional Notes</BookingInfoLabel>
+                    <BookingInfoValue>
+                      {selectedBooking.notes || 'No additional notes'}
+                    </BookingInfoValue>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Actions */}
+              <div style={{ 
+                borderTop: '1px solid #eee',
+                paddingTop: '20px',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px'
+              }}>
+                {selectedBooking.status === 'PENDING' && (
+                  <ActionButton 
+                    confirm
+                    disabled={updating}
+                    onClick={() => handleStatusChange(selectedBooking.id, 'CONFIRMED')}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                    Confirm Booking
+                  </ActionButton>
+                )}
+                
+                {selectedBooking.status === 'CONFIRMED' && (
+                  <ActionButton 
+                    complete
+                    disabled={updating}
+                    onClick={() => handleStatusChange(selectedBooking.id, 'COMPLETED')}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                      <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                    Complete Booking
+                  </ActionButton>
+                )}
+                
+                {(selectedBooking.status === 'PENDING' || selectedBooking.status === 'CONFIRMED') && (
+                  <ActionButton 
+                    cancel
+                    disabled={updating}
+                    onClick={() => handleOpenCancelModal(selectedBooking)}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                    Cancel Booking
+                  </ActionButton>
+                )}
+                
+                <button
+                  onClick={() => setShowDetailsModal(false)}
+                  style={{
+                    padding: '10px 15px',
+                    border: '1px solid #ddd',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: colors.darkGray,
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '14px'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </ModalWrapper>
+          )}
+
+          {/* Cancellation Modal */}
+          {showCancelModal && bookingToCancel && (
+            <ModalWrapper>
+              <h3>Cancel Booking</h3>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <p style={{ marginBottom: '20px' }}>
+                  You are about to cancel the following booking:
+                </p>
+                
+                <div style={{ 
+                  background: colors.lightGray, 
+                  padding: '15px', 
+                  borderRadius: '8px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Bike</BookingInfoLabel>
+                    <BookingInfoValue bold>
+                      {bookingToCancel.bikeName || bookingToCancel.bikeModel || 'Unknown Bike'}
+                    </BookingInfoValue>
+                  </div>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>User</BookingInfoLabel>
+                    <BookingInfoValue>
+                      {bookingToCancel.fullName || bookingToCancel.userName || 'Unknown User'} 
+                      ({bookingToCancel.userEmail || 'No email'})
+                    </BookingInfoValue>
+                  </div>
+                  
+                  <div style={{ marginBottom: '10px' }}>
+                    <BookingInfoLabel>Date</BookingInfoLabel>
+                    <BookingInfoValue>
+                      {bookingToCancel.startDate ? format(bookingToCancel.startDate, 'MMMM d, yyyy') : 'N/A'}
+                    </BookingInfoValue>
+                  </div>
+
+                  <div>
+                    <BookingInfoLabel>Current Status</BookingInfoLabel>
+                    <StatusBadge status={bookingToCancel.status} style={{ marginTop: '8px' }}>
+                      {bookingToCancel.status}
+                    </StatusBadge>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label htmlFor="cancelReason" style={{ 
+                    display: 'block', 
+                    marginBottom: '8px',
+                    fontWeight: '500',
+                    color: colors.darkGray 
+                  }}>
+                    Cancellation Reason (Optional)
+                  </label>
+                  <textarea
+                    id="cancelReason"
+                    value={cancellationReason}
+                    onChange={(e) => setCancellationReason(e.target.value)}
+                    placeholder="Enter reason for cancellation"
+                    style={{ 
+                      width: '100%', 
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: '1px solid #ddd',
+                      minHeight: '100px',
+                      resize: 'vertical',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+              </div>
+              
+              <div style={{ 
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px'
+              }}>
+                <button
+                  onClick={() => setShowCancelModal(false)}
+                  style={{
+                    padding: '10px 15px',
+                    border: '1px solid #ddd',
+                    borderRadius: '8px',
+                    background: 'white',
+                    color: colors.darkGray,
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '14px'
+                  }}
+                >
+                  Keep Booking
+                </button>
+                
+                <ActionButton 
+                  cancel
+                  disabled={updating}
+                  onClick={handleConfirmCancellation}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                  Confirm Cancellation
+                </ActionButton>
+              </div>
+            </ModalWrapper>
+          )}
+
+          {/* Notification */}
+          {notification && (
+            <Notification type={notification.type}>
+              {notification.type === 'success' ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10"></circle>
                   <line x1="12" y1="8" x2="12" y2="12"></line>
                   <line x1="12" y1="16" x2="12.01" y2="16"></line>
                 </svg>
-                <EmptyStateMessage>No bookings found</EmptyStateMessage>
-                <EmptyStateSubtext>
-                  {activeFilters.length > 0 
-                    ? 'Try changing or clearing your filters to see more results.' 
-                    : 'There are no bookings in the system yet.'}
-                </EmptyStateSubtext>
-              </EmptyState>
-            ) : (
-              currentBookings.map(booking => (
-                <TableRow key={booking.id} status={booking.status} onClick={() => handleViewDetails(booking)} style={{ cursor: 'pointer' }}>
-                  <TableCell label="Bike:">
-                    <BikeNameDisplay>
-                      {booking.bikeImageUrl && (
-                        <BikeImage src={booking.bikeImageUrl} alt={booking.bikeName} />
-                      )}
-                      <div>
-                        <BookingInfoValue bold>{booking.bikeName || 'Unknown Bike'}</BookingInfoValue>
-                        <BookingTypeTag isHourly={booking.isHourly}>
-                          {booking.isHourly ? 'Hourly' : 'Daily'}
-                        </BookingTypeTag>
-                      </div>
-                    </BikeNameDisplay>
-                  </TableCell>
-                  
-                  <TableCell label="User:">
-                    <BookingInfoCard>
-                      <BookingInfoLabel>Customer</BookingInfoLabel>
-                      <BookingInfoValue bold>
-                        <UserNameLink onClick={(e) => handleUserClick(booking, e)}>
-                          {booking.fullName || booking.userName || (booking.userId ? `User ID: ${booking.userId.substring(0, 8)}...` : 'Unknown User')}
-                        </UserNameLink>
-                      </BookingInfoValue>
-                    </BookingInfoCard>
-                  </TableCell>
-                  
-                  <TableCell label="Booking Period:">
-                    <BookingInfoCard>
-                      <BookingInfoLabel>Dates</BookingInfoLabel>
-                      <BookingInfoValue>
-                        {booking.startDate ? (
-                          <>
-                            {format(booking.startDate, 'MMM d, yyyy')}
-                            {booking.isHourly && (
-                              <>
-                                <br />
-                                {format(booking.startDate, 'h:mm a')} - 
-                                {booking.endDate && format(booking.endDate, 'h:mm a')}
-                              </>
-                            )}
-                          </>
-                        ) : 'N/A'}
-                      </BookingInfoValue>
-                    </BookingInfoCard>
-                  </TableCell>
-                  
-                  <TableCell label="Duration:">
-                    <BookingInfoCard>
-                      <BookingInfoLabel>Duration</BookingInfoLabel>
-                      <BookingDuration>
-                        {calculateBookingDuration(booking)}
-                      </BookingDuration>
-                    </BookingInfoCard>
-                  </TableCell>
-                  
-                  <TableCell label="Total Price:">
-                    <BookingInfoCard>
-                      <BookingInfoLabel>Price</BookingInfoLabel>
-                      <BookingPrice>₱{parseFloat(booking.totalPrice).toFixed(2)}</BookingPrice>
-                    </BookingInfoCard>
-                  </TableCell>
-                  
-                  <TableCell label="Status:">
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <StatusBadge status={booking.status}>
-                        {booking.status}
-                      </StatusBadge>
-                      <PaymentBadge status={booking.paymentStatus}>
-                        {booking.paymentStatus}
-                      </PaymentBadge>
-                    </div>
-                  </TableCell>
-                  
-                  <TableCell label="Created:">
-                    {booking.createdAt ? format(booking.createdAt, 'MMM d, yyyy') : 'N/A'}
-                  </TableCell>
-                  
-                  <TableCell label="Actions:">
-                    <ButtonGroup>
-                      <ViewDetailsButton onClick={(e) => {
-                        e.stopPropagation(); // Prevent row click event from firing
-                        handleViewDetails(booking);
-                      }}>
-                        Details
-                      </ViewDetailsButton>
-                      
-                      {booking.status === 'PENDING' && (
-                        <ActionButton 
-                          confirm
-                          disabled={updating}
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent row click event from firing
-                            handleStatusChange(booking.id, 'CONFIRMED');
-                          }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                          </svg>
-                          Confirm
-                        </ActionButton>
-                      )}
-                    </ButtonGroup>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </BookingsTable>
-          
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <PaginationContainer>
-              <PageInfo>
-                Showing {indexOfFirstBooking + 1}-{Math.min(indexOfLastBooking, filteredBookings.length)} of {filteredBookings.length} bookings
-              </PageInfo>
-              
-              <PaginationButton
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-              >
-                Previous
-              </PaginationButton>
-              
-              {Array.from({ length: totalPages }).map((_, index) => {
-                // Show first, last, and pages around current page
-                if (
-                  index === 0 || 
-                  index === totalPages - 1 || 
-                  (index >= currentPage - 2 && index <= currentPage + 1)
-                ) {
-                  return (
-                    <PaginationButton
-                      key={index}
-                      active={currentPage === index + 1}
-                      onClick={() => setCurrentPage(index + 1)}
-                    >
-                      {index + 1}
-                    </PaginationButton>
-                  );
-                } else if (
-                  // Show ellipsis for breaks
-                  (index === 1 && currentPage > 3) ||
-                  (index === totalPages - 2 && currentPage < totalPages - 2)
-                ) {
-                  return <span key={index} style={{ margin: '0 5px' }}>...</span>;
-                }
-                return null;
-              })}
-              
-              <PaginationButton
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-              >
-                Next
-              </PaginationButton>
-            </PaginationContainer>
-          )}
-        </>
-      )}
-
-      {/* User Info Popup */}
-      {selectedUser && (
-        <UserInfoPopup 
-          className="user-info-popup"
-          x={userPopupPosition.x} 
-          y={userPopupPosition.y}
-        >
-          <UserInfoHeader>
-            <h4>User Details</h4>
-            {selectedUser.loading && (
-              <div style={{ 
-                display: 'inline-block', 
-                marginLeft: '10px',
-                width: '16px',
-                height: '16px',
-                border: '2px solid rgba(29, 60, 52, 0.3)',
-                borderTopColor: colors.pineGreen,
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }} />
-            )}
-            <style>
-              {`
-                @keyframes spin {
-                  to { transform: rotate(360deg); }
-                }
-              `}
-            </style>
-          </UserInfoHeader>
-          
-          {selectedUser.profileUrl && (
-            <div style={{ textAlign: 'center', marginBottom: '15px' }}>
-              <img 
-                src={selectedUser.profileUrl} 
-                alt={selectedUser.fullName} 
-                style={{
-                  width: '60px',
-                  height: '60px',
-                  borderRadius: '50%',
-                  objectFit: 'cover',
-                  border: `2px solid ${colors.pineGreen}`
-                }}
-              />
-            </div>
-          )}
-          
-          <UserInfoRow>
-            <UserInfoLabel>Name:</UserInfoLabel>
-            <UserInfoValue bold>{selectedUser.fullName}</UserInfoValue>
-          </UserInfoRow>
-          
-          <UserInfoRow>
-            <UserInfoLabel>Email:</UserInfoLabel>
-            <UserInfoValue>
-              <a 
-                href={`mailto:${selectedUser.email}`} 
-                style={{ color: colors.pineGreen, textDecoration: 'none' }}
-              >
-                {selectedUser.email}
-              </a>
-            </UserInfoValue>
-          </UserInfoRow>
-          
-          <UserInfoRow>
-            <UserInfoLabel>Phone:</UserInfoLabel>
-            <UserInfoValue>
-              <a 
-                href={`tel:${selectedUser.phone}`} 
-                style={{ color: colors.pineGreen, textDecoration: 'none' }}
-              >
-                {selectedUser.phone}
-              </a>
-            </UserInfoValue>
-          </UserInfoRow>
-          
-          <UserInfoRow>
-            <UserInfoLabel>User ID:</UserInfoLabel>
-            <UserInfoValue>{selectedUser.userId || 'N/A'}</UserInfoValue>
-          </UserInfoRow>
-          
-          {selectedUser.address && (
-            <UserInfoRow>
-              <UserInfoLabel>Address:</UserInfoLabel>
-              <UserInfoValue>{selectedUser.address}</UserInfoValue>
-            </UserInfoRow>
-          )}
-          
-          {selectedUser.role && (
-            <UserInfoRow>
-              <UserInfoLabel>Role:</UserInfoLabel>
-              <UserInfoValue>{selectedUser.role}</UserInfoValue>
-            </UserInfoRow>
-          )}
-          
-          {selectedUser.membershipTier && (
-            <UserInfoRow>
-              <UserInfoLabel>Membership:</UserInfoLabel>
-              <UserInfoValue>{selectedUser.membershipTier}</UserInfoValue>
-            </UserInfoRow>
-          )}
-          
-          {selectedUser.joinDate && (
-            <UserInfoRow>
-              <UserInfoLabel>Joined:</UserInfoLabel>
-              <UserInfoValue>{selectedUser.joinDate}</UserInfoValue>
-            </UserInfoRow>
-          )}
-          
-          {selectedUser.emergencyContact && (
-            <UserInfoRow>
-              <UserInfoLabel>Emergency:</UserInfoLabel>
-              <UserInfoValue>{selectedUser.emergencyContact}</UserInfoValue>
-            </UserInfoRow>
-          )}
-          
-          {/* View Booking button */}
-          <button
-            onClick={() => {
-              setSelectedBooking(selectedUser.booking);
-              setShowDetailsModal(true);
-              setSelectedUser(null);
-            }}
-            style={{
-              backgroundColor: colors.pineGreen,
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '8px 12px',
-              marginTop: '15px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              width: '100%',
-              transition: 'background-color 0.2s'
-            }}
-          >
-            View Full Booking
-          </button>
-        </UserInfoPopup>
-      )}
-
-      {/* Booking Details Modal */}
-      {showDetailsModal && selectedBooking && (
-        <ModalWrapper>
-          <h3>Booking Details</h3>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '25px' }}>
-            <div>
-              <h4 style={{ fontSize: '18px', margin: '0 0 5px 0', color: colors.darkGray }}>
-                {selectedBooking.bikeName || 'Unknown Bike'}
-              </h4>
-              <BookingTypeTag isHourly={selectedBooking.isHourly} style={{ marginTop: '5px' }}>
-                {selectedBooking.isHourly ? 'Hourly Rental' : 'Daily Rental'}
-              </BookingTypeTag>
-            </div>
-            
-            <div>
-              <BookingInfoLabel>Bike ID</BookingInfoLabel>
-              <BookingInfoValue>{selectedBooking.bikeId || 'N/A'}</BookingInfoValue>
-            </div>
-            
-            <div>
-              <BookingInfoLabel>Bike Type</BookingInfoLabel>
-              <BookingInfoValue>{selectedBooking.bikeType || 'N/A'}</BookingInfoValue>
-            </div>
-          </div>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <BookingInfoLabel>Name</BookingInfoLabel>
-            <BookingInfoValue bold>
-              {selectedBooking.fullName || selectedBooking.userName || 'Unknown User'}
-            </BookingInfoValue>
-          </div>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <BookingInfoLabel>User ID</BookingInfoLabel>
-            <BookingInfoValue>{selectedBooking.userId || 'N/A'}</BookingInfoValue>
-          </div>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <BookingInfoLabel>Email</BookingInfoLabel>
-            <BookingInfoValue>{selectedBooking.userEmail || 'N/A'}</BookingInfoValue>
-          </div>
-          
-          <div style={{ marginBottom: '10px' }}>
-            <BookingInfoLabel>Phone</BookingInfoLabel>
-            <BookingInfoValue>{selectedBooking.userPhone || 'N/A'}</BookingInfoValue>
-          </div>
-          
-          <div style={{ 
-            background: colors.lightGray, 
-            padding: '20px', 
-            borderRadius: '8px',
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr 1fr',
-            gap: '20px',
-            marginBottom: '25px'
-          }}>
-            <div>
-              <BookingInfoLabel>Booking Status</BookingInfoLabel>
-              <StatusBadge status={selectedBooking.status} style={{ marginTop: '8px' }}>
-                {selectedBooking.status}
-              </StatusBadge>
-            </div>
-            
-            <div>
-              <BookingInfoLabel>Payment Status</BookingInfoLabel>
-              <PaymentBadge status={selectedBooking.paymentStatus} style={{ marginTop: '8px' }}>
-                {selectedBooking.paymentStatus || 'unpaid'}
-              </PaymentBadge>
-            </div>
-            
-            <div>
-              <BookingInfoLabel>Total Amount</BookingInfoLabel>
-              <BookingPrice style={{ marginTop: '8px', fontSize: '18px' }}>
-                ₱{parseFloat(selectedBooking.totalPrice).toFixed(2)}
-              </BookingPrice>
-            </div>
-          </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginBottom: '30px' }}>
-            <div>
-              <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                Booking Period
-              </h3>
-              
-              <div style={{ marginBottom: '10px' }}>
-                <BookingInfoLabel>Date</BookingInfoLabel>
-                <BookingInfoValue>
-                  {selectedBooking.startDate ? format(selectedBooking.startDate, 'MMMM d, yyyy') : 'N/A'}
-                </BookingInfoValue>
-              </div>
-              
-              {selectedBooking.isHourly && (
-                <div style={{ marginBottom: '10px' }}>
-                  <BookingInfoLabel>Time</BookingInfoLabel>
-                  <BookingInfoValue>
-                    {selectedBooking.startDate && format(selectedBooking.startDate, 'h:mm a')} - 
-                    {selectedBooking.endDate && format(selectedBooking.endDate, 'h:mm a')}
-                  </BookingInfoValue>
-                </div>
               )}
-              
-              <div style={{ marginBottom: '10px' }}>
-                <BookingInfoLabel>Duration</BookingInfoLabel>
-                <BookingDuration style={{ marginTop: '5px' }}>
-                  {calculateBookingDuration(selectedBooking)}
-                </BookingDuration>
-              </div>
-            </div>
-            
-            <div>
-              <h3 style={{ fontSize: '18px', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                Additional Information
-              </h3>
-              
-              <div style={{ marginBottom: '10px' }}>
-                <BookingInfoLabel>Booking ID</BookingInfoLabel>
-                <BookingInfoValue>{selectedBooking.id || 'N/A'}</BookingInfoValue>
-              </div>
-              
-              <div style={{ marginBottom: '10px' }}>
-                <BookingInfoLabel>Created At</BookingInfoLabel>
-                <BookingInfoValue>
-                  {selectedBooking.createdAt ? format(selectedBooking.createdAt, 'MMMM d, yyyy h:mm a') : 'N/A'}
-                </BookingInfoValue>
-              </div>
-              
-              <div style={{ marginBottom: '10px' }}>
-                <BookingInfoLabel>Additional Notes</BookingInfoLabel>
-                <BookingInfoValue>
-                  {selectedBooking.notes || 'No additional notes'}
-                </BookingInfoValue>
-              </div>
-            </div>
-          </div>
-          
-          {/* Actions */}
-          <div style={{ 
-            borderTop: '1px solid #eee',
-            paddingTop: '20px',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: '10px'
-          }}>
-            {selectedBooking.status === 'PENDING' && (
-              <ActionButton 
-                confirm
-                disabled={updating}
-                onClick={() => handleStatusChange(selectedBooking.id, 'CONFIRMED')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-                Confirm Booking
-              </ActionButton>
-            )}
-            
-            {selectedBooking.status === 'CONFIRMED' && (
-              <ActionButton 
-                complete
-                disabled={updating}
-                onClick={() => handleStatusChange(selectedBooking.id, 'COMPLETED')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                </svg>
-                Complete Booking
-              </ActionButton>
-            )}
-            
-            {(selectedBooking.status === 'PENDING' || selectedBooking.status === 'CONFIRMED') && (
-              <ActionButton 
-                cancel
-                disabled={updating}
-                onClick={() => handleStatusChange(selectedBooking.id, 'CANCELLED')}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-                Cancel Booking
-              </ActionButton>
-            )}
-            
-            <button
-              onClick={() => setShowDetailsModal(false)}
-              style={{
-                padding: '10px 15px',
-                border: '1px solid #ddd',
-                borderRadius: '8px',
-                background: 'white',
-                color: colors.darkGray,
-                cursor: 'pointer',
-                fontWeight: '500',
-                fontSize: '14px'
-              }}
-            >
-              Close
-            </button>
-          </div>
-        </ModalWrapper>
-      )}
-
-      {/* Notification */}
-      {notification && (
-        <Notification type={notification.type}>
-          {notification.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-              <polyline points="22 4 12 14.01 9 11.01"></polyline>
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
+              <span>{notification.message}</span>
+            </Notification>
           )}
-          <span>{notification.message}</span>
-        </Notification>
+
+          {/* Recent Cancellations Section */}
+          {renderRecentCancellations()}
+        </>
       )}
     </Container>
   );

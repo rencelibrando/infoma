@@ -48,6 +48,11 @@
     "emergencyAlerts": {
       ".read": "auth != null",
       ".write": "auth != null"
+    },
+    
+    "app_config": {
+      ".read": true,
+      ".write": "auth != null"
     }
   }
 } 

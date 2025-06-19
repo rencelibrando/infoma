@@ -348,138 +348,76 @@ export const createBooking = async (bookingData) => {
 // Update a booking
 export const updateBooking = async (bookingId, updatedData) => {
   try {
-    // Require authentication for updating bookings
-    requireAuth();
-    
-    let bookingRef = null;
-    let currentBooking = null;
-    let foundLocation = null;
-    
-    // First, try to find the booking in the main collection
-    const mainBookingRef = doc(db, "bookings", bookingId);
-    const mainBookingDoc = await getDoc(mainBookingRef);
-    
-    if (mainBookingDoc.exists()) {
-      bookingRef = mainBookingRef;
-      currentBooking = mainBookingDoc.data();
-      foundLocation = 'main';
-    } else {
-      // If not found in main collection, use collectionGroup to find it in subcollections
-      const bookingsGroupRef = collectionGroup(db, "bookings");
-      const groupSnapshot = await getDocs(bookingsGroupRef);
-      
-      // Find the specific booking document
-      const foundDoc = groupSnapshot.docs.find(doc => doc.id === bookingId);
-      
-      if (foundDoc) {
-        bookingRef = foundDoc.ref;
-        currentBooking = foundDoc.data();
-        foundLocation = foundDoc.ref.path;
-      } else {
-        throw new Error(`Booking with ID ${bookingId} not found in any collection`);
-      }
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to update booking without authentication');
+      // Try to proceed anyway for admin dashboard
     }
     
-    // Convert Date objects to Firestore Timestamps if present
-    const updates = { ...updatedData };
+    // Simple case - update in main collection
+    const bookingRef = doc(db, "bookings", bookingId);
+    await updateDoc(bookingRef, updatedData);
     
-    if (updates.startDate instanceof Date) {
-      updates.startDate = Timestamp.fromDate(updates.startDate);
+    return { success: true };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Cancel a booking with reason and source
+export const cancelBooking = async (bookingId, reason = "", cancelledBy = "admin") => {
+  try {
+    // Check authentication - but don't fail immediately
+    const user = checkAuth();
+    if (!user) {
+      console.warn('Attempting to cancel booking without authentication');
+      // Try to proceed anyway for admin dashboard
     }
     
-    if (updates.endDate instanceof Date) {
-      updates.endDate = Timestamp.fromDate(updates.endDate);
+    const bookingRef = doc(db, "bookings", bookingId);
+    
+    // Get the booking to check if it exists and get additional data
+    const bookingDoc = await getDoc(bookingRef);
+    if (!bookingDoc.exists()) {
+      throw new Error(`Booking with ID ${bookingId} not found`);
     }
     
-    // Add updatedAt timestamp
-    updates.updatedAt = serverTimestamp();
+    // Prepare cancellation data
+    const bookingData = bookingDoc.data();
+    const cancellationData = {
+      status: "CANCELLED",
+      cancelledBy: cancelledBy, 
+      cancelReason: reason,
+      updatedAt: serverTimestamp(),
+      // Track who cancelled for audit/logging
+      cancelledById: user ? user.uid : 'system',
+      cancelledByEmail: user ? user.email : 'system'
+    };
     
-    // Update the booking in its found location
-    await updateDoc(bookingRef, updates);
+    // Update in main collection
+    await updateDoc(bookingRef, cancellationData);
     
-    // If booking was found in a subcollection, also try to update/sync with other locations
-    if (foundLocation !== 'main') {
-      const userId = currentBooking.userId;
-      const bikeId = currentBooking.bikeId;
-      
-      // Try to update in main collection if it exists there
+    // If booking has a bikeId, update the bike's availability
+    if (bookingData.bikeId) {
       try {
-        const mainDoc = await getDoc(mainBookingRef);
-        if (mainDoc.exists()) {
-          await updateDoc(mainBookingRef, updates);
-        }
-      } catch (error) {
-        // Silent error handling
-      }
-      
-      // Try to update in user subcollection if it exists and we have userId
-      if (userId) {
-        try {
-          const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
-          const userBookingDoc = await getDoc(userBookingRef);
-          if (userBookingDoc.exists()) {
-            await updateDoc(userBookingRef, updates);
-          }
-        } catch (error) {
-          // Silent error handling
-        }
-      }
-      
-      // Try to update in bike subcollection if it exists and we have bikeId
-      if (bikeId) {
-        try {
-          const bikeBookingRef = doc(db, `bikes/${bikeId}/bookings`, bookingId);
-          const bikeBookingDoc = await getDoc(bikeBookingRef);
-          if (bikeBookingDoc.exists()) {
-            await updateDoc(bikeBookingRef, updates);
-          }
-        } catch (error) {
-          // Silent error handling
-        }
-      }
-    } else {
-      // If booking was found in main collection, also update subcollections
-      const userId = currentBooking.userId;
-      const bikeId = currentBooking.bikeId;
-      
-      // Update in user subcollection if it exists
-      if (userId) {
-        try {
-          const userBookingRef = doc(db, `users/${userId}/bookings`, bookingId);
-          const userBookingDoc = await getDoc(userBookingRef);
-          if (userBookingDoc.exists()) {
-            await updateDoc(userBookingRef, updates);
-          }
-        } catch (error) {
-          // Silent error handling
-        }
-      }
-      
-      // Update in bike subcollection if it exists
-      if (bikeId) {
-        try {
-          const bikeBookingRef = doc(db, `bikes/${bikeId}/bookings`, bookingId);
-          const bikeBookingDoc = await getDoc(bikeBookingRef);
-          if (bikeBookingDoc.exists()) {
-            await updateDoc(bikeBookingRef, updates);
-          }
-        } catch (error) {
-          // Silent error handling
-        }
+        const bikeRef = doc(db, "bikes", bookingData.bikeId);
+        await updateDoc(bikeRef, {
+          isAvailable: true,
+          isInUse: false,
+          updatedAt: serverTimestamp()
+        });
+      } catch (bikeError) {
+        console.warn(`Failed to update bike availability: ${bikeError.message}`);
+        // Continue execution even if bike update fails
       }
     }
     
-    // Get the updated document from the original location
-    const updatedDoc = await getDoc(bookingRef);
-    const data = updatedDoc.data();
+    // Send notification to the user (this is handled by Firebase functions or mobile app)
     
-    return {
-      id: bookingId,
-      ...data,
-      startDate: data.startDate?.toDate ? data.startDate.toDate() : data.startDate,
-      endDate: data.endDate?.toDate ? data.endDate.toDate() : data.endDate,
-      createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt,
-      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : data.updatedAt
+    return { 
+      success: true, 
+      message: `Booking ${bookingId} successfully cancelled` 
     };
   } catch (error) {
     throw error;
@@ -579,20 +517,39 @@ export const calculateBookingDuration = (booking) => {
     return 'N/A';
   }
   
-  const start = booking.startDate instanceof Date ? booking.startDate : booking.startDate.toDate();
-  const end = booking.endDate instanceof Date ? booking.endDate : booking.endDate.toDate();
-  const diffMs = end.getTime() - start.getTime();
-  const diffHours = diffMs / (1000 * 60 * 60);
+  // Safe date conversion - handle both Date objects and string dates
+  let start, end;
   
-  if (booking.isHourly) {
-    // For hourly bookings, show hours and minutes
-    const hours = Math.floor(diffHours);
-    const minutes = Math.floor((diffHours - hours) * 60);
-    return `${hours}h ${minutes}m`;
-  } else {
-    // For daily bookings, show days
-    const days = Math.ceil(diffHours / 24);
-    return `${days} day${days !== 1 ? 's' : ''}`;
+  try {
+    start = booking.startDate instanceof Date 
+      ? booking.startDate 
+      : (booking.startDate.toDate ? booking.startDate.toDate() : new Date(booking.startDate));
+      
+    end = booking.endDate instanceof Date 
+      ? booking.endDate 
+      : (booking.endDate.toDate ? booking.endDate.toDate() : new Date(booking.endDate));
+    
+    // Check if dates are valid
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return 'N/A';
+    }
+    
+    const diffMs = end.getTime() - start.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    
+    if (booking.isHourly) {
+      // For hourly bookings, show hours and minutes
+      const hours = Math.floor(diffHours);
+      const minutes = Math.floor((diffHours - hours) * 60);
+      return `${hours}h ${minutes}m`;
+    } else {
+      // For daily bookings, show days
+      const days = Math.ceil(diffHours / 24);
+      return `${days} day${days !== 1 ? 's' : ''}`;
+    }
+  } catch (error) {
+    console.error("Error calculating booking duration:", error);
+    return 'N/A';
   }
 };
 

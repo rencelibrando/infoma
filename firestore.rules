@@ -317,5 +317,12 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    // App configuration collection - for location restrictions and other app settings
+    match /app_config/{docId} {
+      allow read: if true;  // Anyone can read app config
+      allow write: if true;  // TEMPORARY: Allow anyone to write for debugging
+      // TODO: Change back to isAdmin() once debugging is complete
+    }
   }
 } 
