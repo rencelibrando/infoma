@@ -138,34 +138,19 @@ const TrackingSettings = () => {
   const [initialLoad, setInitialLoad] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('checking');
   
-  // Admin verification states
-  const [adminStatus, setAdminStatus] = useState({
-    isChecking: true,
-    isAdmin: false,
-    currentUser: null,
-    adminDocExists: false,
-    userDocData: null,
-    debugInfo: []
-  });
+  // Admin verification states (simplified)
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCheckComplete, setAdminCheckComplete] = useState(false);
   
-  // Check admin status
+  // Check admin status (simplified without debug info)
   useEffect(() => {
     const checkAdminStatus = async () => {
-      const debugInfo = [];
-      
       try {
         const currentUser = auth.currentUser;
-        debugInfo.push(`Current user: ${currentUser ? currentUser.email : 'None'}`);
         
         if (!currentUser) {
-          setAdminStatus({
-            isChecking: false,
-            isAdmin: false,
-            currentUser: null,
-            adminDocExists: false,
-            userDocData: null,
-            debugInfo
-          });
+          setIsAdmin(false);
+          setAdminCheckComplete(true);
           return;
         }
         
@@ -173,61 +158,37 @@ const TrackingSettings = () => {
         try {
           const adminDoc = await getDoc(doc(db, 'admins', currentUser.uid));
           const adminDocExists = adminDoc.exists();
-          debugInfo.push(`Admin doc exists: ${adminDocExists}`);
           
           if (adminDocExists) {
-            debugInfo.push(`Admin doc data: ${JSON.stringify(adminDoc.data())}`);
-          }
-        } catch (adminError) {
-          debugInfo.push(`Admin doc check error: ${adminError.message}`);
-        }
-        
-        // Check user document for admin status
-        let userDocData = null;
-        try {
-          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-          if (userDoc.exists()) {
-            userDocData = userDoc.data();
-            debugInfo.push(`User doc data: ${JSON.stringify(userDocData)}`);
+            setIsAdmin(true);
           } else {
-            debugInfo.push('User doc does not exist');
+            // Check user document for admin status
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            if (userDoc.exists()) {
+              const userData = userDoc.data();
+              const isDocAdmin = userData?.isAdmin === true || 
+                                userData?.isAdmin === 'true' || 
+                                userData?.role?.toLowerCase() === 'admin';
+              setIsAdmin(isDocAdmin);
+            }
           }
-        } catch (userError) {
-          debugInfo.push(`User doc check error: ${userError.message}`);
+        } catch (error) {
+          console.error('Error checking admin status:', error);
         }
         
-        // Determine admin status
+        // Check by email domain
         const isEmailAdmin = currentUser.email?.endsWith('@bambike.com') || 
                             currentUser.email?.includes('admin');
-        const isDocAdmin = userDocData?.isAdmin === true || 
-                          userDocData?.isAdmin === 'true' || 
-                          userDocData?.role?.toLowerCase() === 'admin';
         
-        debugInfo.push(`Email admin check: ${isEmailAdmin}`);
-        debugInfo.push(`Doc admin check: ${isDocAdmin}`);
-        
-        const finalAdminStatus = isEmailAdmin || isDocAdmin;
-        debugInfo.push(`Final admin status: ${finalAdminStatus}`);
-        
-        setAdminStatus({
-          isChecking: false,
-          isAdmin: finalAdminStatus,
-          currentUser,
-          adminDocExists: false, // We'll update this if needed
-          userDocData,
-          debugInfo
-        });
+        if (isEmailAdmin) {
+          setIsAdmin(true);
+        }
         
       } catch (error) {
-        debugInfo.push(`Admin check error: ${error.message}`);
-        setAdminStatus({
-          isChecking: false,
-          isAdmin: false,
-          currentUser: null,
-          adminDocExists: false,
-          userDocData: null,
-          debugInfo
-        });
+        console.error('Admin check error:', error);
+        setIsAdmin(false);
+      } finally {
+        setAdminCheckComplete(true);
       }
     };
     
@@ -238,23 +199,12 @@ const TrackingSettings = () => {
   useEffect(() => {
     const testConnection = async () => {
       try {
-        console.log('Testing Firebase connection...');
-        
         // Test Realtime Database read
         const rtdbTestRef = ref(realtimeDb, '.info/connected');
         const unsubscribe = onValue(rtdbTestRef, (snapshot) => {
           const connected = snapshot.val();
-          console.log('Realtime Database connected:', connected);
           setConnectionStatus(connected ? 'connected' : 'disconnected');
         });
-        
-        // Test Firestore read
-        try {
-          const testDoc = await getDoc(doc(db, 'app_config', 'settings'));
-          console.log('Firestore connection test successful');
-        } catch (firestoreError) {
-          console.error('Firestore connection test failed:', firestoreError);
-        }
         
         return () => unsubscribe();
       } catch (error) {
@@ -271,8 +221,6 @@ const TrackingSettings = () => {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        console.log('Loading settings...');
-        
         // First try to load from Realtime Database
         const settingsRef = ref(realtimeDb, 'app_config');
         
@@ -280,19 +228,15 @@ const TrackingSettings = () => {
         const snapshot = await get(settingsRef);
         if (snapshot.exists()) {
           const data = snapshot.val();
-          console.log('Loaded settings from Realtime Database:', data);
           if (data.locationRestrictionEnabled !== undefined) {
             setIsLocationRestrictionEnabled(data.locationRestrictionEnabled);
           }
         } else {
-          console.log('No settings found in Realtime Database, checking Firestore...');
-          
           // Fallback to Firestore
           try {
             const firestoreDoc = await getDoc(doc(db, 'app_config', 'settings'));
             if (firestoreDoc.exists()) {
               const data = firestoreDoc.data();
-              console.log('Loaded settings from Firestore:', data);
               if (data.locationRestrictionEnabled !== undefined) {
                 setIsLocationRestrictionEnabled(data.locationRestrictionEnabled);
               }
@@ -307,7 +251,6 @@ const TrackingSettings = () => {
         const listener = onValue(settingsRef, (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.val();
-            console.log('Settings updated:', data);
             if (data.locationRestrictionEnabled !== undefined) {
               setIsLocationRestrictionEnabled(data.locationRestrictionEnabled);
             }
@@ -344,43 +287,15 @@ const TrackingSettings = () => {
     setSaveStatus('');
     setErrorDetails('');
     
-    console.log('=== SAVE SETTINGS DEBUG START ===');
-    console.log('Saving settings:', { locationRestrictionEnabled: isLocationRestrictionEnabled });
-    
-    // Debug current user and authentication
     const currentUser = auth.currentUser;
-    console.log('Current user:', currentUser);
-    console.log('User email:', currentUser?.email);
-    console.log('User UID:', currentUser?.uid);
-    console.log('User verified:', currentUser?.emailVerified);
-    
-    // Get and log the user token
-    try {
-      if (currentUser) {
-        const token = await currentUser.getIdToken(true);
-        console.log('User token (first 50 chars):', token.substring(0, 50) + '...');
-        
-        const tokenResult = await currentUser.getIdTokenResult();
-        console.log('Token claims:', tokenResult.claims);
-      }
-    } catch (tokenError) {
-      console.error('Error getting token:', tokenError);
-    }
     
     try {
-      // Test 1: Save to Realtime Database first (primary)
-      console.log('=== REALTIME DATABASE SAVE TEST ===');
+      // Save to Realtime Database first (primary)
       const rtdbRef = ref(realtimeDb, 'app_config/locationRestrictionEnabled');
       await set(rtdbRef, isLocationRestrictionEnabled);
-      console.log('✓ Realtime Database save successful');
       
-      // Test 2: Save to Firestore
-      console.log('=== FIRESTORE SAVE TEST ===');
-      console.log('Attempting to save to Firestore path: app_config/settings');
-      
+      // Also save to Firestore for consistency and backup
       const firestoreRef = doc(db, 'app_config', 'settings');
-      console.log('Firestore reference created:', firestoreRef.path);
-      
       const dataToSave = {
         locationRestrictionEnabled: isLocationRestrictionEnabled,
         updatedAt: new Date(),
@@ -388,13 +303,10 @@ const TrackingSettings = () => {
         userEmail: currentUser?.email,
         userUID: currentUser?.uid
       };
-      console.log('Data to save:', dataToSave);
       
       await setDoc(firestoreRef, dataToSave, { merge: true });
-      console.log('✓ Firestore save successful');
       
       setSaveStatus('success');
-      console.log('=== SAVE SETTINGS DEBUG END - SUCCESS ===');
       
       // Clear success message after 3 seconds
       setTimeout(() => {
@@ -402,12 +314,7 @@ const TrackingSettings = () => {
       }, 3000);
       
     } catch (error) {
-      console.error('=== SAVE SETTINGS DEBUG END - ERROR ===');
-      console.error('Full error object:', error);
-      console.error('Error code:', error.code);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-      
+      console.error('Error saving settings:', error);
       setSaveStatus('error');
       
       // Provide detailed error information
@@ -430,35 +337,6 @@ const TrackingSettings = () => {
     <SettingsContainer>
       <h3>Tracking Settings</h3>
       
-      {/* Admin Status Debug Section */}
-      <div style={{ 
-        background: '#f8f9fa', 
-        border: '1px solid #dee2e6', 
-        borderRadius: '4px', 
-        padding: '12px', 
-        marginBottom: '16px',
-        fontSize: '12px' 
-      }}>
-        <h4 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Admin Status Debug</h4>
-        {adminStatus.isChecking ? (
-          <div>Checking admin status...</div>
-        ) : (
-          <div>
-            <div style={{ fontWeight: 'bold', color: adminStatus.isAdmin ? '#28a745' : '#dc3545' }}>
-              Admin Status: {adminStatus.isAdmin ? '✓ ADMIN' : '✗ NOT ADMIN'}
-            </div>
-            <div style={{ marginTop: '8px' }}>
-              <strong>Debug Info:</strong>
-              <ul style={{ margin: '4px 0', paddingLeft: '16px' }}>
-                {adminStatus.debugInfo.map((info, index) => (
-                  <li key={index}>{info}</li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-      </div>
-      
       {connectionStatus === 'checking' && (
         <div style={{ color: '#666', fontSize: '12px', marginBottom: '10px' }}>
           Checking Firebase connection...
@@ -477,7 +355,7 @@ const TrackingSettings = () => {
         </div>
       )}
       
-      {!adminStatus.isAdmin && !adminStatus.isChecking && (
+      {!isAdmin && adminCheckComplete && (
         <div style={{ 
           background: '#fff3cd', 
           border: '1px solid #ffeaa7', 
@@ -517,7 +395,7 @@ const TrackingSettings = () => {
               type="checkbox" 
               checked={isLocationRestrictionEnabled}
               onChange={handleToggleLocationRestriction}
-              disabled={!adminStatus.isAdmin}
+              disabled={!isAdmin}
             />
             <span></span>
           </ToggleSwitch>
@@ -529,7 +407,7 @@ const TrackingSettings = () => {
       
       <SaveButton 
         onClick={saveSettings}
-        disabled={isSaving || connectionStatus === 'disconnected' || !adminStatus.isAdmin}
+        disabled={isSaving || connectionStatus === 'disconnected' || !isAdmin}
       >
         {isSaving ? 'Saving...' : 'Save Settings'}
       </SaveButton>
