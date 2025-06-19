@@ -7,6 +7,7 @@ import com.example.bikerental.utils.FirebaseAppCheckManager
 import com.example.bikerental.utils.LogManager
 import com.example.bikerental.utils.PlacesApiService
 import com.example.bikerental.utils.RoutesApiService
+import com.example.bikerental.utils.AppConfigManager
 import com.google.firebase.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
@@ -33,6 +34,9 @@ class BikeRentalApplication : Application() {
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     
     private var appCheckInitialized = false
+    
+    // App Config Manager instance
+    private lateinit var appConfigManager: AppConfigManager
     
     companion object {
         @Volatile
@@ -125,6 +129,15 @@ class BikeRentalApplication : Application() {
         }
     }
     
+    private fun initializeAppConfigManager() {
+        try {
+            appConfigManager = AppConfigManager.getInstance(applicationContext)
+            LogManager.d(TAG, "App Config Manager initialized")
+        } catch (e: Exception) {
+            LogManager.e(TAG, "Failed to initialize App Config Manager", e)
+        }
+    }
+    
     private fun initializeInBackground() {
         // Move heavy operations to background thread to reduce main thread blocking
         applicationScope.launch {
@@ -137,6 +150,9 @@ class BikeRentalApplication : Application() {
             
             // Also initialize Places API in background
             initializePlacesApi()
+            
+            // Initialize App Config Manager
+            initializeAppConfigManager()
             
             LogManager.d(TAG, "Background Firebase operations completed")
         }
@@ -164,6 +180,11 @@ class BikeRentalApplication : Application() {
         
         // Shutdown Places API client
         PlacesApiService.shutdown()
+        
+        // Clean up App Config Manager
+        if (::appConfigManager.isInitialized) {
+            appConfigManager.cleanup()
+        }
         
         super.onTerminate()
     }

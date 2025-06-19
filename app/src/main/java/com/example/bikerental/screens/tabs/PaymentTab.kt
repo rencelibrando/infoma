@@ -105,12 +105,13 @@ object PaymentColors {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaymentTab(
-    viewModel: PaymentViewModel = hiltViewModel()
+    viewModel: PaymentViewModel = hiltViewModel(),
+    navController: androidx.navigation.NavController? = null
 ) {
     // Use RestrictedFeature to prevent access if user is not ID verified
     RestrictedFeature(
         featureType = "payment",
-        navController = androidx.navigation.compose.rememberNavController()
+        navController = navController ?: androidx.navigation.compose.rememberNavController()
     ) {
         val uiState by viewModel.uiState.collectAsStateWithLifecycle()
         val currentStep by viewModel.currentStep.collectAsStateWithLifecycle()

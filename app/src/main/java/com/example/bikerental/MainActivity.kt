@@ -388,8 +388,8 @@ fun AppNavigation(
         composable(Screen.ChangePassword.route) { ChangePasswordScreen(navController, authViewModel) }
         
         // Add missing routes
-        composable(Screen.BikeList.route) { BikesTab(fusedLocationClient) }
-        composable(Screen.Bookings.route) { BookingsTab() }
+        composable(Screen.BikeList.route) { BikesTab(navController = navController, fusedLocationProviderClient = fusedLocationClient) }
+        composable(Screen.Bookings.route) { BookingsTab(navController = navController) }
         
         // Bike detail route
         composable(

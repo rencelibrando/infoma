@@ -48,7 +48,7 @@ fun SetupNavGraph(
             )
         }
         composable(route = "map") { 
-            MapTab()
+            MapTab(navController = navController)
         }
         composable(route = "history") { 
             RideHistoryTab()

@@ -139,6 +139,9 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.mutableIntStateOf
 import com.example.bikerental.utils.FormattingUtils.calculateEtaString
+import com.example.bikerental.utils.AppConfigManager
+import com.example.bikerental.utils.LocationManager
+import androidx.navigation.NavController
 
 // Singleton HTTP client for better performance
 private val httpClient: OkHttpClient by lazy {
@@ -154,7 +157,7 @@ private val routeCache = ConcurrentHashMap<String, List<RouteInfo>>()
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
+fun MapTab(bikeViewModel: BikeViewModel = viewModel(), navController: NavController) {
     val context = LocalContext.current
     rememberScrollState()
     
@@ -694,6 +697,45 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
     var isOutsideGeofence by remember { mutableStateOf(false) }
     var showGeofenceError by remember { mutableStateOf(false) }
     var showGeofenceBoundary by remember { mutableStateOf(false) }
+
+    // Add AppConfigManager state to check location restrictions
+    var isLocationRestrictionEnabled by remember { mutableStateOf(true) }
+    val appConfigManager = remember { AppConfigManager.getInstance(context) }
+    
+    // Collect the location restriction setting
+    LaunchedEffect(Unit) {
+        appConfigManager.isLocationRestrictionEnabled.collect { isEnabled ->
+            isLocationRestrictionEnabled = isEnabled
+            Log.d("MapTab", "Location restriction setting updated: $isEnabled")
+            
+            // If restrictions are disabled, clear any active geofence errors
+            if (!isEnabled && showGeofenceError) {
+                showGeofenceError = false
+            }
+        }
+    }
+
+    // Define checkUserLocation as a local function inside the composable to access state variables
+    fun checkUserLocation(location: LatLng) {
+        // Skip geofence checking if restrictions are disabled
+        if (!isLocationRestrictionEnabled) {
+            isOutsideGeofence = false
+            return
+        }
+        
+        try {
+            val locationManager = com.example.bikerental.utils.LocationManager.getInstance(context)
+            if (locationManager.isWithinIntramuros(location)) {
+                isOutsideGeofence = false
+            } else {
+                isOutsideGeofence = true
+                showGeofenceError = true
+                Log.w("MapTab", "User outside Intramuros geofence: $location")
+            }
+        } catch (e: Exception) {
+            Log.e("MapTab", "Error checking location for geofence", e)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         GoogleMap(
@@ -1247,24 +1289,26 @@ fun MapTab(bikeViewModel: BikeViewModel = viewModel()) {
                     Button(
                         onClick = { 
                             if (permissionsState.allPermissionsGranted) {
-                                // Check if user is within Intramuros before showing the StartRideDialog
-                                CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
-                                    try {
-                                        val location = getCurrentLocationSuspend(fusedLocationProviderClient)
-                                        val locationManager = com.example.bikerental.utils.LocationManager.getInstance(context)
-                                        
-                                        if (locationManager.isWithinIntramuros(location)) {
-                                            isOutsideGeofence = false
+                                // Skip location check if restrictions are disabled
+                                if (!isLocationRestrictionEnabled) {
+                                    Log.d("MapTab", "Location restrictions disabled - starting ride dialog")
+                                    isOutsideGeofence = false
+                                    showStartRideDialog = true
+                                } else {
+                                    // Check if user is within Intramuros before showing the StartRideDialog
+                                    CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+                                        try {
+                                            val location = getCurrentLocationSuspend(fusedLocationProviderClient)
+                                            // Check location with geofence
+                                            checkUserLocation(location)
+                                            if (!isOutsideGeofence) {
+                                                showStartRideDialog = true
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("MapTab", "Error checking location for geofence", e)
+                                            // If we can't determine location, allow starting the ride but let BikeViewModel do the check
                                             showStartRideDialog = true
-                                        } else {
-                                            isOutsideGeofence = true
-                                            showGeofenceError = true
-                                            Log.w("MapTab", "User outside Intramuros geofence: $location")
                                         }
-                                    } catch (e: Exception) {
-                                        Log.e("MapTab", "Error checking location for geofence", e)
-                                        // If we can't determine location, allow starting the ride but let BikeViewModel do the check
-                                        showStartRideDialog = true
                                     }
                                 }
                             } else {

@@ -28,6 +28,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,16 @@ import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.zip
+import kotlinx.coroutines.job
 
 class BikeViewModel : ViewModel() {
     private val TAG = "BikeViewModel"
@@ -177,12 +188,38 @@ class BikeViewModel : ViewModel() {
     private val _emergencyState = MutableStateFlow<String?>(null)
     val emergencyState: StateFlow<String?> = _emergencyState
     
+    // Add this section for AppConfigManager to check location restrictions
+    private var _isLocationRestrictionEnabled = MutableStateFlow(true) // Default to true/enabled
+    val isLocationRestrictionEnabled: StateFlow<Boolean> = _isLocationRestrictionEnabled.asStateFlow()
+    private var configListener: Job? = null
+    
     init {
         setInstance(this)
         fetchAllBikes()
         fetchBikesFromFirestore()
         setupBikesRealtimeUpdates()
         checkForActiveRide()
+        
+        // Initialize AppConfigManager to monitor location restriction setting
+        initAppConfigManager()
+    }
+    
+    private fun initAppConfigManager() {
+        try {
+            val appConfigManager = com.example.bikerental.utils.AppConfigManager.getInstance(
+                com.example.bikerental.BikeRentalApplication.instance
+            )
+            
+            // Start collecting the configuration flow
+            configListener = viewModelScope.launch {
+                appConfigManager.isLocationRestrictionEnabled.collect { isEnabled ->
+                    _isLocationRestrictionEnabled.value = isEnabled
+                    Log.d(TAG, "Location restriction setting updated in BikeViewModel: $isEnabled")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize App Config Manager in BikeViewModel", e)
+        }
     }
     
     /**
@@ -827,15 +864,19 @@ class BikeViewModel : ViewModel() {
                 
                 Log.d(TAG, "User authenticated: ${currentUser.uid}")
                 
-                // GEOFENCE CHECK: Verify user is within Intramuros
-                val locationManager = com.example.bikerental.utils.LocationManager.getInstance(
-                    com.example.bikerental.BikeRentalApplication.instance
-                )
-                
-                if (!locationManager.isWithinIntramuros(userLocation)) {
-                    Log.w(TAG, "Geofence restriction: User outside Intramuros area")
-                    _unlockError.value = "You must be inside Intramuros, Manila to start a ride."
-                    return@launch
+                // GEOFENCE CHECK: Verify user is within Intramuros, but only if location restriction is enabled
+                if (_isLocationRestrictionEnabled.value) {
+                    val locationManager = com.example.bikerental.utils.LocationManager.getInstance(
+                        com.example.bikerental.BikeRentalApplication.instance
+                    )
+                    
+                    if (!locationManager.isWithinIntramuros(userLocation)) {
+                        Log.w(TAG, "Geofence restriction: User outside Intramuros area")
+                        _unlockError.value = "You must be inside Intramuros, Manila to start a ride."
+                        return@launch
+                    }
+                } else {
+                    Log.d(TAG, "Location restrictions disabled - skipping geofence check")
                 }
                 
                 // SAFETY CHECK: Ensure no active ride exists before starting a new one
@@ -2427,6 +2468,8 @@ class BikeViewModel : ViewModel() {
         INSTANCE = null
         
         Log.d(TAG, "BikeViewModel cleaned up")
+        
+        configListener?.cancel()
     }
 }
 

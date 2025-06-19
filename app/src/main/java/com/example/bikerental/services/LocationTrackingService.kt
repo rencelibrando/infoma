@@ -10,10 +10,12 @@ import android.location.Location
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import com.example.bikerental.R
 import com.example.bikerental.models.BikeLocation
+import com.example.bikerental.utils.AppConfigManager
 import com.example.bikerental.utils.LogManager
 import com.example.bikerental.utils.DistanceCalculationUtils
 import com.google.android.gms.location.*
@@ -30,6 +32,8 @@ import java.util.*
  * Handles all Firebase persistence for ride data to avoid duplication
  */
 class LocationTrackingService : Service() {
+    
+    private val TAG = "LocationTrackingService"
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationRequest: LocationRequest
@@ -53,6 +57,11 @@ class LocationTrackingService : Service() {
     // Add geofence-related fields to the class below other constants
     private val NOTIFICATION_ID = 12345
     private val GEOFENCE_NOTIFICATION_ID = 12346
+    
+    // App config manager to check if location restrictions are enabled
+    private lateinit var appConfigManager: AppConfigManager
+    private var isLocationRestrictionEnabled = true
+    private var configListener: Job? = null
     
     companion object {
         const val CHANNEL_ID = "LocationTracking"
@@ -104,8 +113,22 @@ class LocationTrackingService : Service() {
     
     override fun onCreate() {
         super.onCreate()
+        
+        // Initialize AppConfigManager
+        appConfigManager = AppConfigManager.getInstance(applicationContext)
+        
+        // Start collecting the configuration flow to monitor changes
+        configListener = serviceScope.launch {
+            appConfigManager.isLocationRestrictionEnabled.collect { isEnabled ->
+                isLocationRestrictionEnabled = isEnabled
+                Log.d(TAG, "Location restriction setting updated: $isEnabled")
+            }
+        }
+        
         setupLocationClient()
         createNotificationChannel()
+        
+        LogManager.logInfo(TAG, "Location tracking service created")
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -571,6 +594,9 @@ class LocationTrackingService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         
+        // Cancel the config listener
+        configListener?.cancel()
+        
         if (isTracking) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
@@ -581,6 +607,16 @@ class LocationTrackingService : Service() {
     // Add this new method to monitor geofence boundary
     private fun checkGeofenceBoundary(location: com.google.android.gms.maps.model.LatLng) {
         try {
+            // Skip geofence checking if location restrictions are disabled
+            if (!isLocationRestrictionEnabled) {
+                // If we were previously inside warning zone, reset it
+                if (insideBoundaryWarningZone) {
+                    insideBoundaryWarningZone = false
+                    Log.d(TAG, "Location restrictions disabled - ignoring geofence boundaries")
+                }
+                return
+            }
+            
             val locationManager = com.example.bikerental.utils.LocationManager.getInstance(this)
             
             // If not in Intramuros at all, don't process (handled by ride start checks)
