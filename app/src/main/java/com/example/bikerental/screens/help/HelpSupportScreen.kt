@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import com.example.bikerental.components.ChatbotDialog
 import com.example.bikerental.models.FAQ
 import com.example.bikerental.models.SupportMessage
 import com.example.bikerental.models.SupportReply
@@ -70,6 +72,9 @@ fun HelpSupportScreen(
     val accentColor = Color(0xFF4CAF50)
     val uiState by viewModel.uiState.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+    
+    // Chatbot state
+    var showChatbot by remember { mutableStateOf(false) }
     
     // Show tabs for Contact Us and My Messages
     var selectedTab by remember { mutableStateOf(0) }
@@ -118,6 +123,23 @@ fun HelpSupportScreen(
                     titleContentColor = accentColor
                 )
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showChatbot = true },
+                containerColor = accentColor,
+                contentColor = Color.White,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 6.dp,
+                    pressedElevation = 8.dp
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = "Open Chatbot",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     ) { paddingValues ->
         Column(
@@ -352,6 +374,13 @@ fun HelpSupportScreen(
             viewModel.loadUserMessages()
         }
     }
+    
+    // Chatbot Dialog
+    ChatbotDialog(
+        isVisible = showChatbot,
+        onDismiss = { showChatbot = false },
+        accentColor = accentColor
+    )
 }
 
 @Composable
