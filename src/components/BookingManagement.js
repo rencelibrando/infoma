@@ -33,6 +33,14 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+import EnhancedNotificationList from './EnhancedNotificationList';
+import { 
+  getAllNotifications, 
+  markNotificationAsRead as markAsRead, 
+  deleteNotification as deleteNotif, 
+  clearAllNotifications as clearAllNotifs,
+  getUnreadNotificationCount 
+} from '../services/notificationService';
 
 // Pine green and gray theme colors consistent with app
 const colors = {
@@ -1565,6 +1573,9 @@ const BookingManagement = () => {
         
         // Load revenue data
         await loadRevenueData();
+        
+        // Load notifications
+        await loadNotifications();
       } catch (error) {
         setIsLoading(false);
         if (error.code === 'permission-denied') {
@@ -2085,42 +2096,94 @@ const BookingManagement = () => {
   };
 
   // Mark single notification as read
-  const markNotificationAsRead = (notificationId) => {
-    // Update the notification to mark it as read without losing data
-    setBookingNotifications(prev =>
-      prev.map(notification => 
-        notification.id === notificationId
-          ? { ...notification, read: true }
-          : notification
-      )
-    );
-    
-    // Update the badge counter to reflect unread notifications only
-    const unreadCount = bookingNotifications
-      .filter(notification => !notification.read)
-      .length - 1; // Subtract 1 for the one being marked as read
-    
-    setCancellationCount(Math.max(0, unreadCount));
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      // Update in database
+      await markAsRead(notificationId);
+      
+      // Update local state
+      setBookingNotifications(prev =>
+        prev.map(notification => 
+          notification.id === notificationId
+            ? { ...notification, read: true }
+            : notification
+        )
+      );
+      
+      // Update the badge counter to reflect unread notifications only
+      const unreadCount = bookingNotifications
+        .filter(notification => !notification.read)
+        .length - 1; // Subtract 1 for the one being marked as read
+      
+      setCancellationCount(Math.max(0, unreadCount));
+      
+      console.log('Notification marked as read successfully');
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      showNotification('Failed to mark notification as read', 'error');
+    }
   };
   
   // Delete a notification
-  const deleteNotification = (notificationId) => {
-    setBookingNotifications(prev => 
-      prev.filter(notification => notification.id !== notificationId)
-    );
-    
-    // Update the badge counter
-    const unreadCount = bookingNotifications
-      .filter(notification => !notification.read && notification.id !== notificationId)
-      .length;
-    
-    setCancellationCount(unreadCount);
+  const deleteNotification = async (notificationId) => {
+    try {
+      // Delete from database
+      await deleteNotif(notificationId);
+      
+      // Update local state
+      setBookingNotifications(prev => 
+        prev.filter(notification => notification.id !== notificationId)
+      );
+      
+      // Update the badge counter
+      const unreadCount = bookingNotifications
+        .filter(notification => !notification.read && notification.id !== notificationId)
+        .length;
+      
+      setCancellationCount(unreadCount);
+      
+      console.log('Notification deleted successfully');
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      showNotification('Failed to delete notification', 'error');
+    }
   };
   
   // Clear all notifications
-  const clearAllNotifications = () => {
-    setBookingNotifications([]);
-    setCancellationCount(0);
+  const clearAllNotifications = async () => {
+    try {
+      // Clear from database
+      const result = await clearAllNotifs();
+      
+      // Update local state
+      setBookingNotifications([]);
+      setCancellationCount(0);
+      
+      console.log(`Cleared ${result.deletedCount || 0} notifications`);
+      showNotification('All notifications cleared successfully', 'success');
+    } catch (error) {
+      console.error('Error clearing notifications:', error);
+      showNotification('Failed to clear notifications', 'error');
+    }
+  };
+
+  // Load notifications from database
+  const loadNotifications = async () => {
+    try {
+      const notifications = await getAllNotifications(50);
+      setBookingNotifications(notifications);
+      
+      // Update unread count
+      const unreadCount = notifications.filter(n => !n.read).length;
+      setCancellationCount(unreadCount);
+      
+      console.log(`Loaded ${notifications.length} notifications`);
+    } catch (error) {
+      console.error('Error loading notifications:', error);
+      // Fallback to empty notifications
+      setBookingNotifications([]);
+      setCancellationCount(0);
+    }
   };
 
   return (

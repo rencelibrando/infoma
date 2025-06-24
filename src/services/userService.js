@@ -260,6 +260,45 @@ export const deleteUser = async (userId) => {
 };
 
 /**
+ * Submit ID for verification (sets status to 'pending')
+ * This is a convenience function for users to submit their ID
+ * 
+ * @param {string} userId - The ID of the user submitting verification
+ * @param {string} idImageUrl - The URL of the uploaded ID image
+ * @returns {Promise<void>}
+ */
+export const submitIdVerification = async (userId, idImageUrl) => {
+  try {
+    const currentUser = requireAuth();
+    
+    // Users can only submit verification for their own account
+    if (currentUser.uid !== userId) {
+      throw new Error('You can only submit verification for your own account.');
+    }
+    
+    // Build update object for submission
+    const updateData = {
+      idImageUrl: idImageUrl,
+      idVerificationStatus: 'pending',
+      isIdVerified: false,
+      idVerificationNote: null, // Clear any previous rejection notes
+      idSubmittedAt: new Date(),
+      lastUpdated: new Date(),
+    };
+    
+    // Update Firestore document
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, updateData);
+    
+    console.log(`User ${userId} submitted ID for verification`);
+    return true;
+  } catch (error) {
+    console.error('Error submitting ID verification:', error);
+    throw error;
+  }
+};
+
+/**
  * Update the ID verification status of a user
  * 
  * @param {string} userId - The ID of the user to update
@@ -273,7 +312,7 @@ export const updateIdVerificationStatus = async (userId, status, note = null) =>
     const currentUser = requireAuth();
     console.log("Current authenticated user:", currentUser.uid);
     
-    // Validate status first before checking admin
+    // Validate status first before checking permissions
     if (!['pending', 'verified', 'rejected'].includes(status)) {
       throw new Error(`Invalid verification status: ${status}`);
     }
@@ -283,15 +322,27 @@ export const updateIdVerificationStatus = async (userId, status, note = null) =>
       throw new Error('A reason for rejection is required.');
     }
 
-    // Check if current user is an admin using our helper
+    // Check if current user is an admin
     const isAdmin = await checkAdminStatus(currentUser.uid);
     
-    if (!isAdmin) {
-      console.error(`User ${currentUser.uid} attempted to update verification status but is not an admin`);
-      throw new Error('Only administrators can update ID verification status.');
+    // Permission logic:
+    // - Users can only set their own status to 'pending' (when submitting ID)
+    // - Only admins can approve ('verified') or reject ('rejected') any user's ID
+    if (status === 'pending') {
+      // Users can set their own status to pending, or admins can set anyone's status to pending
+      if (currentUser.uid !== userId && !isAdmin) {
+        console.error(`User ${currentUser.uid} attempted to set pending status for another user ${userId}`);
+        throw new Error('You can only submit verification for your own account.');
+      }
+    } else if (status === 'verified' || status === 'rejected') {
+      // Only admins can approve or reject ID verification
+      if (!isAdmin) {
+        console.error(`User ${currentUser.uid} attempted to ${status} verification but is not an admin`);
+        throw new Error('Only administrators can approve or reject ID verification.');
+      }
     }
     
-    console.log(`Admin ${currentUser.uid} updating ID verification for user ${userId} to ${status}`);
+    console.log(`${isAdmin ? 'Admin' : 'User'} ${currentUser.uid} updating ID verification for user ${userId} to ${status}`);
     
     // Build update object
     const updateData = {
@@ -314,7 +365,7 @@ export const updateIdVerificationStatus = async (userId, status, note = null) =>
     const userRef = doc(db, 'users', userId);
     await updateDoc(userRef, updateData);
     
-    console.log(`User ${userId} ID verification status updated to "${status}" by admin ${currentUser.uid}`);
+    console.log(`User ${userId} ID verification status updated to "${status}" by ${isAdmin ? 'admin' : 'user'} ${currentUser.uid}`);
     return true;
   } catch (error) {
     console.error('Error updating ID verification status:', error);

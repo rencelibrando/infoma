@@ -293,19 +293,31 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
     
-    // Notifications collection - FINAL, CORRECTED RULES
+    // Notifications collection - UPDATED FOR ADMIN DASHBOARD
     match /notifications/{notificationId} {
-        // A user can get and list their own notifications.
-        allow get, list: if isAuthenticated() && isOwner(resource.data.userId);
+        // Users can read their own notifications, admins can read all
+        allow read: if isAuthenticated() && (
+          (resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
 
-        // A service or user can create a notification FOR THAT USER.
-        allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+        // Admins can create notifications for any user, users can create for themselves
+        allow create: if isAuthenticated() && (
+          isAdmin() || 
+          request.resource.data.userId == request.auth.uid
+        );
 
-        // A user can update their own notification (e.g., mark as read).
-        allow update: if isAuthenticated() && isOwner(resource.data.userId);
+        // Users can update their own notifications, admins can update any
+        allow update: if isAuthenticated() && (
+          (resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
 
-        // A user can delete their own notification.
-        allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+        // Users can delete their own notifications, admins can delete any
+        allow delete: if isAuthenticated() && (
+          (resource.data.userId == request.auth.uid) || 
+          isAdmin()
+        );
     }
 
     match /operating_hours/{day} {

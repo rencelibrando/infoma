@@ -15,6 +15,7 @@ import {
   collectionGroup,
   setDoc
 } from "firebase/firestore";
+import { createBookingCancellationNotification } from './notificationService';
 
 // Helper function to check authentication with better error handling
 const checkAuth = () => {
@@ -413,11 +414,19 @@ export const cancelBooking = async (bookingId, reason = "", cancelledBy = "admin
       }
     }
     
-    // Send notification to the user (this is handled by Firebase functions or mobile app)
+    // Create a cancellation notification
+    try {
+      await createBookingCancellationNotification(bookingData, reason, cancelledBy);
+      console.log('Cancellation notification created successfully');
+    } catch (notificationError) {
+      console.warn('Failed to create cancellation notification:', notificationError.message);
+      // Continue execution even if notification creation fails
+    }
     
     return { 
       success: true, 
-      message: `Booking ${bookingId} successfully cancelled` 
+      message: `Booking ${bookingId} successfully cancelled`,
+      bookingData: { ...bookingData, ...cancellationData }
     };
   } catch (error) {
     throw error;
