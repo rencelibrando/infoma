@@ -206,8 +206,8 @@ fun RideProgressDialog(
                         )
                     }
                     
-                    // Current key metric
-                    Row(
+                    // Current key metric - SPEED TEMPORARILY REMOVED
+                    /*Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f),
                         horizontalArrangement = Arrangement.Center
@@ -224,7 +224,10 @@ fun RideProgressDialog(
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
-                    }
+                    }*/
+                    
+                    // Placeholder to maintain layout structure
+                    Box(modifier = Modifier.weight(1f))
                     
                     // Expand/collapse indicator
                     Icon(
@@ -267,12 +270,12 @@ fun RideProgressDialog(
                                 label = "Distance"
                             )
                             
-                            // Max speed
-                            RideMetricItem(
+                            // Max speed - TEMPORARILY REMOVED
+                            /*RideMetricItem(
                                 icon = Icons.Default.Speed,
                                 value = RideMetricsUtils.formatSpeed(maxSpeed),
                                 label = "Max Speed"
-                            )
+                            )*/
                         }
                         
                         Divider()
