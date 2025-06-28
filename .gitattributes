@@ -1,0 +1,6 @@
+*.kt linguist-detectable=true
+*.js linguist-detectable=true
+*.md linguist-detectable=false
+*.json linguist-detectable=false
+*.gradle linguist-detectable=true
+*.xml linguist-detectable=true
