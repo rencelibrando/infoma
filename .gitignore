@@ -1,13 +1,32 @@
+# Android/IntelliJ project files
 *.iml
 .gradle/
-/local.properties
-/.idea/caches
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/captures
-.externalNativeBuild
-.cxx
+.idea/
 local.properties
+.DS_Store
+
+# Build output
+/build/
+**/build/
+.cxx/
+.externalNativeBuild/
+
+# IDE settings
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+
+# Others
+/captures/
+
+# Firebase crashlytics and performance tools
+fabric.properties
+
+# Keystore files (DO NOT COMMIT THIS EVER)
+*.jks
+
+# Google Services JSON (optional if you're sharing open source)
+# google-services.json
