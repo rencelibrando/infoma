@@ -21,7 +21,8 @@ local.properties
 
 # Others
 /captures/
-
+.cursorignore
+.cursor/
 # Firebase crashlytics and performance tools
 fabric.properties
 
