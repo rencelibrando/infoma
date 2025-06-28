@@ -5,33 +5,29 @@ import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import BikeRideScreen from './components/BikeRideScreen';
 import StatusCheck from './components/StatusCheck';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { AnalyticsProvider } from './context/AnalyticsContext';
 import { auth } from './firebase';
 import GoogleMapsPreloader from './components/GoogleMapsPreloader';
 
-// Auth history handler component to prevent back navigation to login
+// Optimized auth history handler with reduced auth state listeners
 const AuthHistoryHandler = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { isAuthenticated } = useAuth(); // Use existing AuthContext instead of new listener
   
   useEffect(() => {
-    // Handle user authentication state changes
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      // If user is authenticated and tries to access login page, redirect to dashboard
-      if (user && location.pathname === '/login') {
-        navigate('/dashboard', { replace: true });
-      }
-    });
-    
-    return () => unsubscribe();
-  }, [navigate, location]);
+    // If user is authenticated and tries to access login page, redirect to dashboard
+    if (isAuthenticated && location.pathname === '/login') {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, location.pathname, navigate]);
   
   // Handle browser back button
   useEffect(() => {
     const handleBackButton = (event) => {
       // If user is authenticated and current location is dashboard
-      if (auth.currentUser && 
+      if (isAuthenticated && 
          (location.pathname === '/dashboard' || 
           location.pathname.startsWith('/ride/'))) {
         // Prevent default action
@@ -46,7 +42,7 @@ const AuthHistoryHandler = () => {
     return () => {
       window.removeEventListener('popstate', handleBackButton);
     };
-  }, [navigate, location]);
+  }, [navigate, location, isAuthenticated]);
   
   return null;
 };
@@ -88,24 +84,16 @@ function App() {
   );
 }
 
-// Protected route component
+// Optimized protected route component using existing AuthContext
 const ProtectedRoute = ({ children }) => {
   const navigate = useNavigate();
-  const [loading, setLoading] = React.useState(true);
-  const [isAuthenticated, setIsAuthenticated] = React.useState(false);
+  const { isAuthenticated, loading } = useAuth(); // Use existing AuthContext
   
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      setIsAuthenticated(!!user);
-      setLoading(false);
-      
-      if (!user) {
-        navigate('/login', { replace: true });
-      }
-    });
-    
-    return () => unsubscribe();
-  }, [navigate]);
+    if (!loading && !isAuthenticated) {
+      navigate('/login', { replace: true });
+    }
+  }, [isAuthenticated, loading, navigate]);
   
   if (loading) {
     return (

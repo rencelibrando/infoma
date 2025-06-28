@@ -10,7 +10,6 @@ import { Marker, InfoWindow, Polyline, Circle, GoogleMap, useJsApiLoader } from 
 import MapContainer from '../MapContainer';
 import { useDataContext } from '../../context/DataContext';
 import { auth } from '../../firebase';
-import TrackingSettings from './TrackingSettings';
 
 
 const pulseStyles = `
@@ -2691,30 +2690,10 @@ const RealTimeTrackingDashboard = () => {
           >
             🕐 Ride History
           </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            style={{
-              background: activeTab === 'settings' ? 
-                `linear-gradient(135deg, ${colors.pineGreen} 0%, ${colors.lightPineGreen} 100%)` : 
-                'transparent',
-              color: activeTab === 'settings' ? colors.white : colors.darkGray,
-              border: 'none',
-              padding: '10px 18px', 
-              cursor: 'pointer',
-              fontSize: '14px', 
-              fontWeight: '600',
-              transition: 'all 0.2s ease',
-              position: 'relative'
-            }}
-          >
-            ⚙️ Settings
-          </button>
         </div>
 
-        <div style={{ padding: activeTab === 'live' || activeTab === 'settings' ? '15px' : '0' }}> {/* Reduced from 20px */}
-          {activeTab === 'settings' ? (
-            <TrackingSettings />
-          ) : activeTab === 'live' ? (
+        <div style={{ padding: activeTab === 'live' ? '15px' : '0' }}> {/* Reduced from 20px */}
+          {activeTab === 'live' ? (
             <>
               {/* Authentication Error Banner */}
               {authError && (

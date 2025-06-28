@@ -1269,14 +1269,11 @@ const PaymentsDashboard = () => {
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState(null);
   
-  // Settings states
-  const [businessName, setBusinessName] = useState('');
-  const [gcashNumber, setGCashNumber] = useState('');
-  const [qrFile, setQrFile] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-  const [currentQRUrl, setCurrentQRUrl] = useState('');
+  // Payment settings moved to AdminProfile component
+  const [businessInfo, setBusinessInfo] = useState({
+    businessName: 'Bambike Cycles',
+    gcashNumber: '09123456789'
+  });
 
   const { user, isAuthenticated, loading: authLoading } = useAuth();
 
@@ -1458,34 +1455,25 @@ const PaymentsDashboard = () => {
     }
   };
 
-  // Load payment settings from Firestore
+  // Load business info for receipts from Firestore
   useEffect(() => {
-    const loadPaymentSettings = async () => {
+    const loadBusinessInfo = async () => {
       try {
         const settingsDoc = await getDoc(doc(db, 'settings', 'payment'));
         if (settingsDoc.exists()) {
-          setBusinessName(settingsDoc.data().businessName);
-          setGCashNumber(settingsDoc.data().gcashNumber);
-          setCurrentQRUrl(settingsDoc.data().qrCodeUrl);
-        } else {
-          // Create default settings if they don't exist
-          const defaultSettings = {
-            gcashNumber: '09123456789',
-            businessName: 'Bambike Cycles',
-            qrCodeUrl: ''
-          };
-          await setDoc(doc(db, 'settings', 'payment'), defaultSettings);
-          setBusinessName(defaultSettings.businessName);
-          setGCashNumber(defaultSettings.gcashNumber);
-          setCurrentQRUrl(defaultSettings.qrCodeUrl);
+          const data = settingsDoc.data();
+          setBusinessInfo({
+            businessName: data.businessName || 'Bambike Cycles',
+            gcashNumber: data.gcashNumber || '09123456789'
+          });
         }
       } catch (error) {
-        console.error('Error loading payment settings:', error);
+        console.error('Error loading business info:', error);
       }
     };
 
     if (isAuthenticated) {
-      loadPaymentSettings();
+      loadBusinessInfo();
     }
   }, [isAuthenticated]);
 
@@ -1604,124 +1592,7 @@ const PaymentsDashboard = () => {
     setProcessingId(null);
   };
 
-  // Handle payment settings update
-  const handleSettingsUpdate = async () => {
-    // Validate input fields
-    if (!gcashNumber || !businessName) {
-      setError({ 
-        type: 'error', 
-        text: 'Please fill in both GCash number and Business name before updating.' 
-      });
-      return;
-    }
-
-    // Validate GCash number format (basic validation)
-    if (!/^09\d{9}$/.test(gcashNumber)) {
-      setError({ 
-        type: 'error', 
-        text: 'Please enter a valid GCash number (format: 09XXXXXXXXX).' 
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    setError({ type: '', text: '' });
-
-    try {
-      let updatedSettings = { 
-        gcashNumber: gcashNumber.trim(),
-        businessName: businessName.trim(),
-        qrCodeUrl: currentQRUrl || ''
-      };
-
-      // Upload new QR code if provided
-      if (qrFile) {
-        const qrRef = ref(storage, `payment-settings/qr-code-${Date.now()}.jpg`);
-        const uploadResult = await uploadBytes(qrRef, qrFile);
-        const downloadURL = await getDownloadURL(qrRef);
-        updatedSettings.qrCodeUrl = downloadURL;
-      }
-
-      // Update settings in Firestore
-      await setDoc(doc(db, 'settings', 'payment'), updatedSettings, { merge: true });
-      
-      setBusinessName(updatedSettings.businessName);
-      setGCashNumber(updatedSettings.gcashNumber);
-      setCurrentQRUrl(updatedSettings.qrCodeUrl);
-      setQrFile(null);
-      
-      // Reset file input
-      const fileInput = document.getElementById('qr-upload');
-      if (fileInput) {
-        fileInput.value = '';
-      }
-      
-      setError({ type: 'success', text: 'Payment settings updated successfully!' });
-      
-      // Clear message after 5 seconds
-      setTimeout(() => setError({ type: '', text: '' }), 5000);
-    } catch (error) {
-      console.error('Error updating payment settings:', error);
-      let errorMessage = 'Failed to update payment settings. ';
-      
-      if (error.code === 'permission-denied') {
-        errorMessage += 'Permission denied. Please check your access rights.';
-      } else if (error.code === 'unavailable') {
-        errorMessage += 'Service temporarily unavailable. Please try again later.';
-      } else {
-        errorMessage += `Error: ${error.message}`;
-      }
-      
-      setError({ type: 'error', text: errorMessage });
-    }
-    
-    setIsUploading(false);
-  };
-
-  const handleQRFileChange = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
-      if (!validTypes.includes(file.type)) {
-        setError({ 
-          type: 'error', 
-          text: 'Please select a valid image file (JPEG, PNG, or GIF).' 
-        });
-        event.target.value = ''; // Clear the input
-        return;
-      }
-
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setError({ 
-          type: 'error', 
-          text: 'File size must be less than 5MB.' 
-        });
-        event.target.value = ''; // Clear the input
-        return;
-      }
-
-      setQrFile(file);
-      setError({ type: '', text: '' }); // Clear any previous errors
-    }
-  };
-
-  const handleGCashNumberChange = (e) => {
-    const value = e.target.value;
-    // Only allow numbers and ensure it starts with 09
-    if (value === '' || /^09\d{0,9}$/.test(value)) {
-      setGCashNumber(value);
-    }
-  };
-
-  const handleBusinessNameChange = (e) => {
-    const value = e.target.value;
-    // Limit business name to 50 characters
-    if (value.length <= 50) {
-      setBusinessName(value);
-    }
-  };
+  // Payment settings management moved to AdminProfile component
 
   const formatDate = (timestamp) => {
     if (!timestamp) return 'N/A';
@@ -1817,100 +1688,7 @@ const PaymentsDashboard = () => {
         </HeaderActions>
       </Header>
 
-      {/* Payment Settings Section */}
-      <PaymentSettingsCard>
-        <SettingsHeader>
-          <FiSettings size={20} />
-          <SettingsTitle>Payment Settings Management</SettingsTitle>
-        </SettingsHeader>
-        <SettingsGrid>
-          <SettingGroup>
-            <SettingLabel>GCash Mobile Number</SettingLabel>
-            <SettingInput
-              type="text"
-              value={gcashNumber}
-              onChange={handleGCashNumberChange}
-              placeholder="09123456789"
-            />
-          </SettingGroup>
-          
-          <SettingGroup>
-            <SettingLabel>Business Name</SettingLabel>
-            <SettingInput
-              type="text"
-              value={businessName}
-              onChange={handleBusinessNameChange}
-              placeholder="Bambike Cycles"
-            />
-          </SettingGroup>
-          
-          <SettingGroup style={{ gridColumn: '1 / -1' }}>
-            <SettingLabel>GCash QR Code</SettingLabel>
-            <FileUploadArea onClick={() => document.getElementById('qr-upload').click()}>
-              <FiUpload size={24} color={colors.pineGreen} />
-              <div style={{ marginTop: '8px', fontWeight: '600', color: colors.darkGray }}>
-                {qrFile ? qrFile.name : 'Click to upload QR code image'}
-              </div>
-              <div style={{ fontSize: '12px', color: colors.mediumGray, marginTop: '4px' }}>
-                Supports JPEG, PNG, GIF (Max 5MB)
-              </div>
-            </FileUploadArea>
-            <FileInput
-              id="qr-upload"
-              type="file"
-              accept="image/*"
-              onChange={handleQRFileChange}
-            />
-            
-            {currentQRUrl && (
-              <QRPreview>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: colors.darkGray }}>
-                  Current QR Code:
-                </div>
-                <QRImage
-                  src={currentQRUrl}
-                  alt="Current QR Code"
-                  onClick={() => setSelectedImage(currentQRUrl)}
-                />
-              </QRPreview>
-            )}
-          </SettingGroup>
-          
-          <SaveButton
-            onClick={handleSettingsUpdate}
-            disabled={isUploading}
-            style={{ gridColumn: '1 / -1' }}
-          >
-            {isUploading ? (
-              <>
-                <FiUpload size={16} />
-                Updating Settings...
-              </>
-            ) : (
-              <>
-                <FiCheck size={16} />
-                Update Settings
-              </>
-            )}
-          </SaveButton>
-          
-          {error && error.text && (
-            <div style={{ gridColumn: '1 / -1' }}>
-              {error.type === 'success' ? (
-                <SuccessMessage>
-                  <FiCheckCircle size={16} />
-                  {error.text}
-                </SuccessMessage>
-              ) : (
-                <ErrorMessage>
-                  <FiAlertCircle size={16} />
-                  {error.text}
-                </ErrorMessage>
-              )}
-            </div>
-          )}
-        </SettingsGrid>
-      </PaymentSettingsCard>
+      {/* Payment settings have been moved to AdminProfile for better organization */}
 
       {/* Statistics Cards */}
       <StatsGrid>
@@ -2191,7 +1969,7 @@ const PaymentsDashboard = () => {
             <Receipt
               payment={selectedPaymentForReceipt}
               userData={users[selectedPaymentForReceipt?.userId]}
-              businessInfo={{ businessName, gcashNumber }}
+              businessInfo={businessInfo}
               onClose={closeReceiptModal}
               onPrint={printReceipt}
             />
