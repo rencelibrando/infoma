@@ -1,0 +1,58 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    
+    "bikes": {
+      ".read": "auth != null",
+      "$bikeId": {
+        ".write": "auth != null"
+      }
+    },
+    
+    "rides": {
+      ".read": "auth != null",
+      "$rideId": {
+        ".write": "auth != null"
+      }
+    },
+    
+    "activeRides": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "liveLocation": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "rideLocationHistory": {
+      ".read": "auth != null",
+      "$rideId": {
+        ".write": "auth != null"
+      }
+    },
+    
+    "userRideHistory": {
+      ".read": "auth != null",
+      "$userId": {
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "emergencyAlerts": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    
+    "app_config": {
+      ".read": true,
+      ".write": "auth != null"
+    }
+  }
+} 
